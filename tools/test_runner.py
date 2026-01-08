@@ -11,11 +11,12 @@ Usage:
 
 import argparse
 import glob
+import json
 import os
 import shutil
 import sys
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -462,23 +463,32 @@ def run_test(driver: Driver, test: TestCase, suite_name: str) -> TestResult:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
 
-def run_tests(driver: Driver, test_files: List[str], verbose: bool = False) -> bool:
+def run_tests(
+    driver: Driver,
+    test_files: List[str],
+    verbose: bool = False,
+    json_output: Optional[str] = None,
+    driver_name: str = "unknown",
+) -> bool:
     """Run all tests from the given files."""
     total = 0
     passed = 0
     failed = 0
     results: List[TestResult] = []
+    suites_data: List[Dict[str, Any]] = []
 
     for file_path in test_files:
         if verbose:
             print(f"\n📁 {file_path}")
 
         suite = load_test_suite(file_path)
+        suite_results = []
 
         for test in suite.tests:
             total += 1
             result = run_test(driver, test, suite.name)
             results.append(result)
+            suite_results.append(result)
 
             if result.passed:
                 passed += 1
@@ -494,8 +504,37 @@ def run_tests(driver: Driver, test_files: List[str], verbose: bool = False) -> b
                 if result.actual is not None:
                     print(f"    Actual: {result.actual}")
 
+        # Collect suite data for JSON output
+        suites_data.append({
+            "suite": suite.name,
+            "description": suite.description,
+            "file": file_path,
+            "tests": [
+                {
+                    "name": r.test_name,
+                    "passed": r.passed,
+                    "error": r.error,
+                }
+                for r in suite_results
+            ],
+        })
+
     print(f"\n{'='*50}")
     print(f"Results: {passed}/{total} passed, {failed} failed")
+
+    # Write JSON output if requested
+    if json_output:
+        output_data = {
+            "driver": driver_name,
+            "total": total,
+            "passed": passed,
+            "failed": failed,
+            "suites": suites_data,
+        }
+        Path(json_output).parent.mkdir(parents=True, exist_ok=True)
+        with open(json_output, "w") as f:
+            json.dump(output_data, f, indent=2)
+        print(f"JSON results written to: {json_output}")
 
     return failed == 0
 
@@ -518,6 +557,11 @@ def main():
         action="store_true",
         help="Verbose output",
     )
+    parser.add_argument(
+        "--json",
+        metavar="FILE",
+        help="Write JSON results to FILE",
+    )
 
     args = parser.parse_args()
 
@@ -538,7 +582,13 @@ def main():
         print(f"Error loading driver: {e}")
         sys.exit(1)
 
-    success = run_tests(driver, test_files, args.verbose)
+    success = run_tests(
+        driver,
+        test_files,
+        verbose=args.verbose,
+        json_output=args.json,
+        driver_name=args.driver,
+    )
     sys.exit(0 if success else 1)
 
 

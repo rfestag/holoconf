@@ -9,6 +9,8 @@ from pathlib import Path
 
 # Import coverage parser
 from coverage_to_markdown import (
+    acceptance_to_markdown,
+    parse_acceptance_results,
     parse_cobertura_xml,
     parse_lcov,
     to_markdown,
@@ -24,15 +26,18 @@ def on_page_markdown(markdown: str, page, config, files) -> str:
     Placeholders:
         <!-- coverage:rust --> - Insert Rust coverage table
         <!-- coverage:python --> - Insert Python coverage table
-        <!-- coverage:acceptance --> - Insert acceptance test coverage table
+        <!-- coverage:acceptance --> - Insert acceptance test coverage table (Rust instrumented)
         <!-- coverage:rust:summary --> - Insert Rust coverage summary only
         <!-- coverage:python:summary --> - Insert Python coverage summary only
         <!-- coverage:acceptance:summary --> - Insert acceptance coverage summary only
+        <!-- acceptance:matrix --> - Insert acceptance test pass/fail matrix
+        <!-- acceptance:matrix:summary --> - Insert acceptance test summary only
     """
     # Define coverage file locations
     rust_lcov = PROJECT_ROOT / "coverage" / "rust-lcov.info"
     python_xml = PROJECT_ROOT / "coverage" / "python-coverage.xml"
     acceptance_lcov = PROJECT_ROOT / "coverage" / "acceptance-lcov.info"
+    acceptance_results_dir = PROJECT_ROOT / "coverage" / "acceptance"
 
     # Process Rust coverage placeholders
     if "<!-- coverage:rust" in markdown:
@@ -66,7 +71,7 @@ def on_page_markdown(markdown: str, page, config, files) -> str:
             placeholder = "!!! warning \"Coverage not available\"\n    Run `make coverage` to generate coverage reports."
             markdown = re.sub(r"<!-- coverage:python(?::summary)? -->", placeholder, markdown)
 
-    # Process acceptance test coverage placeholders
+    # Process acceptance test coverage placeholders (Rust code coverage from acceptance tests)
     if "<!-- coverage:acceptance" in markdown:
         if acceptance_lcov.exists():
             data = parse_lcov(acceptance_lcov)
@@ -81,5 +86,21 @@ def on_page_markdown(markdown: str, page, config, files) -> str:
         else:
             placeholder = "!!! warning \"Acceptance coverage not available\"\n    Run `make coverage-acceptance` to generate acceptance test coverage."
             markdown = re.sub(r"<!-- coverage:acceptance(?::summary)? -->", placeholder, markdown)
+
+    # Process acceptance test matrix placeholders (pass/fail by driver)
+    if "<!-- acceptance:matrix" in markdown:
+        if acceptance_results_dir.exists() and any(acceptance_results_dir.glob("*.json")):
+            data = parse_acceptance_results(acceptance_results_dir)
+            # Full table
+            if "<!-- acceptance:matrix -->" in markdown:
+                table = acceptance_to_markdown(data, detail=True)
+                markdown = markdown.replace("<!-- acceptance:matrix -->", table)
+            # Summary only
+            if "<!-- acceptance:matrix:summary -->" in markdown:
+                summary = acceptance_to_markdown(data, detail=False)
+                markdown = markdown.replace("<!-- acceptance:matrix:summary -->", summary)
+        else:
+            placeholder = "!!! warning \"Acceptance test results not available\"\n    Run `make test-acceptance` to generate test results."
+            markdown = re.sub(r"<!-- acceptance:matrix(?::summary)? -->", placeholder, markdown)
 
     return markdown

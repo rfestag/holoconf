@@ -3,7 +3,7 @@
 
 .PHONY: help install-tools lint lint-rust lint-python format format-rust format-python \
         security security-rust security-python test test-rust test-python \
-        test-acceptance build clean check all audit-unsafe semver-check sbom \
+        test-acceptance test-acceptance-json build clean check all audit-unsafe semver-check sbom \
         docs docs-serve docs-build coverage coverage-rust coverage-python coverage-html \
         coverage-acceptance coverage-full
 
@@ -26,10 +26,11 @@ help:
 	@echo "  make audit-unsafe    - Report unsafe code usage (cargo-geiger)"
 	@echo ""
 	@echo "Testing:"
-	@echo "  make test            - Run all tests"
-	@echo "  make test-rust       - Run Rust unit tests"
-	@echo "  make test-python     - Run Python unit tests"
-	@echo "  make test-acceptance - Run acceptance tests (both drivers)"
+	@echo "  make test                 - Run all tests"
+	@echo "  make test-rust            - Run Rust unit tests"
+	@echo "  make test-python          - Run Python unit tests"
+	@echo "  make test-acceptance      - Run acceptance tests (both drivers)"
+	@echo "  make test-acceptance-json - Run acceptance tests and save JSON results"
 	@echo ""
 	@echo "Coverage:"
 	@echo "  make coverage            - Run tests with coverage (Rust + Python)"
@@ -164,6 +165,14 @@ test-acceptance:
 	python tools/test_runner.py --driver rust 'tests/acceptance/**/*.yaml' -v
 	@echo "→ Running acceptance tests (Python driver)..."
 	python tools/test_runner.py --driver python 'tests/acceptance/**/*.yaml' -v
+
+# Generate JSON results for documentation matrix
+test-acceptance-json:
+	@echo "→ Running acceptance tests and generating JSON results..."
+	@mkdir -p coverage/acceptance
+	python tools/test_runner.py --driver rust 'tests/acceptance/**/*.yaml' --json coverage/acceptance/rust.json || true
+	python tools/test_runner.py --driver python 'tests/acceptance/**/*.yaml' --json coverage/acceptance/python.json || true
+	@echo "✓ Results written to coverage/acceptance/"
 
 # =============================================================================
 # Coverage

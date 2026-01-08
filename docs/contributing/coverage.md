@@ -5,26 +5,23 @@ holoconf tracks code coverage for both Rust and Python code to ensure comprehens
 !!! tip "Generate reports first"
     Run `make coverage` to generate the coverage data shown below.
 
-## Rust Coverage (holoconf-core)
+## Coverage Summary
 
-The Rust crate contains all core logic: configuration parsing, interpolation, resolution, validation, and error handling.
+| Package | Coverage |
+|---------|----------|
+| Rust (holoconf-core) | <!-- coverage:rust:summary --> |
+| Python (holoconf) | <!-- coverage:python:summary --> |
 
-<!-- coverage:rust -->
+For detailed file-level coverage, see the [Rust API docs](../api/rust/index.md#code-coverage) and [Python API docs](../api/python/index.md#code-coverage).
 
-## Python Coverage (holoconf)
+## Acceptance Tests
 
-The Python package coverage measures the wrapper layer (`__init__.py`, `cli.py`). The core logic is tested via Rust coverage above.
+Acceptance tests validate end-to-end behavior across language bindings. The matrix below shows which tests pass for each driver.
 
-<!-- coverage:python -->
+<!-- acceptance:matrix -->
 
-## Acceptance Test Coverage
-
-Acceptance tests exercise the Rust core through the Python bindings. This shows which Rust code is exercised by end-to-end testing.
-
-<!-- coverage:acceptance -->
-
-!!! note "Separate from unit test coverage"
-    Run `make coverage-acceptance` to generate acceptance test coverage separately, or `make coverage-full` for combined unit + acceptance coverage.
+!!! note "Run acceptance tests"
+    Run `make test-acceptance` to generate test results, or `make test-acceptance-json` to update the matrix data.
 
 ---
 
@@ -72,11 +69,9 @@ make docs-serve
 
 holoconf uses a **Rust core with Python bindings** architecture (see [ADR-001](../adr/ADR-001-multi-language-architecture.md)). This means:
 
-1. **Rust unit tests** exercise the core library directly (74 tests)
+1. **Rust unit tests** exercise the core library directly
 2. **Python unit tests** exercise the PyO3 bindings
-3. **Acceptance tests** validate end-to-end behavior through the Python bindings, exercising Rust code
-
-The acceptance test coverage is particularly valuable because it shows which Rust code paths are exercised by real-world usage patterns through the Python API.
+3. **Acceptance tests** validate end-to-end behavior through language bindings
 
 ### Tools Used
 

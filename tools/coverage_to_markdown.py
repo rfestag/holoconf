@@ -177,6 +177,101 @@ def to_markdown(data: dict, title: str = None, detail: bool = True) -> str:
     return "\n".join(lines)
 
 
+def parse_acceptance_results(results_dir: Path) -> dict:
+    """Parse acceptance test JSON results from multiple drivers.
+
+    Expects files like: results_dir/rust.json, results_dir/python.json
+    """
+    drivers = {}
+    all_suites = {}  # suite_name -> {description, tests: {test_name -> True}}
+
+    # Find all JSON result files
+    for json_file in sorted(results_dir.glob("*.json")):
+        driver_name = json_file.stem
+        data = json.loads(json_file.read_text())
+
+        drivers[driver_name] = {
+            "total": data.get("total", 0),
+            "passed": data.get("passed", 0),
+            "failed": data.get("failed", 0),
+        }
+
+        # Collect all suites and tests
+        for suite in data.get("suites", []):
+            suite_name = suite["suite"]
+            if suite_name not in all_suites:
+                all_suites[suite_name] = {
+                    "description": suite.get("description", ""),
+                    "tests": {},
+                }
+
+            for test in suite.get("tests", []):
+                test_name = test["name"]
+                if test_name not in all_suites[suite_name]["tests"]:
+                    all_suites[suite_name]["tests"][test_name] = {}
+                all_suites[suite_name]["tests"][test_name][driver_name] = test["passed"]
+
+    return {
+        "drivers": drivers,
+        "suites": all_suites,
+    }
+
+
+def humanize_name(name: str) -> str:
+    """Convert snake_case to Title Case."""
+    return name.replace("_", " ").title()
+
+
+def acceptance_to_markdown(data: dict, detail: bool = True) -> str:
+    """Convert acceptance test results to markdown."""
+    lines = []
+    drivers = sorted(data["drivers"].keys())
+
+    if not drivers:
+        return "No acceptance test results found."
+
+    if detail and data["suites"]:
+        # Header row
+        header = "| Suite | Test |"
+        separator = "|-------|------|"
+        for driver in drivers:
+            header += f" {driver.title()} |"
+            separator += "--------|"
+        lines.append(header)
+        lines.append(separator)
+
+        # Data rows grouped by suite
+        for suite_name in sorted(data["suites"].keys()):
+            suite = data["suites"][suite_name]
+            tests = suite["tests"]
+
+            for i, test_name in enumerate(sorted(tests.keys())):
+                # Show suite name only on first row
+                suite_display = humanize_name(suite_name) if i == 0 else ""
+                row = f"| {suite_display} | {humanize_name(test_name)} |"
+
+                for driver in drivers:
+                    passed = tests[test_name].get(driver)
+                    if passed is True:
+                        row += " ✅ |"
+                    elif passed is False:
+                        row += " ❌ |"
+                    else:
+                        row += " ⏳ |"
+                lines.append(row)
+
+        lines.append("")
+
+    # Summary
+    summary_parts = []
+    for driver in drivers:
+        info = data["drivers"][driver]
+        summary_parts.append(f"**{driver.title()}**: {info['passed']}/{info['total']}")
+    lines.append(" | ".join(summary_parts))
+
+    return "\n".join(lines)
+
+
 def detect_format(file_path: Path) -> str:
     """Detect the format of a coverage file."""
     suffix = file_path.suffix.lower()
