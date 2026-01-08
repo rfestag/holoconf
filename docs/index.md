@@ -1,5 +1,9 @@
 # holoconf
 
+[![CI](https://github.com/rfestag/holoconf/actions/workflows/rust.yml/badge.svg)](https://github.com/rfestag/holoconf/actions/workflows/rust.yml)
+[![PyPI](https://img.shields.io/pypi/v/holoconf)](https://pypi.org/project/holoconf/)
+[![crates.io](https://img.shields.io/crates/v/holoconf-core)](https://crates.io/crates/holoconf-core)
+
 **Multi-language hierarchical configuration library**
 
 holoconf provides a consistent, powerful configuration management experience across multiple programming languages. Write your configuration once in YAML or JSON, and access it seamlessly from Python, Rust, JavaScript, Go, and more.

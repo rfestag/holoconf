@@ -13,9 +13,9 @@ Validate configuration against a JSON Schema to catch errors early, document the
 
 ## Dependencies
 
-- ADR-007: Schema and Validation
-- ADR-012: Type Coercion
-- FEAT-001: Configuration File Loading
+- [ADR-007: Schema and Validation](../../adr/ADR-007-schema-validation.md)
+- [ADR-012: Type Coercion](../../adr/ADR-012-type-coercion.md)
+- [FEAT-001: Configuration File Loading](FEAT-001-config-loading.md)
 
 ## API Surface
 
@@ -98,7 +98,7 @@ properties:
 
 ## Behavior
 
-### Two-Phase Validation (from ADR-007)
+### Two-Phase Validation (from [ADR-007](../../adr/ADR-007-schema-validation.md))
 
 **Phase 1: Structural Validation** (at load time)
 - Required keys present
@@ -111,7 +111,7 @@ properties:
 - Constraints (min, max, pattern, enum) are checked
 - Type coercion applied if schema expects different type
 
-### Type Coercion (from ADR-012)
+### Type Coercion (from [ADR-012](../../adr/ADR-012-type-coercion.md))
 
 When a schema specifies a type, string values are automatically coerced:
 

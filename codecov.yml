@@ -1,0 +1,49 @@
+# Codecov configuration
+# https://docs.codecov.com/docs/codecov-yaml
+
+coverage:
+  precision: 2
+  round: down
+  range: "60...100"
+
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 1%
+        # Don't fail if coverage drops slightly
+        informational: true
+    patch:
+      default:
+        target: auto
+        threshold: 1%
+        informational: true
+
+# Define coverage flags for different test suites
+flag_management:
+  default_rules:
+    carryforward: true
+
+  individual_flags:
+    - name: rust
+      paths:
+        - crates/
+      carryforward: true
+
+    - name: python
+      paths:
+        - packages/python/
+      carryforward: true
+
+comment:
+  layout: "reach,diff,flags,files"
+  behavior: default
+  require_changes: false
+
+# Ignore certain paths
+ignore:
+  - "tests/"
+  - "tools/"
+  - "**/tests/**"
+  - "**/*_test.rs"
+  - "**/test_*.py"

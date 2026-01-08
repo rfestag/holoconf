@@ -114,6 +114,15 @@ print(safe_yaml)
 #   password: "[REDACTED]"
 ```
 
+## Code Coverage
+
+The Python package coverage measures the wrapper layer (`__init__.py`, `cli.py`). The core logic is tested via [Rust coverage](../rust/index.md#code-coverage).
+
+<!-- coverage:python -->
+
+!!! tip "Generate coverage reports"
+    Run `make coverage` to generate coverage data.
+
 ## See Also
 
 - [Getting Started](../../guide/getting-started.md) - Installation and first steps

@@ -57,6 +57,15 @@ holoconf-core = { version = "0.1", features = ["http"] }
 |---------|-------------|---------|
 | `http` | Enable HTTP resolver | No |
 
+## Code Coverage
+
+The Rust crate contains all core logic: configuration parsing, interpolation, resolution, validation, and error handling.
+
+<!-- coverage:rust -->
+
+!!! tip "Generate coverage reports"
+    Run `make coverage` to generate coverage data.
+
 ## See Also
 
 - [Getting Started](../../guide/getting-started.md) - Installation and first steps

@@ -44,6 +44,10 @@ Thumbs.db
 *.log
 .coverage
 htmlcov/
+/coverage/
+coverage.xml
+*.profraw
+*.profdata
 
 # Build artifacts
 *.whl
@@ -59,3 +63,6 @@ htmlcov/
 # MkDocs documentation build
 /site/
 .venv-docs/
+
+# Generated coverage reports (regenerate with `make coverage-html`)
+/docs/coverage/

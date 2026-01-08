@@ -70,6 +70,9 @@ markdown_extensions:
   - toc:
       permalink: true
 
+hooks:
+  - tools/mkdocs_hooks.py
+
 plugins:
   - search
   - mkdocstrings:
@@ -138,6 +141,7 @@ nav:
       - Overview: contributing/index.md
       - Development Setup: contributing/development.md
       - Testing: contributing/testing.md
+      - Code Coverage: contributing/coverage.md
       - Architecture Decisions:
           - adr/README.md
           - ADR-001 Multi-Language Architecture: adr/ADR-001-multi-language-architecture.md

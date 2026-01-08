@@ -13,11 +13,11 @@ Provide a `holoconf` CLI for validating configs, resolving values, debugging, an
 
 ## Dependencies
 
-- FEAT-001: Configuration File Loading
-- FEAT-002: Core Resolvers
-- FEAT-003: Configuration Merging
-- FEAT-004: Schema Validation
-- FEAT-005: Serialization and Export
+- [FEAT-001: Configuration File Loading](FEAT-001-config-loading.md)
+- [FEAT-002: Core Resolvers](FEAT-002-core-resolvers.md)
+- [FEAT-003: Configuration Merging](FEAT-003-config-merging.md)
+- [FEAT-004: Schema Validation](FEAT-004-schema-validation.md)
+- [FEAT-005: Serialization and Export](FEAT-005-serialization.md)
 
 ## Installation
 
@@ -53,6 +53,7 @@ holoconf validate config.yaml --schema schema.yaml --format json
 ```
 
 **Options:**
+
 | Option | Description |
 |--------|-------------|
 | `--schema, -s` | Path to schema file |
@@ -61,6 +62,7 @@ holoconf validate config.yaml --schema schema.yaml --format json
 | `--quiet, -q` | Only output errors |
 
 **Exit Codes:**
+
 | Code | Meaning |
 |------|---------|
 | 0 | Valid |
@@ -107,6 +109,7 @@ holoconf dump base.yaml production.yaml --resolve
 ```
 
 **Options:**
+
 | Option | Description |
 |--------|-------------|
 | `--resolve, -r` | Resolve interpolations |
@@ -150,6 +153,7 @@ holoconf get config.yaml database --format json
 ```
 
 **Options:**
+
 | Option | Description |
 |--------|-------------|
 | `--resolve, -r` | Resolve interpolations |
@@ -177,6 +181,7 @@ logging.level         local.yaml:5         (overrides base.yaml:12)
 ```
 
 **Options:**
+
 | Option | Description |
 |--------|-------------|
 | `--path, -p` | Filter to specific path prefix |

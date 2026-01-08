@@ -4,7 +4,8 @@
 .PHONY: help install-tools lint lint-rust lint-python format format-rust format-python \
         security security-rust security-python test test-rust test-python \
         test-acceptance build clean check all audit-unsafe semver-check sbom \
-        docs docs-serve docs-build
+        docs docs-serve docs-build coverage coverage-rust coverage-python coverage-html \
+        coverage-acceptance coverage-full
 
 # Default target
 help:
@@ -25,10 +26,18 @@ help:
 	@echo "  make audit-unsafe    - Report unsafe code usage (cargo-geiger)"
 	@echo ""
 	@echo "Testing:"
-	@echo "  make test          - Run all tests"
-	@echo "  make test-rust     - Run Rust unit tests"
-	@echo "  make test-python   - Run Python unit tests"
+	@echo "  make test            - Run all tests"
+	@echo "  make test-rust       - Run Rust unit tests"
+	@echo "  make test-python     - Run Python unit tests"
 	@echo "  make test-acceptance - Run acceptance tests (both drivers)"
+	@echo ""
+	@echo "Coverage:"
+	@echo "  make coverage            - Run tests with coverage (Rust + Python)"
+	@echo "  make coverage-rust       - Run Rust unit tests with coverage"
+	@echo "  make coverage-python     - Run Python tests with coverage"
+	@echo "  make coverage-acceptance - Run acceptance tests with Rust coverage"
+	@echo "  make coverage-full       - Run Rust unit + acceptance tests with coverage"
+	@echo "  make coverage-html       - Generate HTML coverage reports"
 	@echo ""
 	@echo "Documentation:"
 	@echo "  make docs          - Build documentation site"
@@ -58,7 +67,8 @@ install-tools:
 	@echo "══════════════════════════════════════════════════════════════════"
 	@echo ""
 	@echo "→ Installing Rust tools..."
-	cargo install cargo-deny cargo-audit cargo-machete cargo-geiger cargo-semver-checks cargo-cyclonedx
+	cargo install cargo-deny cargo-audit cargo-machete cargo-geiger cargo-semver-checks cargo-cyclonedx cargo-llvm-cov
+	rustup component add llvm-tools-preview
 	@echo ""
 	@echo "→ Installing Python dev dependencies..."
 	cd packages/python/holoconf && pip install -e ".[dev]"
@@ -156,6 +166,90 @@ test-acceptance:
 	python tools/test_runner.py --driver python 'tests/acceptance/**/*.yaml' -v
 
 # =============================================================================
+# Coverage
+# =============================================================================
+
+COVERAGE_DIR := coverage
+
+coverage: coverage-rust coverage-python
+	@echo "✓ Coverage reports generated in $(COVERAGE_DIR)/"
+
+coverage-rust:
+	@echo "→ Running Rust tests with coverage..."
+	@mkdir -p $(COVERAGE_DIR)
+	cargo llvm-cov --all-features --workspace --lcov --output-path $(COVERAGE_DIR)/rust-lcov.info
+	@echo "✓ Rust coverage: $(COVERAGE_DIR)/rust-lcov.info"
+
+coverage-python:
+	@echo "→ Running Python tests with coverage..."
+	@mkdir -p $(COVERAGE_DIR)
+	cd packages/python/holoconf && pytest tests/ --cov=holoconf --cov-report=xml:../../../$(COVERAGE_DIR)/python-coverage.xml --cov-report=term
+	@echo "✓ Python coverage: $(COVERAGE_DIR)/python-coverage.xml"
+
+# Python venv paths
+PYTHON_VENV := packages/python/holoconf/.venv
+VENV_PYTHON := $(PYTHON_VENV)/bin/python
+VENV_MATURIN := $(PYTHON_VENV)/bin/maturin
+
+# Run acceptance tests with Rust coverage instrumentation
+# This measures which Rust code is exercised by the acceptance test suite
+# All commands must run in the same shell with the coverage environment set
+coverage-acceptance:
+	@echo "→ Running acceptance tests with Rust coverage..."
+	@mkdir -p $(COVERAGE_DIR)
+	@bash -c '\
+		set -e; \
+		export PATH="$$HOME/.cargo/bin:$$PATH"; \
+		cargo llvm-cov clean --workspace; \
+		source <(cargo llvm-cov show-env --export-prefix); \
+		export CARGO_TARGET_DIR=$$CARGO_LLVM_COV_TARGET_DIR; \
+		export CARGO_INCREMENTAL=1; \
+		echo "→ Building instrumented Python bindings..."; \
+		cd packages/python/holoconf && $(CURDIR)/$(VENV_MATURIN) develop; \
+		cd $(CURDIR); \
+		echo "→ Running acceptance tests..."; \
+		$(CURDIR)/$(VENV_PYTHON) tools/test_runner.py --driver rust "tests/acceptance/**/*.yaml" -v; \
+		echo "→ Generating coverage report..."; \
+		cargo llvm-cov report --lcov --output-path $(COVERAGE_DIR)/acceptance-lcov.info; \
+	'
+	@echo "✓ Acceptance test coverage: $(COVERAGE_DIR)/acceptance-lcov.info"
+
+# Combined coverage: Rust unit tests + acceptance tests
+# All commands must run in the same shell with the coverage environment set
+coverage-full:
+	@echo "→ Running full Rust coverage (unit + acceptance tests)..."
+	@mkdir -p $(COVERAGE_DIR)
+	@bash -c '\
+		set -e; \
+		export PATH="$$HOME/.cargo/bin:$$PATH"; \
+		cargo llvm-cov clean --workspace; \
+		source <(cargo llvm-cov show-env --export-prefix); \
+		export CARGO_TARGET_DIR=$$CARGO_LLVM_COV_TARGET_DIR; \
+		export CARGO_INCREMENTAL=1; \
+		echo "→ Running Rust unit tests..."; \
+		cargo test --all-features --workspace; \
+		echo "→ Building instrumented Python bindings..."; \
+		cd packages/python/holoconf && $(CURDIR)/$(VENV_MATURIN) develop; \
+		cd $(CURDIR); \
+		echo "→ Running acceptance tests..."; \
+		$(CURDIR)/$(VENV_PYTHON) tools/test_runner.py --driver rust "tests/acceptance/**/*.yaml" -v; \
+		echo "→ Generating combined coverage report..."; \
+		cargo llvm-cov report --lcov --output-path $(COVERAGE_DIR)/rust-lcov.info; \
+	'
+	@echo "✓ Combined Rust coverage: $(COVERAGE_DIR)/rust-lcov.info"
+
+coverage-html:
+	@echo "→ Generating HTML coverage reports..."
+	@mkdir -p docs/coverage/rust docs/coverage/python
+	cargo llvm-cov --all-features --workspace --html --output-dir docs/coverage/rust
+	cd packages/python/holoconf && pytest tests/ --cov=holoconf --cov-report=html:../../../docs/coverage/python || true
+	@echo "✓ HTML reports generated in docs/coverage/"
+	@echo "  Rust:   docs/coverage/rust/html/index.html"
+	@echo "  Python: docs/coverage/python/index.html"
+	@echo ""
+	@echo "Run 'make docs-serve' to view in documentation site"
+
+# =============================================================================
 # Build
 # =============================================================================
 
@@ -238,6 +332,8 @@ clean:
 	cargo clean
 	rm -rf packages/python/holoconf/target/
 	rm -rf packages/python/holoconf/.venv/
+	rm -rf $(COVERAGE_DIR)/
+	rm -rf packages/python/holoconf/.coverage
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	find . -type d -name "*.egg-info" -exec rm -rf {} + 2>/dev/null || true
 	find . -type f -name "*.so" -delete 2>/dev/null || true

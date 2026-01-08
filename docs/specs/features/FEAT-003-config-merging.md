@@ -12,8 +12,8 @@ Load and merge multiple configuration files in a specified order, with later fil
 
 ## Dependencies
 
-- ADR-004: Config Merging Semantics
-- FEAT-001: Configuration File Loading
+- [ADR-004: Config Merging Semantics](../../adr/ADR-004-config-merging.md)
+- [FEAT-001: Configuration File Loading](FEAT-001-config-loading.md)
 
 ## API Surface
 
@@ -62,7 +62,7 @@ let config = Config::load(&[
 
 ## Behavior
 
-### Merge Semantics (from ADR-004)
+### Merge Semantics (from [ADR-004](../../adr/ADR-004-config-merging.md))
 
 **Deep merge with last-writer-wins:**
 

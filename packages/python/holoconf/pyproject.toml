@@ -36,6 +36,7 @@ Repository = "https://github.com/holoconf/holoconf"
 dev = [
     "maturin>=1.0,<2.0",
     "pytest>=7.0",
+    "pytest-cov>=4.0",
     "pyyaml>=6.0",
     "ruff>=0.8",
     "pip-audit>=2.7",
@@ -60,6 +61,19 @@ python-source = "src"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
+
+[tool.coverage.run]
+source = ["holoconf"]
+branch = true
+omit = ["*/tests/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]
+show_missing = true
 
 [tool.ruff]
 target-version = "py39"

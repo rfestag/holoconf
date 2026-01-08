@@ -13,9 +13,9 @@ Export configuration to YAML, JSON, or dict formats for debugging, auditing, and
 
 ## Dependencies
 
-- ADR-009: Serialization and Export
-- FEAT-001: Configuration File Loading
-- FEAT-002: Core Resolvers
+- [ADR-009: Serialization and Export](../../adr/ADR-009-serialization-export.md)
+- [FEAT-001: Configuration File Loading](FEAT-001-config-loading.md)
+- [FEAT-002: Core Resolvers](FEAT-002-core-resolvers.md)
 
 ## API Surface
 
@@ -112,7 +112,7 @@ database:
   port: 5432
 ```
 
-### Resolver-Aware Redaction (from ADR-009)
+### Resolver-Aware Redaction (from [ADR-009](../../adr/ADR-009-serialization-export.md))
 
 Redaction is determined by the resolver, not just the resolver name:
 

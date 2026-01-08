@@ -13,11 +13,11 @@ Provide built-in resolvers for common value sources: environment variables, self
 
 ## Dependencies
 
-- ADR-002: Resolver Architecture
-- ADR-005: Resolver Timing (Lazy Resolution)
-- ADR-011: Interpolation Syntax
-- ADR-012: Type Coercion
-- FEAT-001: Configuration File Loading
+- [ADR-002: Resolver Architecture](../../adr/ADR-002-resolver-architecture.md)
+- [ADR-005: Resolver Timing (Lazy Resolution)](../../adr/ADR-005-resolver-timing.md)
+- [ADR-011: Interpolation Syntax](../../adr/ADR-011-interpolation-syntax.md)
+- [ADR-012: Type Coercion](../../adr/ADR-012-type-coercion.md)
+- [FEAT-001: Configuration File Loading](FEAT-001-config-loading.md)
 
 ## Core Resolvers
 
@@ -44,6 +44,7 @@ port: ${env:PORT,${env:DEFAULT_PORT,8080}}
 - Sensitivity: Not sensitive by default (env vars are often non-secret)
 
 **Arguments:**
+
 | Position | Name | Required | Description |
 |----------|------|----------|-------------|
 | 1 | name | Yes | Environment variable name |
@@ -111,12 +112,14 @@ binary_key: ${file:./key.pem,encoding=utf-8}
 ```
 
 **Arguments:**
+
 | Position | Name | Required | Description |
 |----------|------|----------|-------------|
 | 1 | path | Yes | Local file path |
 | 2+ | options | No | Key=value options |
 
 **Options:**
+
 | Option | Values | Default | Description |
 |--------|--------|---------|-------------|
 | `encoding` | `utf-8`, `ascii`, `base64` | `utf-8` | Text encoding |
@@ -154,12 +157,14 @@ remote_config: ${http:https://config.example.com/shared.yaml,header=Authorizatio
 ```
 
 **Arguments:**
+
 | Position | Name | Required | Description |
 |----------|------|----------|-------------|
 | 1 | url | Yes | HTTP or HTTPS URL |
 | 2+ | options | No | Key=value options |
 
 **Options:**
+
 | Option | Values | Default | Description |
 |--------|--------|---------|-------------|
 | `timeout` | integer (seconds) | 30 | Request timeout |
@@ -233,7 +238,7 @@ def my_resolver(arg1: str, arg2: str, key: str = None) -> str:
 
 ### Resolution Timing
 
-Per ADR-005, resolution is lazy:
+Per [ADR-005](../../adr/ADR-005-resolver-timing.md), resolution is lazy:
 
 ```python
 config = Config.load("config.yaml")  # No resolution yet

@@ -12,8 +12,8 @@ Load configuration data from YAML or JSON files into a `Config` object that prov
 
 ## Dependencies
 
-- ADR-001: Multi-Language Architecture (Rust core)
-- ADR-008: Error Handling Strategy
+- [ADR-001: Multi-Language Architecture](../../adr/ADR-001-multi-language-architecture.md) (Rust core)
+- [ADR-008: Error Handling Strategy](../../adr/ADR-008-error-handling.md)
 
 ## API Surface
 
@@ -134,7 +134,7 @@ host = config.database.host  # Returns "localhost"
 
 ### Interpolation Placeholders
 
-At load time, interpolation placeholders (`${...}`) are preserved as-is. Resolution happens on access (see FEAT-002).
+At load time, interpolation placeholders (`${...}`) are preserved as-is. Resolution happens on access (see [FEAT-002](FEAT-002-core-resolvers.md)).
 
 ```python
 config = Config.load("config.yaml")
