@@ -513,12 +513,10 @@ impl Config {
         // Append the remaining path
         if remaining.is_empty() {
             segments.join(".")
+        } else if segments.is_empty() {
+            remaining
         } else {
-            if segments.is_empty() {
-                remaining
-            } else {
-                format!("{}.{}", segments.join("."), remaining)
-            }
+            format!("{}.{}", segments.join("."), remaining)
         }
     }
 

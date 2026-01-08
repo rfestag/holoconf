@@ -340,7 +340,8 @@ fn file_resolver(
                     .with_path(ctx.config_path.clone()))?;
             Ok(ResolvedValue::new(value))
         }
-        "text" | _ => {
+        _ => {
+            // Default to text mode (including explicit "text")
             Ok(ResolvedValue::new(Value::String(content)))
         }
     }
@@ -441,7 +442,7 @@ mod tests {
         let mut registry = ResolverRegistry::new();
 
         registry.register_fn("custom", |args, _kwargs, _ctx| {
-            let value = args.get(0).cloned().unwrap_or_default();
+            let value = args.first().cloned().unwrap_or_default();
             Ok(ResolvedValue::new(Value::String(format!("custom:{}", value))))
         });
 

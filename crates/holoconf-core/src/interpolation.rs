@@ -427,10 +427,8 @@ pub fn contains_interpolation(input: &str) -> bool {
         if c == '\\' {
             // Skip escaped characters
             chars.next();
-        } else if c == '$' {
-            if chars.peek() == Some(&'{') {
-                return true;
-            }
+        } else if c == '$' && chars.peek() == Some(&'{') {
+            return true;
         }
     }
 

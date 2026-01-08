@@ -13,8 +13,10 @@ use crate::error::{Error, Result};
 /// A configuration value that may contain unresolved interpolations
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
+#[derive(Default)]
 pub enum Value {
     /// Null value
+    #[default]
     Null,
     /// Boolean value
     Bool(bool),
@@ -292,11 +294,6 @@ impl Value {
     }
 }
 
-impl Default for Value {
-    fn default() -> Self {
-        Value::Null
-    }
-}
 
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -535,7 +532,7 @@ mod tests {
         assert!(Value::Null.is_null());
         assert!(Value::Bool(true).is_bool());
         assert!(Value::Integer(42).is_integer());
-        assert!(Value::Float(3.14).is_float());
+        assert!(Value::Float(2.5).is_float());
         assert!(Value::String("hello".into()).is_string());
         assert!(Value::Sequence(vec![]).is_sequence());
         assert!(Value::Mapping(IndexMap::new()).is_mapping());
@@ -545,7 +542,7 @@ mod tests {
     fn test_value_conversions() {
         assert_eq!(Value::Bool(true).as_bool(), Some(true));
         assert_eq!(Value::Integer(42).as_i64(), Some(42));
-        assert_eq!(Value::Float(3.14).as_f64(), Some(3.14));
+        assert_eq!(Value::Float(2.5).as_f64(), Some(2.5));
         assert_eq!(Value::Integer(42).as_f64(), Some(42.0));
         assert_eq!(Value::String("hello".into()).as_str(), Some("hello"));
     }

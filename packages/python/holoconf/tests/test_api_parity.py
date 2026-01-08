@@ -62,14 +62,10 @@ class TestExceptionHierarchy:
 
         if parent_name is None:
             # Base exception should inherit from Python's Exception
-            assert issubclass(exc_class, Exception), (
-                f"{name} should inherit from Exception"
-            )
+            assert issubclass(exc_class, Exception), f"{name} should inherit from Exception"
         else:
             parent_class = getattr(holoconf, parent_name)
-            assert issubclass(exc_class, parent_class), (
-                f"{name} should inherit from {parent_name}"
-            )
+            assert issubclass(exc_class, parent_class), f"{name} should inherit from {parent_name}"
 
 
 # =============================================================================

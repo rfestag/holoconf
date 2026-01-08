@@ -20,32 +20,32 @@ Exception Hierarchy:
 """
 
 from holoconf._holoconf import (
+    CircularReferenceError,
     # Classes
     Config,
-    Schema,
     # Exceptions
     HoloconfError,
     ParseError,
-    ValidationError,
-    ResolverError,
     PathNotFoundError,
-    CircularReferenceError,
+    ResolverError,
+    Schema,
     TypeCoercionError,
+    ValidationError,
 )
 
 __version__ = "0.1.0"
 __all__ = [
+    "CircularReferenceError",
     # Classes
     "Config",
-    "Schema",
     # Exceptions
     "HoloconfError",
     "ParseError",
-    "ValidationError",
-    "ResolverError",
     "PathNotFoundError",
-    "CircularReferenceError",
+    "ResolverError",
+    "Schema",
     "TypeCoercionError",
+    "ValidationError",
     # Metadata
     "__version__",
 ]

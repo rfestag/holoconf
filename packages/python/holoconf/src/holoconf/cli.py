@@ -14,9 +14,9 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import List, Optional
+from typing import Optional
 
-from holoconf import Config, Schema, HoloconfError
+from holoconf import Config, HoloconfError, Schema
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -25,9 +25,7 @@ def create_parser() -> argparse.ArgumentParser:
         prog="holoconf",
         description="Configuration management with resolver support",
     )
-    parser.add_argument(
-        "--version", action="version", version="holoconf 0.1.0"
-    )
+    parser.add_argument("--version", action="version", version="holoconf 0.1.0")
 
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -42,76 +40,57 @@ def create_parser() -> argparse.ArgumentParser:
         "-s", "--schema", type=Path, required=True, help="Path to schema file"
     )
     validate_parser.add_argument(
-        "-r", "--resolve", action="store_true",
-        help="Resolve interpolations before validating"
+        "-r", "--resolve", action="store_true", help="Resolve interpolations before validating"
     )
     validate_parser.add_argument(
-        "-f", "--format", choices=["text", "json"], default="text",
-        help="Output format (default: text)"
+        "-f",
+        "--format",
+        choices=["text", "json"],
+        default="text",
+        help="Output format (default: text)",
     )
     validate_parser.add_argument(
-        "-q", "--quiet", action="store_true",
-        help="Only output errors (quiet mode)"
+        "-q", "--quiet", action="store_true", help="Only output errors (quiet mode)"
     )
 
     # dump command
-    dump_parser = subparsers.add_parser(
-        "dump", help="Export configuration in various formats"
+    dump_parser = subparsers.add_parser("dump", help="Export configuration in various formats")
+    dump_parser.add_argument("files", nargs="+", type=Path, help="Configuration file(s) to dump")
+    dump_parser.add_argument("-r", "--resolve", action="store_true", help="Resolve interpolations")
+    dump_parser.add_argument(
+        "--no-redact", action="store_true", help="Don't redact sensitive values (use with caution)"
     )
     dump_parser.add_argument(
-        "files", nargs="+", type=Path, help="Configuration file(s) to dump"
+        "-f",
+        "--format",
+        choices=["yaml", "json"],
+        default="yaml",
+        help="Output format (default: yaml)",
     )
-    dump_parser.add_argument(
-        "-r", "--resolve", action="store_true",
-        help="Resolve interpolations"
-    )
-    dump_parser.add_argument(
-        "--no-redact", action="store_true",
-        help="Don't redact sensitive values (use with caution)"
-    )
-    dump_parser.add_argument(
-        "-f", "--format", choices=["yaml", "json"], default="yaml",
-        help="Output format (default: yaml)"
-    )
-    dump_parser.add_argument(
-        "-o", "--output", type=Path,
-        help="Write to file instead of stdout"
-    )
+    dump_parser.add_argument("-o", "--output", type=Path, help="Write to file instead of stdout")
 
     # get command
-    get_parser = subparsers.add_parser(
-        "get", help="Get a specific value from the configuration"
-    )
+    get_parser = subparsers.add_parser("get", help="Get a specific value from the configuration")
+    get_parser.add_argument("files", nargs="+", type=Path, help="Configuration file(s)")
+    get_parser.add_argument("path", help="Path to the value (e.g., database.host)")
+    get_parser.add_argument("-r", "--resolve", action="store_true", help="Resolve interpolations")
     get_parser.add_argument(
-        "files", nargs="+", type=Path, help="Configuration file(s)"
+        "-f",
+        "--format",
+        choices=["text", "json", "yaml"],
+        default="text",
+        help="Output format (default: text)",
     )
-    get_parser.add_argument(
-        "path", help="Path to the value (e.g., database.host)"
-    )
-    get_parser.add_argument(
-        "-r", "--resolve", action="store_true",
-        help="Resolve interpolations"
-    )
-    get_parser.add_argument(
-        "-f", "--format", choices=["text", "json", "yaml"], default="text",
-        help="Output format (default: text)"
-    )
-    get_parser.add_argument(
-        "-d", "--default", help="Default value if key not found"
-    )
+    get_parser.add_argument("-d", "--default", help="Default value if key not found")
 
     # check command
-    check_parser = subparsers.add_parser(
-        "check", help="Quick syntax check without full validation"
-    )
-    check_parser.add_argument(
-        "files", nargs="+", type=Path, help="Configuration file(s) to check"
-    )
+    check_parser = subparsers.add_parser("check", help="Quick syntax check without full validation")
+    check_parser.add_argument("files", nargs="+", type=Path, help="Configuration file(s) to check")
 
     return parser
 
 
-def load_config(files: List[Path]) -> Config:
+def load_config(files: list[Path]) -> Config:
     """Load configuration from one or more files."""
     if len(files) == 1:
         return Config.load(str(files[0]))
@@ -120,7 +99,7 @@ def load_config(files: List[Path]) -> Config:
 
 
 def cmd_validate(
-    files: List[Path],
+    files: list[Path],
     schema_path: Path,
     resolve: bool,
     output_format: str,
@@ -158,13 +137,13 @@ def cmd_validate(
             result = {"valid": False, "error": str(e)}
             print(json.dumps(result, indent=2))
         else:
-            print(f"\033[91m\u2717\033[0m Validation failed\n", file=sys.stderr)
+            print("\033[91m\u2717\033[0m Validation failed\n", file=sys.stderr)
             print(str(e), file=sys.stderr)
         return 1
 
 
 def cmd_dump(
-    files: List[Path],
+    files: list[Path],
     resolve: bool,
     no_redact: bool,
     output_format: str,
@@ -197,7 +176,7 @@ def cmd_dump(
 
 
 def cmd_get(
-    files: List[Path],
+    files: list[Path],
     path: str,
     resolve: bool,
     output_format: str,
@@ -211,10 +190,7 @@ def cmd_get(
         return 2
 
     try:
-        if resolve:
-            value = config.get(path)
-        else:
-            value = config.get_raw(path)
+        value = config.get(path) if resolve else config.get_raw(path)
 
         if output_format == "json":
             print(json.dumps(value, indent=2))
@@ -222,6 +198,7 @@ def cmd_get(
             # Simple YAML output for basic types
             if isinstance(value, (dict, list)):
                 import yaml
+
                 print(yaml.dump(value, default_flow_style=False), end="")
             else:
                 print(value)
@@ -244,7 +221,7 @@ def cmd_get(
             return 1
 
 
-def cmd_check(files: List[Path]) -> int:
+def cmd_check(files: list[Path]) -> int:
     """Quick syntax check for configuration files."""
     all_valid = True
 
