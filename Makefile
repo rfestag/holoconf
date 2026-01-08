@@ -215,7 +215,7 @@ MKDOCS := $(DOCS_VENV)/bin/mkdocs
 $(DOCS_VENV)/bin/mkdocs:
 	@echo "→ Creating docs virtual environment..."
 	python -m venv $(DOCS_VENV)
-	$(DOCS_VENV)/bin/pip install --quiet mkdocs-material mike
+	$(DOCS_VENV)/bin/pip install --quiet mkdocs-material mike "mkdocstrings[python]" ruff
 
 docs: docs-build
 	@echo "✓ Documentation built in site/"

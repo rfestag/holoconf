@@ -72,6 +72,27 @@ markdown_extensions:
 
 plugins:
   - search
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          paths:
+            - packages/python/holoconf/src
+          options:
+            show_source: false
+            show_bases: true
+            show_root_heading: true
+            show_root_full_path: false
+            heading_level: 2
+            members_order: alphabetical
+            group_by_category: true
+            show_category_heading: true
+            docstring_style: google
+            docstring_section_style: spacy
+            show_signature_annotations: true
+            separate_signature: true
+            signature_crossrefs: true
+            merge_init_into_class: true
 
 extra:
   version:
@@ -89,9 +110,30 @@ nav:
       - Merging: guide/merging.md
       - Validation: guide/validation.md
   - API Reference:
-      - Python: api/python.md
-      - Rust: api/rust.md
-      - CLI: api/cli.md
+      - holoconf (Python):
+          - Overview: api/python/index.md
+          - Classes:
+              - Config: api/python/classes/config.md
+              - Schema: api/python/classes/schema.md
+          - Exceptions:
+              - HoloconfError: api/python/exceptions/holoconf-error.md
+              - ParseError: api/python/exceptions/parse-error.md
+              - ValidationError: api/python/exceptions/validation-error.md
+              - ResolverError: api/python/exceptions/resolver-error.md
+              - PathNotFoundError: api/python/exceptions/path-not-found-error.md
+              - CircularReferenceError: api/python/exceptions/circular-reference-error.md
+              - TypeCoercionError: api/python/exceptions/type-coercion-error.md
+      - holoconf-core (Rust):
+          - Overview: api/rust/index.md
+          - Structs:
+              - Config: api/rust/structs/config.md
+              - Schema: api/rust/structs/schema.md
+              - ConfigOptions: api/rust/structs/config-options.md
+          - Enums:
+              - Value: api/rust/enums/value.md
+              - Error: api/rust/enums/error.md
+      - holoconf-cli:
+          - Overview: api/cli/index.md
   - Contributing:
       - Overview: contributing/index.md
       - Development Setup: contributing/development.md
@@ -113,6 +155,7 @@ nav:
           - ADR-013 Testing Architecture: adr/ADR-013-testing-architecture.md
           - ADR-014 Code Quality Tooling: adr/ADR-014-code-quality-tooling.md
           - ADR-015 Documentation Site: adr/ADR-015-documentation-site.md
+          - ADR-016 PyO3 API Documentation: adr/ADR-016-pyo3-api-documentation.md
       - Feature Specs:
           - specs/features/README.md
           - FEAT-001 Config Loading: specs/features/FEAT-001-config-loading.md

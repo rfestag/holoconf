@@ -94,4 +94,4 @@ holoconf provides a consistent, powerful configuration management experience acr
 - [Getting Started](guide/getting-started.md) - Installation and first configuration
 - [Interpolation](guide/interpolation.md) - Learn about variable substitution
 - [Resolvers](guide/resolvers.md) - Environment, file, HTTP, and self-reference resolvers
-- [API Reference](api/python.md) - Detailed API documentation
+- [API Reference](api/python/index.md) - Detailed API documentation
