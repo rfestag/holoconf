@@ -1,0 +1,27 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/holoconf-core",
+    "crates/holoconf-python",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/holoconf/holoconf"
+rust-version = "1.75"
+
+[workspace.dependencies]
+# Core dependencies
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9"
+serde_json = "1.0"
+thiserror = "2.0"
+indexmap = { version = "2.0", features = ["serde"] }
+
+# Async
+tokio = { version = "1.0", features = ["full"] }
+
+# Testing
+pretty_assertions = "1.4"

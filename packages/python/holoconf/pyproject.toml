@@ -1,0 +1,54 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "holoconf"
+version = "0.1.0"
+description = "Cross-language configuration library with resolver support"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT OR Apache-2.0"}
+keywords = ["config", "configuration", "yaml", "resolver"]
+authors = [
+    {name = "Ryan", email = "ryan@example.com"}
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Rust",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+[project.urls]
+Homepage = "https://github.com/holoconf/holoconf"
+Repository = "https://github.com/holoconf/holoconf"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pyyaml>=6.0",
+]
+
+[tool.maturin]
+# Path to the Rust crate
+manifest-path = "../../../crates/holoconf-python/Cargo.toml"
+# Python module name
+module-name = "holoconf._holoconf"
+# Features to activate
+features = []
+# Build for the current Python only
+python-source = "src"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]

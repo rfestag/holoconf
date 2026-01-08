@@ -1,0 +1,44 @@
+suite: interpolation_syntax
+description: Interpolation syntax per ADR-011
+
+tests:
+  - name: basic_interpolation
+    given:
+      env:
+        HOLOCONF_VAR: "value"
+      config: |
+        key: ${env:HOLOCONF_VAR}
+    when:
+      access: key
+    then:
+      value: "value"
+
+  - name: escaped_interpolation
+    given:
+      config: |
+        literal: '\${not_resolved}'
+    when:
+      access: literal
+    then:
+      value: "${not_resolved}"
+
+  - name: no_interpolation_literal
+    given:
+      config: |
+        plain: just a string
+    when:
+      access: plain
+    then:
+      value: "just a string"
+
+  - name: multiple_interpolations
+    given:
+      env:
+        HOLOCONF_A: "first"
+        HOLOCONF_B: "second"
+      config: |
+        combined: ${env:HOLOCONF_A}-${env:HOLOCONF_B}
+    when:
+      access: combined
+    then:
+      value: "first-second"

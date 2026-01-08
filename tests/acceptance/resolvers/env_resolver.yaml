@@ -1,0 +1,56 @@
+suite: env_resolver
+description: Environment variable resolver behavior
+
+tests:
+  - name: resolves_environment_variable
+    given:
+      env:
+        HOLOCONF_TEST_PORT: "8080"
+      config: |
+        port: ${env:HOLOCONF_TEST_PORT}
+    when:
+      access: port
+    then:
+      value: "8080"
+
+  - name: uses_default_when_missing
+    given:
+      config: |
+        port: ${env:HOLOCONF_UNDEFINED_VAR,3000}
+    when:
+      access: port
+    then:
+      value: "3000"
+
+  - name: errors_when_missing_no_default
+    given:
+      config: |
+        port: ${env:HOLOCONF_UNDEFINED_VAR}
+    when:
+      access: port
+    then:
+      error:
+        type: ResolverError
+        message_contains: "Environment variable not found"
+
+  - name: nested_default
+    given:
+      env:
+        HOLOCONF_FALLBACK: "fallback_value"
+      config: |
+        value: ${env:HOLOCONF_UNDEFINED,${env:HOLOCONF_FALLBACK}}
+    when:
+      access: value
+    then:
+      value: "fallback_value"
+
+  - name: string_concatenation
+    given:
+      env:
+        HOLOCONF_PREFIX: "prod"
+      config: |
+        bucket: myapp-${env:HOLOCONF_PREFIX}-data
+    when:
+      access: bucket
+    then:
+      value: "myapp-prod-data"

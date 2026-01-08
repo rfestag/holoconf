@@ -1,0 +1,128 @@
+suite: deep_merge
+description: Deep merge behavior per ADR-004
+
+tests:
+  - name: deep_merge_nested_mappings
+    given:
+      files:
+        base.yaml: |
+          database:
+            host: localhost
+            port: 5432
+            pool:
+              min: 5
+              max: 20
+        override.yaml: |
+          database:
+            host: prod-db.example.com
+            pool:
+              max: 100
+      config_merge:
+        - base.yaml
+        - override.yaml
+    when:
+      access: database
+    then:
+      value:
+        host: prod-db.example.com
+        port: 5432
+        pool:
+          min: 5
+          max: 100
+
+  - name: null_removes_key
+    given:
+      files:
+        base.yaml: |
+          feature:
+            enabled: true
+            debug_logging: true
+            config:
+              setting: value
+        override.yaml: |
+          feature:
+            debug_logging: null
+      config_merge:
+        - base.yaml
+        - override.yaml
+    when:
+      access: feature
+    then:
+      value:
+        enabled: true
+        config:
+          setting: value
+
+  - name: array_replaces_entirely
+    given:
+      files:
+        base.yaml: |
+          servers:
+            - host: server1
+            - host: server2
+        override.yaml: |
+          servers:
+            - host: prod-server
+      config_merge:
+        - base.yaml
+        - override.yaml
+    when:
+      access: servers
+    then:
+      value:
+        - host: prod-server
+
+  - name: scalar_replaces_mapping
+    given:
+      files:
+        base.yaml: |
+          database:
+            host: localhost
+            port: 5432
+        override.yaml: |
+          database: "postgresql://prod-db/app"
+      config_merge:
+        - base.yaml
+        - override.yaml
+    when:
+      access: database
+    then:
+      value: "postgresql://prod-db/app"
+
+  - name: mapping_replaces_scalar
+    given:
+      files:
+        base.yaml: |
+          database: "postgresql://localhost/app"
+        override.yaml: |
+          database:
+            host: prod-db
+            port: 5432
+      config_merge:
+        - base.yaml
+        - override.yaml
+    when:
+      access: database
+    then:
+      value:
+        host: prod-db
+        port: 5432
+
+  - name: new_keys_added
+    given:
+      files:
+        base.yaml: |
+          database:
+            host: localhost
+        override.yaml: |
+          database:
+            port: 5432
+          logging:
+            level: info
+      config_merge:
+        - base.yaml
+        - override.yaml
+    when:
+      access: logging.level
+    then:
+      value: info

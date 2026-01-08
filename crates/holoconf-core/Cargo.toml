@@ -1,0 +1,20 @@
+[package]
+name = "holoconf-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Core configuration library with resolver support"
+keywords = ["config", "configuration", "yaml", "resolver"]
+categories = ["config", "development-tools"]
+
+[dependencies]
+serde.workspace = true
+serde_yaml.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+indexmap.workspace = true
+
+[dev-dependencies]
+pretty_assertions.workspace = true

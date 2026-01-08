@@ -1,0 +1,63 @@
+suite: self_resolver
+description: Self-reference resolver behavior
+
+tests:
+  - name: absolute_reference
+    given:
+      config: |
+        defaults:
+          host: localhost
+        database:
+          host: ${defaults.host}
+    when:
+      access: database.host
+    then:
+      value: "localhost"
+
+  - name: relative_sibling_reference
+    given:
+      config: |
+        database:
+          host: localhost
+          url: postgres://${.host}:5432/db
+    when:
+      access: database.url
+    then:
+      value: "postgres://localhost:5432/db"
+
+  - name: array_access
+    given:
+      config: |
+        servers:
+          - host: server1
+          - host: server2
+        primary: ${servers[0].host}
+    when:
+      access: primary
+    then:
+      value: "server1"
+
+  - name: reference_not_found
+    given:
+      config: |
+        value: ${nonexistent.path}
+    when:
+      access: value
+    then:
+      error:
+        type: ResolverError
+        message_contains: "not found"
+
+  - name: chained_references
+    given:
+      config: |
+        base:
+          region: us-east-1
+        derived:
+          region: ${base.region}
+        final:
+          region: ${derived.region}
+    when:
+      access: final.region
+    then:
+      value: "us-east-1"

@@ -1,0 +1,66 @@
+suite: file_resolver
+description: File resolver behavior for loading external files
+
+tests:
+  - name: reads_text_file
+    given:
+      files:
+        data.txt: "Hello, World!"
+      config: |
+        content: ${file:data.txt}
+    when:
+      access: content
+    then:
+      value: "Hello, World!"
+
+  - name: reads_yaml_file
+    given:
+      files:
+        settings.yaml: |
+          timeout: 30
+          retries: 3
+      config: |
+        settings: ${file:settings.yaml}
+    when:
+      access: settings
+    then:
+      # The file resolver returns a mapping
+      value:
+        timeout: 30
+        retries: 3
+
+  - name: reads_json_file
+    given:
+      files:
+        config.json: '{"host": "localhost", "port": 8080}'
+      config: |
+        server: ${file:config.json}
+    when:
+      access: server
+    then:
+      # The file resolver returns a mapping
+      value:
+        host: localhost
+        port: 8080
+
+  - name: file_not_found
+    given:
+      config: |
+        content: ${file:nonexistent.txt}
+    when:
+      access: content
+    then:
+      error:
+        type: ResolverError
+        message_contains: "not found"
+
+  - name: explicit_parse_mode_text
+    given:
+      files:
+        data.yaml: "key: value"
+      config: |
+        content: ${file:data.yaml,parse=text}
+    when:
+      access: content
+    then:
+      value: "key: value"
