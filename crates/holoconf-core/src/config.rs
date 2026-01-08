@@ -117,9 +117,8 @@ impl Config {
 
         for path in paths {
             let path = path.as_ref();
-            let content = std::fs::read_to_string(path).map_err(|_e| {
-                Error::file_not_found(path.display().to_string(), None)
-            })?;
+            let content = std::fs::read_to_string(path)
+                .map_err(|_e| Error::file_not_found(path.display().to_string(), None))?;
 
             let value: Value =
                 serde_yaml::from_str(&content).map_err(|e| Error::parse(e.to_string()))?;
@@ -215,9 +214,9 @@ impl Config {
         let value = self.get(path)?;
         match value {
             Value::Integer(i) => Ok(i),
-            Value::String(s) => s.parse().map_err(|_| {
-                Error::type_coercion(path, "integer", format!("string (\"{}\")", s))
-            }),
+            Value::String(s) => s
+                .parse()
+                .map_err(|_| Error::type_coercion(path, "integer", format!("string (\"{}\")", s))),
             _ => Err(Error::type_coercion(path, "integer", value.type_name())),
         }
     }
@@ -228,9 +227,9 @@ impl Config {
         match value {
             Value::Float(f) => Ok(f),
             Value::Integer(i) => Ok(i as f64),
-            Value::String(s) => s.parse().map_err(|_| {
-                Error::type_coercion(path, "float", format!("string (\"{}\")", s))
-            }),
+            Value::String(s) => s
+                .parse()
+                .map_err(|_| Error::type_coercion(path, "float", format!("string (\"{}\")", s))),
             _ => Err(Error::type_coercion(path, "float", value.type_name())),
         }
     }
@@ -367,7 +366,10 @@ impl Config {
     }
 
     /// Validate and collect all errors (instead of failing on first)
-    pub fn validate_collect(&self, schema: &crate::schema::Schema) -> Vec<crate::schema::ValidationError> {
+    pub fn validate_collect(
+        &self,
+        schema: &crate::schema::Schema,
+    ) -> Vec<crate::schema::ValidationError> {
         match self.to_value() {
             Ok(resolved) => schema.validate_collect(&resolved),
             Err(e) => vec![crate::schema::ValidationError {
@@ -422,7 +424,10 @@ impl Config {
                     .resolve(name, &resolved_args, &resolved_kwargs, &ctx)
             }
 
-            Interpolation::SelfRef { path: ref_path, relative } => {
+            Interpolation::SelfRef {
+                path: ref_path,
+                relative,
+            } => {
                 let full_path = if *relative {
                     self.resolve_relative_path(path, ref_path)
                 } else {
@@ -432,13 +437,17 @@ impl Config {
                 // Check for circular reference
                 // For now, simple implementation - full cycle detection would need context tracking
                 if full_path == path {
-                    return Err(Error::circular_reference(path, vec![path.to_string(), full_path]));
+                    return Err(Error::circular_reference(
+                        path,
+                        vec![path.to_string(), full_path],
+                    ));
                 }
 
                 // Get the referenced value
-                let ref_value = self.raw.get_path(&full_path).map_err(|_| {
-                    Error::ref_not_found(&full_path, Some(path.to_string()))
-                })?;
+                let ref_value = self
+                    .raw
+                    .get_path(&full_path)
+                    .map_err(|_| Error::ref_not_found(&full_path, Some(path.to_string())))?;
 
                 // Resolve it recursively
                 self.resolve_value(ref_value, &full_path)
@@ -635,7 +644,10 @@ impl Config {
                     } else {
                         format!("{}.{}", path, key)
                     };
-                    resolved.insert(key.clone(), self.resolve_value_to_value_redacted(val, &key_path)?);
+                    resolved.insert(
+                        key.clone(),
+                        self.resolve_value_to_value_redacted(val, &key_path)?,
+                    );
                 }
                 Ok(Value::Mapping(resolved))
             }
@@ -804,28 +816,19 @@ value: ${env:HOLOCONF_CACHED}
         let config = Config::from_yaml(yaml).unwrap();
 
         // First access resolves and caches
-        assert_eq!(
-            config.get("value").unwrap().as_str(),
-            Some("initial")
-        );
+        assert_eq!(config.get("value").unwrap().as_str(), Some("initial"));
 
         // Change the env var
         std::env::set_var("HOLOCONF_CACHED", "changed");
 
         // Second access returns cached value
-        assert_eq!(
-            config.get("value").unwrap().as_str(),
-            Some("initial")
-        );
+        assert_eq!(config.get("value").unwrap().as_str(), Some("initial"));
 
         // Clear cache
         config.clear_cache();
 
         // Now returns new value
-        assert_eq!(
-            config.get("value").unwrap().as_str(),
-            Some("changed")
-        );
+        assert_eq!(config.get("value").unwrap().as_str(), Some("changed"));
 
         std::env::remove_var("HOLOCONF_CACHED");
     }
@@ -897,10 +900,7 @@ host: ${env:UNDEFINED_HOST,${env:HOLOCONF_DEFAULT_HOST}}
 "#;
         let config = Config::from_yaml(yaml).unwrap();
 
-        assert_eq!(
-            config.get("host").unwrap().as_str(),
-            Some("fallback-host")
-        );
+        assert_eq!(config.get("host").unwrap().as_str(), Some("fallback-host"));
 
         std::env::remove_var("HOLOCONF_DEFAULT_HOST");
     }
@@ -941,7 +941,10 @@ key: ${env:SOME_VAR}
         let config = Config::from_yaml(yaml).unwrap();
 
         let raw = config.to_value_raw();
-        assert_eq!(raw.get_path("key").unwrap().as_str(), Some("${env:SOME_VAR}"));
+        assert_eq!(
+            raw.get_path("key").unwrap().as_str(),
+            Some("${env:SOME_VAR}")
+        );
     }
 
     #[test]

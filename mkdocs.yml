@@ -1,0 +1,124 @@
+# holoconf Documentation Site
+# https://squidfunk.github.io/mkdocs-material/
+
+site_name: holoconf
+site_description: Multi-language hierarchical configuration library
+site_url: https://rfestag.github.io/holoconf/
+repo_url: https://github.com/rfestag/holoconf
+repo_name: rfestag/holoconf
+edit_uri: edit/main/docs/
+
+# Documentation directory (relative to mkdocs.yml)
+docs_dir: docs
+
+theme:
+  name: material
+  features:
+    - content.tabs.link        # Persistent language selection across pages
+    - content.code.copy        # Copy button on code blocks
+    - content.code.annotate    # Code annotations
+    - navigation.instant       # Preserves tab state on navigation
+    - navigation.tabs          # Top-level sections as tabs
+    - navigation.sections      # Collapsible sections in sidebar
+    - navigation.top           # Back to top button
+    - search.highlight         # Highlight search terms
+    - search.suggest           # Search suggestions
+  palette:
+    # Light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    # Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  icon:
+    repo: fontawesome/brands/github
+
+markdown_extensions:
+  # Code blocks with syntax highlighting
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+
+  # Tabbed content (for language selection)
+  - pymdownx.tabbed:
+      alternate_style: true
+      slugify: !!python/object/apply:pymdownx.slugs.slugify
+        kwds:
+          case: lower
+
+  # Admonitions (notes, warnings, etc.)
+  - admonition
+  - pymdownx.details
+
+  # Other useful extensions
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+
+extra:
+  version:
+    provider: mike
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/rfestag/holoconf
+
+nav:
+  - Home: index.md
+  - Guide:
+      - Getting Started: guide/getting-started.md
+      - Interpolation: guide/interpolation.md
+      - Resolvers: guide/resolvers.md
+      - Merging: guide/merging.md
+      - Validation: guide/validation.md
+  - API Reference:
+      - Python: api/python.md
+      - Rust: api/rust.md
+      - CLI: api/cli.md
+  - Contributing:
+      - Overview: contributing/index.md
+      - Development Setup: contributing/development.md
+      - Testing: contributing/testing.md
+      - Architecture Decisions:
+          - adr/README.md
+          - ADR-001 Multi-Language Architecture: adr/ADR-001-multi-language-architecture.md
+          - ADR-002 Resolver Architecture: adr/ADR-002-resolver-architecture.md
+          - ADR-003 Async Execution Model: adr/ADR-003-async-execution-model.md
+          - ADR-004 Config Merging: adr/ADR-004-config-merging.md
+          - ADR-005 Resolver Timing: adr/ADR-005-resolver-timing.md
+          - ADR-006 Repository Structure: adr/ADR-006-repository-package-structure.md
+          - ADR-007 Schema Validation: adr/ADR-007-schema-validation.md
+          - ADR-008 Error Handling: adr/ADR-008-error-handling.md
+          - ADR-009 Serialization: adr/ADR-009-serialization-export.md
+          - ADR-010 Thread Safety: adr/ADR-010-thread-safety.md
+          - ADR-011 Interpolation Syntax: adr/ADR-011-interpolation-syntax.md
+          - ADR-012 Type Coercion: adr/ADR-012-type-coercion.md
+          - ADR-013 Testing Architecture: adr/ADR-013-testing-architecture.md
+          - ADR-014 Code Quality Tooling: adr/ADR-014-code-quality-tooling.md
+          - ADR-015 Documentation Site: adr/ADR-015-documentation-site.md
+      - Feature Specs:
+          - specs/features/README.md
+          - FEAT-001 Config Loading: specs/features/FEAT-001-config-loading.md
+          - FEAT-002 Core Resolvers: specs/features/FEAT-002-core-resolvers.md
+          - FEAT-003 Config Merging: specs/features/FEAT-003-config-merging.md
+          - FEAT-004 Schema Validation: specs/features/FEAT-004-schema-validation.md
+          - FEAT-005 Serialization: specs/features/FEAT-005-serialization.md
+          - FEAT-006 CLI: specs/features/FEAT-006-cli.md
+  - Changelog: changelog.md

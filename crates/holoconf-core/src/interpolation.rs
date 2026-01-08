@@ -243,10 +243,7 @@ impl<'a> InterpolationParser<'a> {
                     self.advance();
                 }
                 Some(c) => {
-                    return Err(Error::parse(format!(
-                        "Invalid character '{}' in path",
-                        c
-                    )));
+                    return Err(Error::parse(format!("Invalid character '{}' in path", c)));
                 }
                 None => {
                     return Err(Error::parse("Unexpected end of input in path"));
@@ -318,17 +315,12 @@ impl<'a> InterpolationParser<'a> {
                     Some('$') if self.peek() == Some('{') => {
                         // Nested interpolation - parse it
                         let nested = self.parse_interpolation()?;
-                        return Ok(InterpolationArg::Nested(Box::new(
-                            if value.is_empty() {
-                                nested
-                            } else {
-                                // Concatenation: literal prefix + nested
-                                Interpolation::Concat(vec![
-                                    Interpolation::Literal(value),
-                                    nested,
-                                ])
-                            }
-                        )));
+                        return Ok(InterpolationArg::Nested(Box::new(if value.is_empty() {
+                            nested
+                        } else {
+                            // Concatenation: literal prefix + nested
+                            Interpolation::Concat(vec![Interpolation::Literal(value), nested])
+                        })));
                     }
                     Some('{') => {
                         depth += 1;
@@ -537,10 +529,7 @@ mod tests {
     #[test]
     fn test_parse_escaped() {
         let result = parse(r"\${not_interpolated}").unwrap();
-        assert_eq!(
-            result,
-            Interpolation::Literal("${not_interpolated}".into())
-        );
+        assert_eq!(result, Interpolation::Literal("${not_interpolated}".into()));
     }
 
     #[test]

@@ -52,3 +52,10 @@ htmlcov/
 # maturin
 *.pyd
 *.dll
+
+# Generated SBOMs (regenerate with `make sbom`)
+/sbom/
+
+# MkDocs documentation build
+/site/
+.venv-docs/

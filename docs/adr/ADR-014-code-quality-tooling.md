@@ -38,15 +38,27 @@ Adopt **Alternative 3**: Unified quality pipeline with best-of-breed tools for e
 
 ## Design
 
+### Language Version Requirements
+
+| Language | Minimum Version | Defined In |
+|----------|-----------------|------------|
+| **Rust** | 1.88+ | `Cargo.toml` (`rust-version`), `rust-toolchain.toml` |
+| **Python** | 3.9+ | `pyproject.toml` (`requires-python`) |
+
+To update Rust: `rustup update stable`
+
 ### Rust Tooling
 
-| Tool | Purpose | Configuration |
-|------|---------|---------------|
-| **rustfmt** | Code formatting | `rustfmt.toml` |
-| **clippy** | Linting, complexity | `clippy.toml` |
-| **cargo-deny** | License & advisory audit | `deny.toml` |
-| **cargo-audit** | CVE vulnerability scan | - |
-| **cargo-machete** | Unused dependency detection | - |
+| Tool | Purpose | Configuration | When |
+|------|---------|---------------|------|
+| **rustfmt** | Code formatting | `rustfmt.toml` | CI |
+| **clippy** | Linting, complexity | `clippy.toml` | CI |
+| **cargo-deny** | License & advisory audit | `deny.toml` | CI |
+| **cargo-audit** | CVE vulnerability scan | - | CI |
+| **cargo-machete** | Unused dependency detection | - | CI |
+| **cargo-geiger** | Audit unsafe code usage | - | Manual |
+| **cargo-semver-checks** | Detect breaking API changes | - | Pre-release |
+| **cargo-cyclonedx** | Generate SBOM (CycloneDX format) | - | Release |
 
 #### Clippy Configuration (`clippy.toml`)
 
@@ -65,10 +77,11 @@ too-many-arguments-threshold = 6
 
 ### Python Tooling
 
-| Tool | Purpose | Configuration |
-|------|---------|---------------|
-| **ruff** | Linting + formatting | `pyproject.toml` |
-| **pip-audit** | Dependency security scan | - |
+| Tool | Purpose | Configuration | When |
+|------|---------|---------------|------|
+| **ruff** | Linting + formatting | `pyproject.toml` | CI |
+| **pip-audit** | Dependency security scan | - | CI |
+| **cyclonedx-bom** | Generate SBOM (CycloneDX format) | - | Release |
 
 #### Ruff Configuration
 
@@ -111,6 +124,9 @@ make format        # Format all code
 make security      # Run all security checks
 make test          # Run all tests
 make check         # Run everything (lint + security + test)
+make audit-unsafe  # Report unsafe code usage
+make semver-check  # Check for breaking API changes (pre-release)
+make sbom          # Generate SBOMs for all packages
 ```
 
 Individual language commands are also available:
@@ -153,6 +169,25 @@ ruff format src/ tests/             # Format
 
 4. **Separate CI jobs** - Allows parallel execution and clear failure identification
 
+5. **CycloneDX for SBOMs** - Widely adopted format (OWASP, GitHub), better tooling support than SPDX, more concise
+
+### SBOM Generation
+
+Software Bill of Materials (SBOM) generation is available for supply chain transparency:
+
+```bash
+make sbom
+```
+
+This generates CycloneDX-format SBOMs in the `sbom/` directory:
+
+| File | Contents |
+|------|----------|
+| `holoconf-rust.cdx.json` | All Rust crate dependencies |
+| `holoconf-python.cdx.json` | All Python package dependencies |
+
+SBOMs should be generated and published with each release to provide downstream users visibility into the dependency tree.
+
 ## Trade-offs Accepted
 
 - **More CI time** in exchange for **comprehensive quality gates**
@@ -173,6 +208,7 @@ N/A - This ADR establishes tooling for an existing codebase. Initial cleanup was
   - License compliance verified automatically
   - Code complexity stays manageable
   - Unused dependencies removed
+  - SBOM generation enables supply chain transparency
 
 - **Negative:**
   - CI runs take longer (~2-3 min additional)

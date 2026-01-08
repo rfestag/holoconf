@@ -92,7 +92,10 @@ impl Error {
             kind: ErrorKind::PathNotFound,
             path: Some(path_str.clone()),
             source_location: None,
-            help: Some(format!("Check that '{}' exists in the configuration", path_str)),
+            help: Some(format!(
+                "Check that '{}' exists in the configuration",
+                path_str
+            )),
             cause: None,
         }
     }
@@ -162,10 +165,7 @@ impl Error {
             kind: ErrorKind::Resolver(ResolverErrorKind::UnknownResolver { name: n.clone() }),
             path: config_path,
             source_location: None,
-            help: Some(format!(
-                "Register the '{}' resolver or check for typos",
-                n
-            )),
+            help: Some(format!("Register the '{}' resolver or check for typos", n)),
             cause: None,
         }
     }
@@ -193,7 +193,11 @@ impl Error {
         let p = path.into();
         Self {
             kind: ErrorKind::Validation,
-            path: if p.is_empty() || p == "<root>" { None } else { Some(p) },
+            path: if p.is_empty() || p == "<root>" {
+                None
+            } else {
+                Some(p)
+            },
             source_location: None,
             help: Some("Fix the value to match the schema requirements".into()),
             cause: Some(message.into()),
@@ -228,9 +232,7 @@ impl fmt::Display for Error {
                 ResolverErrorKind::EnvNotFound { var_name } => {
                     write!(f, "Environment variable not found: {}", var_name)?
                 }
-                ResolverErrorKind::FileNotFound { path } => {
-                    write!(f, "File not found: {}", path)?
-                }
+                ResolverErrorKind::FileNotFound { path } => write!(f, "File not found: {}", path)?,
                 ResolverErrorKind::HttpError { url, status } => {
                     write!(f, "HTTP request failed: {}", url)?;
                     if let Some(s) = status {

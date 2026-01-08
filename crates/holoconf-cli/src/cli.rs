@@ -141,14 +141,12 @@ fn load_config(files: &[PathBuf]) -> Result<Config, String> {
             .map_err(|e| format!("Failed to load {}: {}", files[0].display(), e))
     } else {
         let paths: Vec<&std::path::Path> = files.iter().map(|p| p.as_path()).collect();
-        Config::load_merged(&paths)
-            .map_err(|e| format!("Failed to load and merge files: {}", e))
+        Config::load_merged(&paths).map_err(|e| format!("Failed to load and merge files: {}", e))
     }
 }
 
 fn load_schema(path: &PathBuf) -> Result<Schema, String> {
-    Schema::from_file(path)
-        .map_err(|e| format!("Failed to load schema {}: {}", path.display(), e))
+    Schema::from_file(path).map_err(|e| format!("Failed to load schema {}: {}", path.display(), e))
 }
 
 fn cmd_validate(
@@ -254,11 +252,7 @@ fn cmd_dump(
                     eprintln!("{}: {}", "Error writing file".red(), e);
                     return ExitCode::from(2);
                 }
-                eprintln!(
-                    "{} Wrote to {}",
-                    "✓".green(),
-                    output_path.display()
-                );
+                eprintln!("{} Wrote to {}", "✓".green(), output_path.display());
             } else {
                 print!("{}", content);
             }
@@ -363,8 +357,12 @@ fn cmd_check(files: Vec<PathBuf>) -> ExitCode {
 
         match parse_result {
             Ok(_) => {
-                println!("{} {}: valid {}", "✓".green(), file.display(),
-                    if ext == "json" { "JSON" } else { "YAML" });
+                println!(
+                    "{} {}: valid {}",
+                    "✓".green(),
+                    file.display(),
+                    if ext == "json" { "JSON" } else { "YAML" }
+                );
             }
             Err(e) => {
                 eprintln!("{} {}: {}", "✗".red(), file.display(), e);
@@ -386,11 +384,9 @@ fn value_to_json(value: &holoconf_core::Value) -> serde_json::Value {
         holoconf_core::Value::Null => serde_json::Value::Null,
         holoconf_core::Value::Bool(b) => serde_json::Value::Bool(*b),
         holoconf_core::Value::Integer(i) => serde_json::Value::Number((*i).into()),
-        holoconf_core::Value::Float(f) => {
-            serde_json::Number::from_f64(*f)
-                .map(serde_json::Value::Number)
-                .unwrap_or(serde_json::Value::Null)
-        }
+        holoconf_core::Value::Float(f) => serde_json::Number::from_f64(*f)
+            .map(serde_json::Value::Number)
+            .unwrap_or(serde_json::Value::Null),
         holoconf_core::Value::String(s) => serde_json::Value::String(s.clone()),
         holoconf_core::Value::Sequence(seq) => {
             serde_json::Value::Array(seq.iter().map(value_to_json).collect())

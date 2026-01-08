@@ -22,15 +22,15 @@ pub struct Schema {
 impl Schema {
     /// Load a schema from a JSON string
     pub fn from_json(json: &str) -> Result<Self> {
-        let schema: serde_json::Value =
-            serde_json::from_str(json).map_err(|e| Error::parse(format!("Invalid JSON schema: {}", e)))?;
+        let schema: serde_json::Value = serde_json::from_str(json)
+            .map_err(|e| Error::parse(format!("Invalid JSON schema: {}", e)))?;
         Self::from_value(schema)
     }
 
     /// Load a schema from a YAML string
     pub fn from_yaml(yaml: &str) -> Result<Self> {
-        let schema: serde_json::Value =
-            serde_yaml::from_str(yaml).map_err(|e| Error::parse(format!("Invalid YAML schema: {}", e)))?;
+        let schema: serde_json::Value = serde_yaml::from_str(yaml)
+            .map_err(|e| Error::parse(format!("Invalid YAML schema: {}", e)))?;
         Self::from_value(schema)
     }
 
@@ -51,7 +51,10 @@ impl Schema {
     fn from_value(schema: serde_json::Value) -> Result<Self> {
         let compiled = jsonschema::validator_for(&schema)
             .map_err(|e| Error::parse(format!("Invalid JSON Schema: {}", e)))?;
-        Ok(Self { schema, compiled: Arc::new(compiled) })
+        Ok(Self {
+            schema,
+            compiled: Arc::new(compiled),
+        })
     }
 
     /// Validate a Value against this schema
@@ -118,15 +121,11 @@ fn value_to_json(value: &Value) -> serde_json::Value {
         Value::Null => serde_json::Value::Null,
         Value::Bool(b) => serde_json::Value::Bool(*b),
         Value::Integer(i) => serde_json::Value::Number((*i).into()),
-        Value::Float(f) => {
-            serde_json::Number::from_f64(*f)
-                .map(serde_json::Value::Number)
-                .unwrap_or(serde_json::Value::Null)
-        }
+        Value::Float(f) => serde_json::Number::from_f64(*f)
+            .map(serde_json::Value::Number)
+            .unwrap_or(serde_json::Value::Null),
         Value::String(s) => serde_json::Value::String(s.clone()),
-        Value::Sequence(seq) => {
-            serde_json::Value::Array(seq.iter().map(value_to_json).collect())
-        }
+        Value::Sequence(seq) => serde_json::Value::Array(seq.iter().map(value_to_json).collect()),
         Value::Mapping(map) => {
             let obj: serde_json::Map<String, serde_json::Value> = map
                 .iter()
@@ -161,14 +160,17 @@ properties:
 
     #[test]
     fn test_validate_valid_config() {
-        let schema = Schema::from_yaml(r#"
+        let schema = Schema::from_yaml(
+            r#"
 type: object
 properties:
   name:
     type: string
   port:
     type: integer
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         let mut map = indexmap::IndexMap::new();
         map.insert("name".into(), Value::String("myapp".into()));
@@ -180,14 +182,17 @@ properties:
 
     #[test]
     fn test_validate_missing_required() {
-        let schema = Schema::from_yaml(r#"
+        let schema = Schema::from_yaml(
+            r#"
 type: object
 required:
   - name
 properties:
   name:
     type: string
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         let config = Value::Mapping(indexmap::IndexMap::new());
         let result = schema.validate(&config);
@@ -198,12 +203,15 @@ properties:
 
     #[test]
     fn test_validate_wrong_type() {
-        let schema = Schema::from_yaml(r#"
+        let schema = Schema::from_yaml(
+            r#"
 type: object
 properties:
   port:
     type: integer
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         let mut map = indexmap::IndexMap::new();
         map.insert("port".into(), Value::String("not-a-number".into()));
@@ -215,14 +223,17 @@ properties:
 
     #[test]
     fn test_validate_constraint_violation() {
-        let schema = Schema::from_yaml(r#"
+        let schema = Schema::from_yaml(
+            r#"
 type: object
 properties:
   port:
     type: integer
     minimum: 1
     maximum: 65535
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         let mut map = indexmap::IndexMap::new();
         map.insert("port".into(), Value::Integer(70000));
@@ -234,13 +245,16 @@ properties:
 
     #[test]
     fn test_validate_enum() {
-        let schema = Schema::from_yaml(r#"
+        let schema = Schema::from_yaml(
+            r#"
 type: object
 properties:
   log_level:
     type: string
     enum: [debug, info, warn, error]
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         // Valid enum value
         let mut map = indexmap::IndexMap::new();
@@ -257,7 +271,8 @@ properties:
 
     #[test]
     fn test_validate_nested() {
-        let schema = Schema::from_yaml(r#"
+        let schema = Schema::from_yaml(
+            r#"
 type: object
 properties:
   database:
@@ -269,7 +284,9 @@ properties:
       port:
         type: integer
         default: 5432
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         // Valid nested config
         let mut db = indexmap::IndexMap::new();
@@ -290,7 +307,8 @@ properties:
 
     #[test]
     fn test_validate_collect_multiple_errors() {
-        let schema = Schema::from_yaml(r#"
+        let schema = Schema::from_yaml(
+            r#"
 type: object
 required:
   - name
@@ -300,7 +318,9 @@ properties:
     type: string
   port:
     type: integer
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         let config = Value::Mapping(indexmap::IndexMap::new());
         let errors = schema.validate_collect(&config);
@@ -311,12 +331,15 @@ properties:
     #[test]
     fn test_validate_additional_properties_allowed() {
         // By default, additional properties are allowed
-        let schema = Schema::from_yaml(r#"
+        let schema = Schema::from_yaml(
+            r#"
 type: object
 properties:
   name:
     type: string
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         let mut map = indexmap::IndexMap::new();
         map.insert("name".into(), Value::String("myapp".into()));
@@ -327,13 +350,16 @@ properties:
 
     #[test]
     fn test_validate_additional_properties_denied() {
-        let schema = Schema::from_yaml(r#"
+        let schema = Schema::from_yaml(
+            r#"
 type: object
 properties:
   name:
     type: string
 additionalProperties: false
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         let mut map = indexmap::IndexMap::new();
         map.insert("name".into(), Value::String("myapp".into()));
@@ -344,42 +370,51 @@ additionalProperties: false
 
     #[test]
     fn test_validate_array() {
-        let schema = Schema::from_yaml(r#"
+        let schema = Schema::from_yaml(
+            r#"
 type: object
 properties:
   servers:
     type: array
     items:
       type: string
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         let mut map = indexmap::IndexMap::new();
-        map.insert("servers".into(), Value::Sequence(vec![
-            Value::String("server1".into()),
-            Value::String("server2".into()),
-        ]));
+        map.insert(
+            "servers".into(),
+            Value::Sequence(vec![
+                Value::String("server1".into()),
+                Value::String("server2".into()),
+            ]),
+        );
         let config = Value::Mapping(map);
         assert!(schema.validate(&config).is_ok());
 
         // Wrong item type
         let mut map = indexmap::IndexMap::new();
-        map.insert("servers".into(), Value::Sequence(vec![
-            Value::String("server1".into()),
-            Value::Integer(123),
-        ]));
+        map.insert(
+            "servers".into(),
+            Value::Sequence(vec![Value::String("server1".into()), Value::Integer(123)]),
+        );
         let config = Value::Mapping(map);
         assert!(schema.validate(&config).is_err());
     }
 
     #[test]
     fn test_validate_pattern() {
-        let schema = Schema::from_yaml(r#"
+        let schema = Schema::from_yaml(
+            r#"
 type: object
 properties:
   version:
     type: string
     pattern: "^\\d+\\.\\d+\\.\\d+$"
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         // Valid semver
         let mut map = indexmap::IndexMap::new();

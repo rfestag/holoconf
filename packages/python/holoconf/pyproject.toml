@@ -38,6 +38,8 @@ dev = [
     "pytest>=7.0",
     "pyyaml>=6.0",
     "ruff>=0.8",
+    "pip-audit>=2.7",
+    "cyclonedx-bom>=4.0",
 ]
 
 [project.scripts]

@@ -276,7 +276,10 @@ fn env_resolver(
             if let Some(default) = default_value {
                 Ok(ResolvedValue::new(Value::String(default.clone())))
             } else {
-                Err(Error::env_not_found(var_name, Some(ctx.config_path.clone())))
+                Err(Error::env_not_found(
+                    var_name,
+                    Some(ctx.config_path.clone()),
+                ))
             }
         }
     }
@@ -291,8 +294,9 @@ fn file_resolver(
     use std::path::Path;
 
     if args.is_empty() {
-        return Err(Error::parse("file resolver requires a file path")
-            .with_path(ctx.config_path.clone()));
+        return Err(
+            Error::parse("file resolver requires a file path").with_path(ctx.config_path.clone())
+        );
     }
 
     let file_path_str = &args[0];
@@ -310,9 +314,8 @@ fn file_resolver(
     };
 
     // Read the file
-    let content = std::fs::read_to_string(&file_path).map_err(|_| {
-        Error::file_not_found(file_path_str, Some(ctx.config_path.clone()))
-    })?;
+    let content = std::fs::read_to_string(&file_path)
+        .map_err(|_| Error::file_not_found(file_path_str, Some(ctx.config_path.clone())))?;
 
     // Determine parse mode
     let actual_parse_mode = if parse_mode == "auto" {
@@ -329,15 +332,17 @@ fn file_resolver(
     // Parse content based on mode
     match actual_parse_mode {
         "yaml" => {
-            let value: Value = serde_yaml::from_str(&content)
-                .map_err(|e| Error::parse(format!("Failed to parse YAML: {}", e))
-                    .with_path(ctx.config_path.clone()))?;
+            let value: Value = serde_yaml::from_str(&content).map_err(|e| {
+                Error::parse(format!("Failed to parse YAML: {}", e))
+                    .with_path(ctx.config_path.clone())
+            })?;
             Ok(ResolvedValue::new(value))
         }
         "json" => {
-            let value: Value = serde_json::from_str(&content)
-                .map_err(|e| Error::parse(format!("Failed to parse JSON: {}", e))
-                    .with_path(ctx.config_path.clone()))?;
+            let value: Value = serde_json::from_str(&content).map_err(|e| {
+                Error::parse(format!("Failed to parse JSON: {}", e))
+                    .with_path(ctx.config_path.clone())
+            })?;
             Ok(ResolvedValue::new(value))
         }
         _ => {
@@ -359,8 +364,7 @@ fn http_resolver(
     ctx: &ResolverContext,
 ) -> Result<ResolvedValue> {
     if args.is_empty() {
-        return Err(Error::parse("http resolver requires a URL")
-            .with_path(ctx.config_path.clone()));
+        return Err(Error::parse("http resolver requires a URL").with_path(ctx.config_path.clone()));
     }
 
     let url = &args[0];
@@ -443,7 +447,10 @@ mod tests {
 
         registry.register_fn("custom", |args, _kwargs, _ctx| {
             let value = args.first().cloned().unwrap_or_default();
-            Ok(ResolvedValue::new(Value::String(format!("custom:{}", value))))
+            Ok(ResolvedValue::new(Value::String(format!(
+                "custom:{}",
+                value
+            ))))
         });
 
         let ctx = ResolverContext::new("test");

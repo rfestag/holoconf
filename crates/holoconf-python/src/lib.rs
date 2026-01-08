@@ -11,28 +11,59 @@
 //!   - CircularReferenceError
 //!   - TypeCoercionError
 
-use pyo3::prelude::*;
 use pyo3::create_exception;
 use pyo3::exceptions::PyException;
-use pyo3::types::{PyList, PyDict};
+use pyo3::prelude::*;
+use pyo3::types::{PyDict, PyList};
 
 use holoconf_core::{
-    Config as CoreConfig,
-    ConfigOptions,
-    Value as CoreValue,
-    Error as CoreError,
-    Schema as CoreSchema,
-    error::ErrorKind,
+    error::ErrorKind, Config as CoreConfig, ConfigOptions, Error as CoreError,
+    Schema as CoreSchema, Value as CoreValue,
 };
 
 // Define exception hierarchy per ADR-008
-create_exception!(holoconf, HoloconfError, PyException, "Base exception for all holoconf errors");
-create_exception!(holoconf, ParseError, HoloconfError, "Error parsing configuration (YAML/JSON syntax)");
-create_exception!(holoconf, ValidationError, HoloconfError, "Schema validation error");
-create_exception!(holoconf, ResolverError, HoloconfError, "Error during value resolution");
-create_exception!(holoconf, PathNotFoundError, HoloconfError, "Requested path does not exist in configuration");
-create_exception!(holoconf, CircularReferenceError, HoloconfError, "Circular reference detected in configuration");
-create_exception!(holoconf, TypeCoercionError, HoloconfError, "Failed to coerce value to requested type");
+create_exception!(
+    holoconf,
+    HoloconfError,
+    PyException,
+    "Base exception for all holoconf errors"
+);
+create_exception!(
+    holoconf,
+    ParseError,
+    HoloconfError,
+    "Error parsing configuration (YAML/JSON syntax)"
+);
+create_exception!(
+    holoconf,
+    ValidationError,
+    HoloconfError,
+    "Schema validation error"
+);
+create_exception!(
+    holoconf,
+    ResolverError,
+    HoloconfError,
+    "Error during value resolution"
+);
+create_exception!(
+    holoconf,
+    PathNotFoundError,
+    HoloconfError,
+    "Requested path does not exist in configuration"
+);
+create_exception!(
+    holoconf,
+    CircularReferenceError,
+    HoloconfError,
+    "Circular reference detected in configuration"
+);
+create_exception!(
+    holoconf,
+    TypeCoercionError,
+    HoloconfError,
+    "Failed to coerce value to requested type"
+);
 
 /// Convert a holoconf error to the appropriate Python exception
 fn to_py_err(err: CoreError) -> PyErr {
@@ -110,8 +141,12 @@ impl PyConfig {
     #[pyo3(signature = (path, allow_http=false))]
     fn load(path: &str, allow_http: bool) -> PyResult<Self> {
         let path_ref = std::path::Path::new(path);
-        let content = std::fs::read_to_string(path_ref)
-            .map_err(|e| to_py_err(holoconf_core::Error::parse(format!("Failed to read file '{}': {}", path, e))))?;
+        let content = std::fs::read_to_string(path_ref).map_err(|e| {
+            to_py_err(holoconf_core::Error::parse(format!(
+                "Failed to read file '{}': {}",
+                path, e
+            )))
+        })?;
 
         let value: holoconf_core::Value = serde_yaml::from_str(&content)
             .map_err(|e| to_py_err(holoconf_core::Error::parse(e.to_string())))?;
@@ -189,8 +224,7 @@ impl PyConfig {
     /// Raises:
     ///     PathNotFoundError: If the path doesn't exist
     fn get_raw(&self, py: Python<'_>, path: &str) -> PyResult<PyObject> {
-        let value = self.inner.get_raw(path)
-            .map_err(to_py_err)?;
+        let value = self.inner.get_raw(path).map_err(to_py_err)?;
         value_to_py(py, value)
     }
 
@@ -464,7 +498,10 @@ fn holoconf(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("ValidationError", m.py().get_type::<ValidationError>())?;
     m.add("ResolverError", m.py().get_type::<ResolverError>())?;
     m.add("PathNotFoundError", m.py().get_type::<PathNotFoundError>())?;
-    m.add("CircularReferenceError", m.py().get_type::<CircularReferenceError>())?;
+    m.add(
+        "CircularReferenceError",
+        m.py().get_type::<CircularReferenceError>(),
+    )?;
     m.add("TypeCoercionError", m.py().get_type::<TypeCoercionError>())?;
 
     Ok(())

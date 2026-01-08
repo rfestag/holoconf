@@ -129,9 +129,9 @@ impl Value {
         for segment in &segments {
             current = match segment {
                 PathSegment::Key(key) => match current {
-                    Value::Mapping(map) => {
-                        map.get(key.as_str()).ok_or_else(|| Error::path_not_found(path))?
-                    }
+                    Value::Mapping(map) => map
+                        .get(key.as_str())
+                        .ok_or_else(|| Error::path_not_found(path))?,
                     _ => return Err(Error::path_not_found(path)),
                 },
                 PathSegment::Index(idx) => match current {
@@ -158,15 +158,15 @@ impl Value {
         for segment in segments {
             current = match segment {
                 PathSegment::Key(key) => match current {
-                    Value::Mapping(map) => {
-                        map.get_mut(&key).ok_or_else(|| Error::path_not_found(path))?
-                    }
+                    Value::Mapping(map) => map
+                        .get_mut(&key)
+                        .ok_or_else(|| Error::path_not_found(path))?,
                     _ => return Err(Error::path_not_found(path)),
                 },
                 PathSegment::Index(idx) => match current {
-                    Value::Sequence(seq) => {
-                        seq.get_mut(idx).ok_or_else(|| Error::path_not_found(path))?
-                    }
+                    Value::Sequence(seq) => seq
+                        .get_mut(idx)
+                        .ok_or_else(|| Error::path_not_found(path))?,
                     _ => return Err(Error::path_not_found(path)),
                 },
             };
@@ -214,7 +214,10 @@ impl Value {
                 PathSegment::Key(key) => {
                     if let Value::Mapping(map) = current {
                         // Check what the next segment expects
-                        let next_is_index = segments.get(i + 1).map(|s| matches!(s, PathSegment::Index(_))).unwrap_or(false);
+                        let next_is_index = segments
+                            .get(i + 1)
+                            .map(|s| matches!(s, PathSegment::Index(_)))
+                            .unwrap_or(false);
 
                         if !map.contains_key(key) {
                             let new_value = if next_is_index {
@@ -231,7 +234,8 @@ impl Value {
                 }
                 PathSegment::Index(idx) => {
                     if let Value::Sequence(seq) = current {
-                        seq.get_mut(*idx).ok_or_else(|| Error::path_not_found(path))?
+                        seq.get_mut(*idx)
+                            .ok_or_else(|| Error::path_not_found(path))?
                     } else {
                         return Err(Error::path_not_found(path));
                     }
@@ -293,7 +297,6 @@ impl Value {
         self
     }
 }
-
 
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -493,7 +496,10 @@ mod tests {
             value.get_path("database.host").unwrap().as_str(),
             Some("localhost")
         );
-        assert_eq!(value.get_path("database.port").unwrap().as_i64(), Some(5432));
+        assert_eq!(
+            value.get_path("database.port").unwrap().as_i64(),
+            Some(5432)
+        );
     }
 
     #[test]
@@ -614,10 +620,7 @@ mod tests {
         let mut base = IndexMap::new();
         base.insert(
             "servers".into(),
-            Value::Sequence(vec![
-                Value::String("a".into()),
-                Value::String("b".into()),
-            ]),
+            Value::Sequence(vec![Value::String("a".into()), Value::String("b".into())]),
         );
         let mut base = Value::Mapping(base);
 
