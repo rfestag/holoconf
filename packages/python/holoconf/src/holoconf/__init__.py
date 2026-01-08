@@ -6,10 +6,46 @@ This module provides a configuration library that supports:
 - Environment variable interpolation: ${env:VAR}
 - Self-references: ${path.to.value}
 - File includes: ${file:./other.yaml}
+- JSON Schema validation
 - Type coercion with schema support
+
+Exception Hierarchy:
+    HoloconfError (base)
+    ├── ParseError - YAML/JSON syntax errors
+    ├── ValidationError - Schema validation failures
+    ├── ResolverError - Resolution failures (missing env vars, etc.)
+    ├── PathNotFoundError - Requested config path doesn't exist
+    ├── CircularReferenceError - Circular reference in config
+    └── TypeCoercionError - Type conversion failures
 """
 
-from holoconf._holoconf import Config
+from holoconf._holoconf import (
+    # Classes
+    Config,
+    Schema,
+    # Exceptions
+    HoloconfError,
+    ParseError,
+    ValidationError,
+    ResolverError,
+    PathNotFoundError,
+    CircularReferenceError,
+    TypeCoercionError,
+)
 
 __version__ = "0.1.0"
-__all__ = ["Config", "__version__"]
+__all__ = [
+    # Classes
+    "Config",
+    "Schema",
+    # Exceptions
+    "HoloconfError",
+    "ParseError",
+    "ValidationError",
+    "ResolverError",
+    "PathNotFoundError",
+    "CircularReferenceError",
+    "TypeCoercionError",
+    # Metadata
+    "__version__",
+]

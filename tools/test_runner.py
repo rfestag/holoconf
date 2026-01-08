@@ -104,8 +104,9 @@ class RustDriver(Driver):
 
     def __init__(self):
         try:
-            from holoconf import Config
+            from holoconf import Config, Schema
             self.Config = Config
+            self.Schema = Schema
         except ImportError:
             raise ImportError(
                 "Could not import holoconf. "
@@ -118,8 +119,26 @@ class RustDriver(Driver):
     def load_merged(self, file_paths: List[str]) -> Any:
         return self.Config.load_merged(file_paths)
 
+    def load_schema(self, yaml_content: str) -> Any:
+        return self.Schema.from_yaml(yaml_content)
+
+    def validate(self, config: Any, schema: Any) -> None:
+        config.validate(schema)
+
+    def validate_collect(self, config: Any, schema: Any) -> List[str]:
+        return config.validate_collect(schema)
+
     def access(self, config: Any, path: str) -> Any:
         return config.get(path)
+
+    def export_yaml(self, config: Any, resolve: bool, redact: bool = False) -> str:
+        return config.to_yaml(resolve=resolve, redact=redact)
+
+    def export_json(self, config: Any, resolve: bool, redact: bool = False) -> str:
+        return config.to_json(resolve=resolve, redact=redact)
+
+    def export_dict(self, config: Any, resolve: bool, redact: bool = False) -> Any:
+        return config.to_dict(resolve=resolve, redact=redact)
 
 
 class PythonDriver(Driver):
@@ -127,8 +146,9 @@ class PythonDriver(Driver):
 
     def __init__(self):
         try:
-            from holoconf import Config
+            from holoconf import Config, Schema
             self.Config = Config
+            self.Schema = Schema
         except ImportError:
             raise ImportError(
                 "Could not import holoconf. "
@@ -141,8 +161,26 @@ class PythonDriver(Driver):
     def load_config(self, yaml_content: str, base_path: Optional[str] = None) -> Any:
         return self.Config.loads(yaml_content, base_path=base_path)
 
+    def load_schema(self, yaml_content: str) -> Any:
+        return self.Schema.from_yaml(yaml_content)
+
+    def validate(self, config: Any, schema: Any) -> None:
+        config.validate(schema)
+
+    def validate_collect(self, config: Any, schema: Any) -> List[str]:
+        return config.validate_collect(schema)
+
     def access(self, config: Any, path: str) -> Any:
         return config.get(path)
+
+    def export_yaml(self, config: Any, resolve: bool, redact: bool = False) -> str:
+        return config.to_yaml(resolve=resolve, redact=redact)
+
+    def export_json(self, config: Any, resolve: bool, redact: bool = False) -> str:
+        return config.to_json(resolve=resolve, redact=redact)
+
+    def export_dict(self, config: Any, resolve: bool, redact: bool = False) -> Any:
+        return config.to_dict(resolve=resolve, redact=redact)
 
 
 def load_driver(name: str) -> Driver:
@@ -208,8 +246,80 @@ def run_test(driver: Driver, test: TestCase, suite_name: str) -> TestResult:
             config_yaml = test.given.get("config", "")
             config = driver.load_config(config_yaml, base_path=base_path)
 
-        # Execute action
-        if "access" in test.when:
+        # Execute action - check export first since it may also have access
+        if "export" in test.when:
+            # Serialization export test
+            export_format = test.when["export"]
+            resolve = test.when.get("resolve", True)
+            redact = test.when.get("redact", False)
+
+            if export_format == "yaml":
+                result = driver.export_yaml(config, resolve=resolve, redact=redact)
+            elif export_format == "json":
+                result = driver.export_json(config, resolve=resolve, redact=redact)
+            elif export_format == "dict":
+                result = driver.export_dict(config, resolve=resolve, redact=redact)
+                # If we need to access a key from the dict
+                if "access" in test.when:
+                    path = test.when["access"]
+                    # Navigate the dict by path
+                    parts = path.split(".")
+                    for part in parts:
+                        result = result[part]
+            else:
+                return TestResult(
+                    test_name=test.name,
+                    suite_name=suite_name,
+                    passed=False,
+                    error=f"Unknown export format: {export_format}",
+                )
+
+            # Check contains
+            if "contains" in test.then:
+                for expected in test.then["contains"]:
+                    if expected not in str(result):
+                        return TestResult(
+                            test_name=test.name,
+                            suite_name=suite_name,
+                            passed=False,
+                            error="Export missing expected content",
+                            expected=f"contains '{expected}'",
+                            actual=str(result)[:200],
+                        )
+
+            # Check not_contains
+            if "not_contains" in test.then:
+                for unexpected in test.then["not_contains"]:
+                    if unexpected in str(result):
+                        return TestResult(
+                            test_name=test.name,
+                            suite_name=suite_name,
+                            passed=False,
+                            error="Export contains unexpected content",
+                            expected=f"does not contain '{unexpected}'",
+                            actual=str(result)[:200],
+                        )
+
+            # Check value
+            if "value" in test.then:
+                expected = test.then["value"]
+                if not values_equal(result, expected):
+                    return TestResult(
+                        test_name=test.name,
+                        suite_name=suite_name,
+                        passed=False,
+                        error="Export value mismatch",
+                        expected=expected,
+                        actual=result,
+                    )
+
+            return TestResult(
+                test_name=test.name,
+                suite_name=suite_name,
+                passed=True,
+            )
+
+        elif "access" in test.when:
             path = test.when["access"]
             try:
                 result = driver.access(config, path)
@@ -266,6 +376,71 @@ def run_test(driver: Driver, test: TestCase, suite_name: str) -> TestResult:
                     expected=test.then["error"],
                     actual=result,
                 )
+
+        elif "validate" in test.when:
+            # Schema validation test
+            schema_yaml = test.given.get("schema", "")
+            schema = driver.load_schema(schema_yaml)
+
+            try:
+                driver.validate(config, schema)
+                # Validation passed
+                if "valid" in test.then:
+                    if test.then["valid"]:
+                        return TestResult(
+                            test_name=test.name,
+                            suite_name=suite_name,
+                            passed=True,
+                        )
+                    else:
+                        return TestResult(
+                            test_name=test.name,
+                            suite_name=suite_name,
+                            passed=False,
+                            error="Expected validation to fail but it passed",
+                        )
+                if "error" in test.then:
+                    return TestResult(
+                        test_name=test.name,
+                        suite_name=suite_name,
+                        passed=False,
+                        error="Expected validation error but validation passed",
+                        expected=test.then["error"],
+                    )
+            except Exception as e:
+                # Validation failed
+                if "valid" in test.then and test.then["valid"]:
+                    return TestResult(
+                        test_name=test.name,
+                        suite_name=suite_name,
+                        passed=False,
+                        error="Expected validation to pass but it failed",
+                        actual=str(e),
+                    )
+                if "error" in test.then:
+                    message_contains = test.then["error"].get("message_contains", "")
+                    error_str = str(e)
+                    if message_contains and message_contains not in error_str:
+                        return TestResult(
+                            test_name=test.name,
+                            suite_name=suite_name,
+                            passed=False,
+                            error="Validation error message mismatch",
+                            expected=f"contains '{message_contains}'",
+                            actual=error_str,
+                        )
+                    return TestResult(
+                        test_name=test.name,
+                        suite_name=suite_name,
+                        passed=True,
+                    )
+                # Error expected implicitly (valid: false)
+                if "valid" in test.then and not test.then["valid"]:
+                    return TestResult(
+                        test_name=test.name,
+                        suite_name=suite_name,
+                        passed=True,
+                    )
 
         return TestResult(
             test_name=test.name,

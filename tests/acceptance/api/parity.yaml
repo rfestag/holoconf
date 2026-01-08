@@ -1,0 +1,247 @@
+suite: api_parity
+description: |
+  API parity tests ensure all language bindings expose the same features.
+  Each language test runner must verify it implements all listed capabilities.
+  When adding new features to holoconf-core, add them here first.
+
+# Required classes/types that must be exposed
+classes:
+  Config:
+    description: "Main configuration class"
+    static_methods:
+      - name: loads
+        description: "Parse YAML from string"
+        parameters:
+          - name: yaml
+            type: string
+            required: true
+          - name: base_path
+            type: string
+            required: false
+          - name: allow_http
+            type: bool
+            required: false
+            default: false
+      - name: load
+        description: "Load YAML from file"
+        parameters:
+          - name: path
+            type: string
+            required: true
+          - name: allow_http
+            type: bool
+            required: false
+            default: false
+      - name: load_merged
+        description: "Load and merge multiple YAML files"
+        parameters:
+          - name: paths
+            type: list[string]
+            required: true
+      - name: from_json
+        description: "Parse JSON from string"
+        parameters:
+          - name: json
+            type: string
+            required: true
+    instance_methods:
+      - name: get
+        description: "Get resolved value by path"
+        parameters:
+          - name: path
+            type: string
+            required: true
+        returns: any
+      - name: get_raw
+        description: "Get unresolved value by path"
+        parameters:
+          - name: path
+            type: string
+            required: true
+        returns: any
+      - name: get_string
+        description: "Get value as string with coercion"
+        parameters:
+          - name: path
+            type: string
+            required: true
+        returns: string
+      - name: get_int
+        description: "Get value as integer with coercion"
+        parameters:
+          - name: path
+            type: string
+            required: true
+        returns: integer
+      - name: get_float
+        description: "Get value as float with coercion"
+        parameters:
+          - name: path
+            type: string
+            required: true
+        returns: float
+      - name: get_bool
+        description: "Get value as boolean with coercion"
+        parameters:
+          - name: path
+            type: string
+            required: true
+        returns: bool
+      - name: merge
+        description: "Merge another config into this one"
+        parameters:
+          - name: other
+            type: Config
+            required: true
+      - name: resolve_all
+        description: "Eagerly resolve all values"
+      - name: clear_cache
+        description: "Clear resolution cache"
+      - name: validate
+        description: "Validate resolved config against schema"
+        parameters:
+          - name: schema
+            type: Schema
+            required: true
+      - name: validate_raw
+        description: "Validate raw config against schema"
+        parameters:
+          - name: schema
+            type: Schema
+            required: true
+      - name: validate_collect
+        description: "Validate and return all errors"
+        parameters:
+          - name: schema
+            type: Schema
+            required: true
+        returns: list[string]
+      - name: to_dict
+        description: "Export as native dict/map"
+        parameters:
+          - name: resolve
+            type: bool
+            required: false
+            default: true
+          - name: redact
+            type: bool
+            required: false
+            default: false
+        returns: mapping
+      - name: to_yaml
+        description: "Export as YAML string"
+        parameters:
+          - name: resolve
+            type: bool
+            required: false
+            default: true
+          - name: redact
+            type: bool
+            required: false
+            default: false
+        returns: string
+      - name: to_json
+        description: "Export as JSON string"
+        parameters:
+          - name: resolve
+            type: bool
+            required: false
+            default: true
+          - name: redact
+            type: bool
+            required: false
+            default: false
+        returns: string
+
+  Schema:
+    description: "JSON Schema validation"
+    static_methods:
+      - name: from_yaml
+        description: "Parse schema from YAML string"
+        parameters:
+          - name: yaml
+            type: string
+            required: true
+      - name: from_json
+        description: "Parse schema from JSON string"
+        parameters:
+          - name: json
+            type: string
+            required: true
+      - name: load
+        description: "Load schema from file"
+        parameters:
+          - name: path
+            type: string
+            required: true
+
+# Required exception types (per ADR-008)
+exceptions:
+  - name: HoloconfError
+    description: "Base exception for all holoconf errors"
+    parent: null  # Language's base exception
+  - name: ParseError
+    description: "YAML/JSON syntax error"
+    parent: HoloconfError
+  - name: ValidationError
+    description: "Schema validation failure"
+    parent: HoloconfError
+  - name: ResolverError
+    description: "Resolution failure (missing env var, etc.)"
+    parent: HoloconfError
+  - name: PathNotFoundError
+    description: "Config path doesn't exist"
+    parent: HoloconfError
+  - name: CircularReferenceError
+    description: "Circular reference detected"
+    parent: HoloconfError
+  - name: TypeCoercionError
+    description: "Type conversion failure"
+    parent: HoloconfError
+
+# Test cases to verify API works correctly
+tests:
+  - name: config_loads_basic
+    description: "Config.loads() parses YAML"
+    test: |
+      config = Config.loads("key: value")
+      assert config.get("key") == "value"
+
+  - name: config_get_raw_preserves_interpolation
+    description: "get_raw() returns unresolved value"
+    test: |
+      config = Config.loads("port: ${env:PORT}")
+      assert config.get_raw("port") == "${env:PORT}"
+
+  - name: config_allow_http_disabled_by_default
+    description: "HTTP resolver disabled by default"
+    test: |
+      config = Config.loads("url: ${http:https://example.com}")
+      expect_error(ResolverError, lambda: config.get("url"))
+
+  - name: exception_hierarchy
+    description: "All exceptions inherit from HoloconfError"
+    test: |
+      for exc in [ParseError, ValidationError, ResolverError, PathNotFoundError, CircularReferenceError, TypeCoercionError]:
+        assert is_subclass(exc, HoloconfError)
+
+  - name: schema_validation
+    description: "Schema validates config"
+    test: |
+      schema = Schema.from_yaml("""
+        type: object
+        properties:
+          port:
+            type: integer
+        required: [port]
+      """)
+      config = Config.loads("port: 8080")
+      config.validate(schema)  # Should not raise
+
+  - name: serialization_redact
+    description: "to_yaml(redact=True) masks sensitive values"
+    test: |
+      config = Config.loads("password: ${env:SECRET}")
+      # Set SECRET env var first
+      yaml_output = config.to_yaml(redact=true)
+      assert "[REDACTED]" in yaml_output or sensitive value is masked

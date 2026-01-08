@@ -267,15 +267,67 @@ impl Config {
         self.resolve_value_to_value(&self.raw, "")
     }
 
+    /// Export the raw (unresolved) configuration as a Value
+    ///
+    /// This shows the configuration with interpolation placeholders (${...})
+    pub fn to_value_raw(&self) -> Value {
+        (*self.raw).clone()
+    }
+
+    /// Export the resolved configuration with optional redaction
+    ///
+    /// When redact=true, sensitive values are replaced with "[REDACTED]"
+    pub fn to_value_redacted(&self, redact: bool) -> Result<Value> {
+        if redact {
+            self.resolve_value_to_value_redacted(&self.raw, "")
+        } else {
+            self.resolve_value_to_value(&self.raw, "")
+        }
+    }
+
     /// Export the configuration as YAML
+    ///
+    /// By default, resolves all values. Use to_yaml_raw() for unresolved output.
     pub fn to_yaml(&self) -> Result<String> {
         let value = self.to_value()?;
         serde_yaml::to_string(&value).map_err(|e| Error::parse(e.to_string()))
     }
 
+    /// Export the raw (unresolved) configuration as YAML
+    ///
+    /// Shows interpolation placeholders (${...}) without resolution.
+    pub fn to_yaml_raw(&self) -> Result<String> {
+        serde_yaml::to_string(&*self.raw).map_err(|e| Error::parse(e.to_string()))
+    }
+
+    /// Export the resolved configuration as YAML with optional redaction
+    ///
+    /// When redact=true, sensitive values are replaced with "[REDACTED]"
+    pub fn to_yaml_redacted(&self, redact: bool) -> Result<String> {
+        let value = self.to_value_redacted(redact)?;
+        serde_yaml::to_string(&value).map_err(|e| Error::parse(e.to_string()))
+    }
+
     /// Export the configuration as JSON
+    ///
+    /// By default, resolves all values. Use to_json_raw() for unresolved output.
     pub fn to_json(&self) -> Result<String> {
         let value = self.to_value()?;
+        serde_json::to_string_pretty(&value).map_err(|e| Error::parse(e.to_string()))
+    }
+
+    /// Export the raw (unresolved) configuration as JSON
+    ///
+    /// Shows interpolation placeholders (${...}) without resolution.
+    pub fn to_json_raw(&self) -> Result<String> {
+        serde_json::to_string_pretty(&*self.raw).map_err(|e| Error::parse(e.to_string()))
+    }
+
+    /// Export the resolved configuration as JSON with optional redaction
+    ///
+    /// When redact=true, sensitive values are replaced with "[REDACTED]"
+    pub fn to_json_redacted(&self, redact: bool) -> Result<String> {
+        let value = self.to_value_redacted(redact)?;
         serde_json::to_string_pretty(&value).map_err(|e| Error::parse(e.to_string()))
     }
 
@@ -291,6 +343,37 @@ impl Config {
         // This is safe because we're the only owner at this point
         if let Some(registry) = Arc::get_mut(&mut self.resolvers) {
             registry.register(resolver);
+        }
+    }
+
+    /// Validate the raw (unresolved) configuration against a schema
+    ///
+    /// This performs structural validation (Phase 1 per ADR-007):
+    /// - Required keys are present
+    /// - Object/array structure matches
+    /// - Interpolations (${...}) are allowed as placeholders
+    pub fn validate_raw(&self, schema: &crate::schema::Schema) -> Result<()> {
+        schema.validate(&self.raw)
+    }
+
+    /// Validate the resolved configuration against a schema
+    ///
+    /// This performs type/value validation (Phase 2 per ADR-007):
+    /// - Resolved values match expected types
+    /// - Constraints (min, max, pattern, enum) are checked
+    pub fn validate(&self, schema: &crate::schema::Schema) -> Result<()> {
+        let resolved = self.to_value()?;
+        schema.validate(&resolved)
+    }
+
+    /// Validate and collect all errors (instead of failing on first)
+    pub fn validate_collect(&self, schema: &crate::schema::Schema) -> Vec<crate::schema::ValidationError> {
+        match self.to_value() {
+            Ok(resolved) => schema.validate_collect(&resolved),
+            Err(e) => vec![crate::schema::ValidationError {
+                path: String::new(),
+                message: e.to_string(),
+            }],
         }
     }
 
@@ -510,6 +593,51 @@ impl Config {
                         format!("{}.{}", path, key)
                     };
                     resolved.insert(key.clone(), self.resolve_value_to_value(val, &key_path)?);
+                }
+                Ok(Value::Mapping(resolved))
+            }
+            _ => Ok(value.clone()),
+        }
+    }
+
+    /// Resolve a value tree to a new Value with sensitive value redaction
+    fn resolve_value_to_value_redacted(&self, value: &Value, path: &str) -> Result<Value> {
+        const REDACTED: &str = "[REDACTED]";
+
+        match value {
+            Value::String(s) => {
+                if interpolation::needs_processing(s) {
+                    let parsed = interpolation::parse(s)?;
+                    let resolved = self.resolve_interpolation(&parsed, path)?;
+                    if resolved.sensitive {
+                        Ok(Value::String(REDACTED.to_string()))
+                    } else {
+                        Ok(resolved.value)
+                    }
+                } else {
+                    Ok(value.clone())
+                }
+            }
+            Value::Sequence(seq) => {
+                let resolved: Result<Vec<Value>> = seq
+                    .iter()
+                    .enumerate()
+                    .map(|(i, item)| {
+                        let item_path = format!("{}[{}]", path, i);
+                        self.resolve_value_to_value_redacted(item, &item_path)
+                    })
+                    .collect();
+                Ok(Value::Sequence(resolved?))
+            }
+            Value::Mapping(map) => {
+                let mut resolved = indexmap::IndexMap::new();
+                for (key, val) in map {
+                    let key_path = if path.is_empty() {
+                        key.clone()
+                    } else {
+                        format!("{}.{}", path, key)
+                    };
+                    resolved.insert(key.clone(), self.resolve_value_to_value_redacted(val, &key_path)?);
                 }
                 Ok(Value::Mapping(resolved))
             }
@@ -777,5 +905,60 @@ host: ${env:UNDEFINED_HOST,${env:HOLOCONF_DEFAULT_HOST}}
         );
 
         std::env::remove_var("HOLOCONF_DEFAULT_HOST");
+    }
+
+    #[test]
+    fn test_to_yaml_raw() {
+        let yaml = r#"
+server:
+  host: ${env:MY_HOST}
+  port: 8080
+"#;
+        let config = Config::from_yaml(yaml).unwrap();
+
+        let raw = config.to_yaml_raw().unwrap();
+        // Should contain the placeholder, not a resolved value
+        assert!(raw.contains("${env:MY_HOST}"));
+        assert!(raw.contains("8080"));
+    }
+
+    #[test]
+    fn test_to_json_raw() {
+        let yaml = r#"
+database:
+  url: ${env:DATABASE_URL}
+"#;
+        let config = Config::from_yaml(yaml).unwrap();
+
+        let raw = config.to_json_raw().unwrap();
+        // Should contain the placeholder
+        assert!(raw.contains("${env:DATABASE_URL}"));
+    }
+
+    #[test]
+    fn test_to_value_raw() {
+        let yaml = r#"
+key: ${env:SOME_VAR}
+"#;
+        let config = Config::from_yaml(yaml).unwrap();
+
+        let raw = config.to_value_raw();
+        assert_eq!(raw.get_path("key").unwrap().as_str(), Some("${env:SOME_VAR}"));
+    }
+
+    #[test]
+    fn test_to_yaml_redacted_no_sensitive() {
+        std::env::set_var("HOLOCONF_NON_SENSITIVE", "public-value");
+
+        let yaml = r#"
+value: ${env:HOLOCONF_NON_SENSITIVE}
+"#;
+        let config = Config::from_yaml(yaml).unwrap();
+
+        // With redact=true, but no sensitive values, should show real values
+        let output = config.to_yaml_redacted(true).unwrap();
+        assert!(output.contains("public-value"));
+
+        std::env::remove_var("HOLOCONF_NON_SENSITIVE");
     }
 }

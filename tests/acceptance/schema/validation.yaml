@@ -1,0 +1,265 @@
+suite: schema_validation
+description: JSON Schema validation behavior
+
+tests:
+  - name: validates_valid_config
+    given:
+      config: |
+        name: myapp
+        port: 8080
+      schema: |
+        type: object
+        properties:
+          name:
+            type: string
+          port:
+            type: integer
+    when:
+      validate: true
+    then:
+      valid: true
+
+  - name: rejects_missing_required_field
+    given:
+      config: |
+        port: 8080
+      schema: |
+        type: object
+        required:
+          - name
+        properties:
+          name:
+            type: string
+          port:
+            type: integer
+    when:
+      validate: true
+    then:
+      valid: false
+      error:
+        message_contains: "name"
+
+  - name: rejects_wrong_type
+    given:
+      config: |
+        name: myapp
+        port: "not-a-number"
+      schema: |
+        type: object
+        properties:
+          name:
+            type: string
+          port:
+            type: integer
+    when:
+      validate: true
+    then:
+      valid: false
+      error:
+        message_contains: "port"
+
+  - name: validates_nested_objects
+    given:
+      config: |
+        database:
+          host: localhost
+          port: 5432
+      schema: |
+        type: object
+        properties:
+          database:
+            type: object
+            required:
+              - host
+            properties:
+              host:
+                type: string
+              port:
+                type: integer
+    when:
+      validate: true
+    then:
+      valid: true
+
+  - name: rejects_missing_nested_required
+    given:
+      config: |
+        database:
+          port: 5432
+      schema: |
+        type: object
+        properties:
+          database:
+            type: object
+            required:
+              - host
+            properties:
+              host:
+                type: string
+              port:
+                type: integer
+    when:
+      validate: true
+    then:
+      valid: false
+      error:
+        message_contains: "host"
+
+  - name: validates_enum_values
+    given:
+      config: |
+        log_level: info
+      schema: |
+        type: object
+        properties:
+          log_level:
+            type: string
+            enum: [debug, info, warn, error]
+    when:
+      validate: true
+    then:
+      valid: true
+
+  - name: rejects_invalid_enum_value
+    given:
+      config: |
+        log_level: verbose
+      schema: |
+        type: object
+        properties:
+          log_level:
+            type: string
+            enum: [debug, info, warn, error]
+    when:
+      validate: true
+    then:
+      valid: false
+
+  - name: validates_integer_constraints
+    given:
+      config: |
+        port: 8080
+      schema: |
+        type: object
+        properties:
+          port:
+            type: integer
+            minimum: 1
+            maximum: 65535
+    when:
+      validate: true
+    then:
+      valid: true
+
+  - name: rejects_integer_out_of_range
+    given:
+      config: |
+        port: 70000
+      schema: |
+        type: object
+        properties:
+          port:
+            type: integer
+            minimum: 1
+            maximum: 65535
+    when:
+      validate: true
+    then:
+      valid: false
+
+  - name: validates_arrays
+    given:
+      config: |
+        servers:
+          - server1
+          - server2
+      schema: |
+        type: object
+        properties:
+          servers:
+            type: array
+            items:
+              type: string
+    when:
+      validate: true
+    then:
+      valid: true
+
+  - name: rejects_array_with_wrong_item_type
+    given:
+      config: |
+        servers:
+          - server1
+          - 123
+      schema: |
+        type: object
+        properties:
+          servers:
+            type: array
+            items:
+              type: string
+    when:
+      validate: true
+    then:
+      valid: false
+
+  - name: validates_string_pattern
+    given:
+      config: |
+        version: "1.2.3"
+      schema: |
+        type: object
+        properties:
+          version:
+            type: string
+            pattern: "^\\d+\\.\\d+\\.\\d+$"
+    when:
+      validate: true
+    then:
+      valid: true
+
+  - name: rejects_string_not_matching_pattern
+    given:
+      config: |
+        version: "v1.2"
+      schema: |
+        type: object
+        properties:
+          version:
+            type: string
+            pattern: "^\\d+\\.\\d+\\.\\d+$"
+    when:
+      validate: true
+    then:
+      valid: false
+
+  - name: allows_additional_properties_by_default
+    given:
+      config: |
+        name: myapp
+        extra: allowed
+      schema: |
+        type: object
+        properties:
+          name:
+            type: string
+    when:
+      validate: true
+    then:
+      valid: true
+
+  - name: rejects_additional_properties_when_denied
+    given:
+      config: |
+        name: myapp
+        extra: not allowed
+      schema: |
+        type: object
+        additionalProperties: false
+        properties:
+          name:
+            type: string
+    when:
+      validate: true
+    then:
+      valid: false

@@ -202,12 +202,14 @@ impl ResolverRegistry {
         registry
     }
 
-    /// Register the built-in resolvers (env, file, etc.)
+    /// Register the built-in resolvers (env, file, http)
     fn register_builtin_resolvers(&mut self) {
         // Environment variable resolver
         self.register(Arc::new(FnResolver::new("env", env_resolver)));
         // File resolver
         self.register(Arc::new(FnResolver::new("file", file_resolver)));
+        // HTTP resolver (disabled by default for security)
+        self.register(Arc::new(FnResolver::new("http", http_resolver)));
     }
 
     /// Register a resolver
@@ -342,6 +344,41 @@ fn file_resolver(
             Ok(ResolvedValue::new(Value::String(content)))
         }
     }
+}
+
+/// Built-in HTTP resolver
+///
+/// This resolver is registered but disabled by default for security.
+/// To enable HTTP resolution, set allow_http=true in ConfigOptions.
+///
+/// When the `http` feature is not enabled, this always returns an error.
+fn http_resolver(
+    args: &[String],
+    _kwargs: &HashMap<String, String>,
+    ctx: &ResolverContext,
+) -> Result<ResolvedValue> {
+    if args.is_empty() {
+        return Err(Error::parse("http resolver requires a URL")
+            .with_path(ctx.config_path.clone()));
+    }
+
+    let url = &args[0];
+
+    // The http resolver is always disabled by default for security
+    // Users must enable it explicitly via ConfigOptions.allow_http
+    // This is just a placeholder that always returns an error
+    // The actual HTTP fetching is done in the Config when allow_http is true
+
+    Err(Error {
+        kind: crate::error::ErrorKind::Resolver(crate::error::ResolverErrorKind::HttpDisabled),
+        path: Some(ctx.config_path.clone()),
+        source_location: None,
+        help: Some(format!(
+            "Enable HTTP resolver with Config.load(..., allow_http=True)\nURL: {}",
+            url
+        )),
+        cause: None,
+    })
 }
 
 #[cfg(test)]
@@ -506,5 +543,25 @@ mod tests {
     fn test_registry_with_file() {
         let registry = ResolverRegistry::with_builtins();
         assert!(registry.contains("file"));
+    }
+
+    #[test]
+    fn test_http_resolver_disabled() {
+        let ctx = ResolverContext::new("test.path");
+        let args = vec!["https://example.com/config.yaml".to_string()];
+        let kwargs = HashMap::new();
+
+        let result = http_resolver(&args, &kwargs, &ctx);
+        assert!(result.is_err());
+
+        let err = result.unwrap_err();
+        let display = format!("{}", err);
+        assert!(display.contains("HTTP resolver is disabled"));
+    }
+
+    #[test]
+    fn test_registry_with_http() {
+        let registry = ResolverRegistry::with_builtins();
+        assert!(registry.contains("http"));
     }
 }

@@ -1,0 +1,13 @@
+suite: http_resolver
+description: HTTP resolver behavior (disabled by default for security)
+
+tests:
+  - name: http_resolver_disabled_by_default
+    given:
+      config: |
+        remote: ${http:https://example.com/config.yaml}
+    when:
+      access: remote
+    then:
+      error:
+        message_contains: "HTTP resolver is disabled"

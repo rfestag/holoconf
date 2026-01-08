@@ -21,6 +21,7 @@
 pub mod error;
 pub mod interpolation;
 pub mod resolver;
+pub mod schema;
 pub mod value;
 
 mod config;
@@ -28,4 +29,5 @@ mod config;
 pub use config::{Config, ConfigOptions};
 pub use error::{Error, Result};
 pub use resolver::{ResolvedValue, Resolver, ResolverRegistry};
+pub use schema::Schema;
 pub use value::Value;

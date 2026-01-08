@@ -1,0 +1,87 @@
+suite: serialization_export
+description: Configuration serialization and export behavior
+
+tests:
+  - name: to_yaml_resolved
+    given:
+      env:
+        HOLOCONF_EXPORT_HOST: "resolved-host"
+      config: |
+        server:
+          host: ${env:HOLOCONF_EXPORT_HOST}
+          port: 8080
+    when:
+      export: yaml
+      resolve: true
+    then:
+      contains:
+        - "resolved-host"
+        - "8080"
+      not_contains:
+        - "${env:"
+
+  - name: to_yaml_raw
+    given:
+      config: |
+        server:
+          host: ${env:SOME_HOST}
+          port: 8080
+    when:
+      export: yaml
+      resolve: false
+    then:
+      contains:
+        - "${env:SOME_HOST}"
+        - "8080"
+
+  - name: to_json_resolved
+    given:
+      env:
+        HOLOCONF_JSON_VAR: "json-value"
+      config: |
+        data:
+          value: ${env:HOLOCONF_JSON_VAR}
+    when:
+      export: json
+      resolve: true
+    then:
+      contains:
+        - "json-value"
+      not_contains:
+        - "${env:"
+
+  - name: to_json_raw
+    given:
+      config: |
+        data:
+          value: ${env:UNRESOLVED_VAR}
+    when:
+      export: json
+      resolve: false
+    then:
+      contains:
+        - "${env:UNRESOLVED_VAR}"
+
+  - name: to_dict_resolved
+    given:
+      env:
+        HOLOCONF_DICT_VALUE: "dict-result"
+      config: |
+        key: ${env:HOLOCONF_DICT_VALUE}
+    when:
+      export: dict
+      resolve: true
+      access: key
+    then:
+      value: "dict-result"
+
+  - name: to_dict_raw
+    given:
+      config: |
+        key: ${env:RAW_VAR}
+    when:
+      export: dict
+      resolve: false
+      access: key
+    then:
+      value: "${env:RAW_VAR}"

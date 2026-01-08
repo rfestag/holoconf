@@ -188,6 +188,18 @@ impl Error {
         }
     }
 
+    /// Create a validation error
+    pub fn validation(path: impl Into<String>, message: impl Into<String>) -> Self {
+        let p = path.into();
+        Self {
+            kind: ErrorKind::Validation,
+            path: if p.is_empty() || p == "<root>" { None } else { Some(p) },
+            source_location: None,
+            help: Some("Fix the value to match the schema requirements".into()),
+            cause: Some(message.into()),
+        }
+    }
+
     /// Add path context to the error
     pub fn with_path(mut self, path: impl Into<String>) -> Self {
         self.path = Some(path.into());
