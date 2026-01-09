@@ -1,19 +1,20 @@
 //! Configuration value types
 //!
 //! Represents parsed configuration values before resolution.
-//! Values can be scalars (string, int, float, bool, null),
+//! Values can be scalars (string, int, float, bool, null, bytes),
 //! sequences (arrays), or mappings (objects).
 
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use indexmap::IndexMap;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
 
 use crate::error::{Error, Result};
 
 /// A configuration value that may contain unresolved interpolations
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(untagged)]
-#[derive(Default)]
+///
+/// The `Bytes` variant stores raw binary data and serializes to base64 in YAML/JSON.
+#[derive(Debug, Clone, PartialEq, Default)]
 pub enum Value {
     /// Null value
     #[default]
@@ -26,10 +27,67 @@ pub enum Value {
     Float(f64),
     /// String value (may contain interpolations like ${env:VAR})
     String(String),
+    /// Binary data (serializes to base64)
+    Bytes(Vec<u8>),
     /// Sequence of values
     Sequence(Vec<Value>),
     /// Mapping of string keys to values
     Mapping(IndexMap<String, Value>),
+}
+
+// Custom Serialize implementation to handle Bytes as base64
+impl Serialize for Value {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            Value::Null => serializer.serialize_none(),
+            Value::Bool(b) => serializer.serialize_bool(*b),
+            Value::Integer(i) => serializer.serialize_i64(*i),
+            Value::Float(f) => serializer.serialize_f64(*f),
+            Value::String(s) => serializer.serialize_str(s),
+            Value::Bytes(bytes) => {
+                // Serialize bytes as base64-encoded string
+                let encoded = STANDARD.encode(bytes);
+                serializer.serialize_str(&encoded)
+            }
+            Value::Sequence(seq) => seq.serialize(serializer),
+            Value::Mapping(map) => map.serialize(serializer),
+        }
+    }
+}
+
+// Custom Deserialize implementation (Bytes won't come from YAML/JSON directly)
+impl<'de> Deserialize<'de> for Value {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        // Use an untagged enum approach for deserialization
+        // Bytes are never deserialized from YAML/JSON - they come from file resolver
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum ValueHelper {
+            Null,
+            Bool(bool),
+            Integer(i64),
+            Float(f64),
+            String(String),
+            Sequence(Vec<Value>),
+            Mapping(IndexMap<String, Value>),
+        }
+
+        match ValueHelper::deserialize(deserializer)? {
+            ValueHelper::Null => Ok(Value::Null),
+            ValueHelper::Bool(b) => Ok(Value::Bool(b)),
+            ValueHelper::Integer(i) => Ok(Value::Integer(i)),
+            ValueHelper::Float(f) => Ok(Value::Float(f)),
+            ValueHelper::String(s) => Ok(Value::String(s)),
+            ValueHelper::Sequence(seq) => Ok(Value::Sequence(seq)),
+            ValueHelper::Mapping(map) => Ok(Value::Mapping(map)),
+        }
+    }
 }
 
 impl Value {
@@ -66,6 +124,11 @@ impl Value {
     /// Check if this value is a mapping
     pub fn is_mapping(&self) -> bool {
         matches!(self, Value::Mapping(_))
+    }
+
+    /// Check if this value is bytes
+    pub fn is_bytes(&self) -> bool {
+        matches!(self, Value::Bytes(_))
     }
 
     /// Get as boolean if this is a Bool
@@ -113,6 +176,14 @@ impl Value {
     pub fn as_mapping(&self) -> Option<&IndexMap<String, Value>> {
         match self {
             Value::Mapping(m) => Some(m),
+            _ => None,
+        }
+    }
+
+    /// Get as bytes if this is Bytes
+    pub fn as_bytes(&self) -> Option<&[u8]> {
+        match self {
+            Value::Bytes(b) => Some(b),
             _ => None,
         }
     }
@@ -254,6 +325,7 @@ impl Value {
             Value::Integer(_) => "integer",
             Value::Float(_) => "float",
             Value::String(_) => "string",
+            Value::Bytes(_) => "bytes",
             Value::Sequence(_) => "sequence",
             Value::Mapping(_) => "mapping",
         }
@@ -296,6 +368,115 @@ impl Value {
         self.merge(other);
         self
     }
+
+    /// Merge another value into this one while tracking source files
+    ///
+    /// Like `merge()`, but also records which file each leaf value came from.
+    /// The `sources` map is updated to reflect the final source of each path.
+    pub fn merge_tracking_sources(
+        &mut self,
+        other: Value,
+        source: &str,
+        path_prefix: &str,
+        sources: &mut std::collections::HashMap<String, String>,
+    ) {
+        match (self, other) {
+            // Both are mappings: deep merge
+            (Value::Mapping(base), Value::Mapping(overlay)) => {
+                for (key, overlay_value) in overlay {
+                    let full_path = if path_prefix.is_empty() {
+                        key.clone()
+                    } else {
+                        format!("{}.{}", path_prefix, key)
+                    };
+
+                    if overlay_value.is_null() {
+                        // Null removes the key - remove from sources too
+                        base.shift_remove(&key);
+                        remove_sources_with_prefix(sources, &full_path);
+                    } else if let Some(base_value) = base.get_mut(&key) {
+                        // Key exists in both: recursive merge
+                        base_value.merge_tracking_sources(
+                            overlay_value,
+                            source,
+                            &full_path,
+                            sources,
+                        );
+                    } else {
+                        // Key only in overlay: add it and record all its leaf paths
+                        collect_leaf_paths(&overlay_value, &full_path, source, sources);
+                        base.insert(key, overlay_value);
+                    }
+                }
+            }
+            // Any other combination: overlay wins (replacement)
+            (this, other) => {
+                // Remove old sources for this path prefix
+                remove_sources_with_prefix(sources, path_prefix);
+                // Record new leaf paths from the replacement value
+                collect_leaf_paths(&other, path_prefix, source, sources);
+                *this = other;
+            }
+        }
+    }
+
+    /// Collect all leaf paths from this value and record their source
+    pub fn collect_leaf_paths(
+        &self,
+        path_prefix: &str,
+        source: &str,
+        sources: &mut std::collections::HashMap<String, String>,
+    ) {
+        collect_leaf_paths(self, path_prefix, source, sources);
+    }
+}
+
+/// Collect all leaf paths from a value and record their source file
+fn collect_leaf_paths(
+    value: &Value,
+    path_prefix: &str,
+    source: &str,
+    sources: &mut std::collections::HashMap<String, String>,
+) {
+    match value {
+        Value::Mapping(map) => {
+            for (key, val) in map {
+                let full_path = if path_prefix.is_empty() {
+                    key.clone()
+                } else {
+                    format!("{}.{}", path_prefix, key)
+                };
+                collect_leaf_paths(val, &full_path, source, sources);
+            }
+        }
+        Value::Sequence(seq) => {
+            for (i, val) in seq.iter().enumerate() {
+                let full_path = format!("{}[{}]", path_prefix, i);
+                collect_leaf_paths(val, &full_path, source, sources);
+            }
+        }
+        // Leaf values: record the source
+        _ => {
+            if !path_prefix.is_empty() {
+                sources.insert(path_prefix.to_string(), source.to_string());
+            }
+        }
+    }
+}
+
+/// Remove all sources that start with the given prefix
+fn remove_sources_with_prefix(
+    sources: &mut std::collections::HashMap<String, String>,
+    prefix: &str,
+) {
+    if prefix.is_empty() {
+        sources.clear();
+        return;
+    }
+    // Remove exact match and any children (prefix. or prefix[)
+    sources.retain(|path, _| {
+        path != prefix && !path.starts_with(&format!("{}.", prefix)) && !path.starts_with(&format!("{}[", prefix))
+    });
 }
 
 impl fmt::Display for Value {
@@ -306,6 +487,7 @@ impl fmt::Display for Value {
             Value::Integer(i) => write!(f, "{}", i),
             Value::Float(n) => write!(f, "{}", n),
             Value::String(s) => write!(f, "{}", s),
+            Value::Bytes(bytes) => write!(f, "<bytes: {} bytes>", bytes.len()),
             Value::Sequence(seq) => {
                 write!(f, "[")?;
                 for (i, v) in seq.iter().enumerate() {
@@ -376,6 +558,12 @@ impl<T: Into<Value>> From<Vec<T>> for Value {
 impl From<IndexMap<String, Value>> for Value {
     fn from(m: IndexMap<String, Value>) -> Self {
         Value::Mapping(m)
+    }
+}
+
+impl From<Vec<u8>> for Value {
+    fn from(bytes: Vec<u8>) -> Self {
+        Value::Bytes(bytes)
     }
 }
 
@@ -1048,5 +1236,82 @@ mod tests {
         assert!(!integer.is_string());
         assert!(!integer.is_sequence());
         assert!(!integer.is_mapping());
+        assert!(!integer.is_bytes());
+    }
+
+    // Tests for Value::Bytes
+
+    #[test]
+    fn test_bytes_is_bytes() {
+        let bytes = Value::Bytes(vec![0x48, 0x65, 0x6c, 0x6c, 0x6f]); // "Hello"
+        assert!(bytes.is_bytes());
+        assert!(!bytes.is_string());
+        assert!(!bytes.is_null());
+    }
+
+    #[test]
+    fn test_bytes_as_bytes() {
+        let bytes = Value::Bytes(vec![1, 2, 3, 4, 5]);
+        assert_eq!(bytes.as_bytes(), Some(&[1u8, 2, 3, 4, 5][..]));
+    }
+
+    #[test]
+    fn test_bytes_as_bytes_non_bytes() {
+        assert!(Value::String("hello".into()).as_bytes().is_none());
+        assert!(Value::Integer(42).as_bytes().is_none());
+    }
+
+    #[test]
+    fn test_bytes_type_name() {
+        assert_eq!(Value::Bytes(vec![]).type_name(), "bytes");
+    }
+
+    #[test]
+    fn test_bytes_display() {
+        let bytes = Value::Bytes(vec![1, 2, 3, 4, 5]);
+        assert_eq!(format!("{}", bytes), "<bytes: 5 bytes>");
+
+        let empty = Value::Bytes(vec![]);
+        assert_eq!(format!("{}", empty), "<bytes: 0 bytes>");
+    }
+
+    #[test]
+    fn test_bytes_from_vec() {
+        let v: Value = vec![0x48u8, 0x65, 0x6c, 0x6c, 0x6f].into();
+        assert!(v.is_bytes());
+        assert_eq!(v.as_bytes(), Some(&[0x48u8, 0x65, 0x6c, 0x6c, 0x6f][..]));
+    }
+
+    #[test]
+    fn test_bytes_serialize_to_base64() {
+        let bytes = Value::Bytes(vec![0x48, 0x65, 0x6c, 0x6c, 0x6f]); // "Hello"
+        let yaml = serde_yaml::to_string(&bytes).unwrap();
+        // Base64 of "Hello" is "SGVsbG8="
+        assert!(yaml.contains("SGVsbG8="));
+    }
+
+    #[test]
+    fn test_bytes_serialize_empty() {
+        let bytes = Value::Bytes(vec![]);
+        let json = serde_json::to_string(&bytes).unwrap();
+        // Base64 of empty is ""
+        assert_eq!(json, "\"\"");
+    }
+
+    #[test]
+    fn test_bytes_equality() {
+        let a = Value::Bytes(vec![1, 2, 3]);
+        let b = Value::Bytes(vec![1, 2, 3]);
+        let c = Value::Bytes(vec![1, 2, 4]);
+
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+    }
+
+    #[test]
+    fn test_bytes_clone() {
+        let original = Value::Bytes(vec![1, 2, 3, 4, 5]);
+        let cloned = original.clone();
+        assert_eq!(original, cloned);
     }
 }

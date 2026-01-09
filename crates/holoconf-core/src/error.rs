@@ -221,6 +221,32 @@ impl Error {
         self.help = Some(help.into());
         self
     }
+
+    /// Create a custom resolver error
+    pub fn resolver_custom(resolver: impl Into<String>, message: impl Into<String>) -> Self {
+        let resolver_name = resolver.into();
+        Self {
+            kind: ErrorKind::Resolver(ResolverErrorKind::Custom {
+                resolver: resolver_name.clone(),
+                message: message.into(),
+            }),
+            path: None,
+            source_location: None,
+            help: Some(format!("Check the '{}' resolver implementation", resolver_name)),
+            cause: None,
+        }
+    }
+
+    /// Create an internal error (bug in holoconf)
+    pub fn internal(message: impl Into<String>) -> Self {
+        Self {
+            kind: ErrorKind::Internal,
+            path: None,
+            source_location: None,
+            help: Some("This is likely a bug in holoconf. Please report it.".into()),
+            cause: Some(message.into()),
+        }
+    }
 }
 
 impl fmt::Display for Error {

@@ -32,33 +32,28 @@ tests:
       error:
         message_contains: "Unexpected end of input"
 
-  # NOTE: Circular reference tests are disabled pending bug fix
-  # The current implementation does not properly detect transitive circular references
-  # and causes a stack overflow / segfault instead of returning an error
-  # See: config.rs resolve_interpolation - needs proper cycle tracking
+  - name: circular_reference_detected
+    given:
+      config: |
+        a: ${b}
+        b: ${a}
+    when:
+      access: a
+    then:
+      error:
+        message_contains: "circular"
 
-  # - name: circular_reference_detected
-  #   given:
-  #     config: |
-  #       a: ${b}
-  #       b: ${a}
-  #   when:
-  #     access: a
-  #   then:
-  #     error:
-  #       message_contains: "circular"
-
-  # - name: circular_reference_chain_detected
-  #   given:
-  #     config: |
-  #       first: ${second}
-  #       second: ${third}
-  #       third: ${first}
-  #   when:
-  #     access: first
-  #   then:
-  #     error:
-  #       message_contains: "circular"
+  - name: circular_reference_chain_detected
+    given:
+      config: |
+        first: ${second}
+        second: ${third}
+        third: ${first}
+    when:
+      access: first
+    then:
+      error:
+        message_contains: "circular"
 
   - name: missing_resolver_prefix
     given:

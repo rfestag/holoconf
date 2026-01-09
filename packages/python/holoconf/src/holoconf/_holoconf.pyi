@@ -185,17 +185,21 @@ class Config:
     def to_dict(self, resolve: bool = True, redact: bool = False) -> dict[str, Any]:
         """Export the configuration as a Python dict.
 
+        Binary data (from file resolver with encoding=binary) is returned as Python bytes objects.
+
         Args:
             resolve: If True (default), resolve all interpolations. If False, return raw values.
             redact: If True (default False), redact sensitive values with "[REDACTED]"
 
         Returns:
-            The configuration as a Python dictionary
+            The configuration as a Python dictionary. Values may include bytes objects.
         """
         ...
 
     def to_yaml(self, resolve: bool = True, redact: bool = False) -> str:
         """Export the configuration as YAML.
+
+        Binary data (from file resolver with encoding=binary) is serialized as base64 strings.
 
         Args:
             resolve: If True (default), resolve all interpolations. If False, return raw values.
@@ -208,6 +212,8 @@ class Config:
 
     def to_json(self, resolve: bool = True, redact: bool = False) -> str:
         """Export the configuration as JSON.
+
+        Binary data (from file resolver with encoding=binary) is serialized as base64 strings.
 
         Args:
             resolve: If True (default), resolve all interpolations. If False, return raw values.
@@ -245,6 +251,31 @@ class Config:
 
         Resolved values are cached for performance. Call this method to clear
         the cache, for example after environment variables have changed.
+        """
+        ...
+
+    def get_source(self, path: str) -> str | None:
+        """Get the source file for a config path.
+
+        Returns the filename of the config file that provided this value.
+        For merged configs, this returns the file that "won" for this path.
+
+        Args:
+            path: The config path (e.g., "database.host")
+
+        Returns:
+            The filename or None if source tracking is not available
+        """
+        ...
+
+    def dump_sources(self) -> dict[str, str]:
+        """Get all source mappings.
+
+        Returns a dict mapping config paths to their source filenames.
+        Useful for debugging which file each value came from.
+
+        Returns:
+            A dict of {path: filename} entries
         """
         ...
 

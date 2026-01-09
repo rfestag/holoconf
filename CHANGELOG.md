@@ -7,9 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+#### Source Tracking
+- **File-level source tracking** for merged configurations - track which file each value came from
+  - `config.get_source("path.to.value")` - Returns the filename that provided this value
+  - `config.dump_sources()` - Returns a map of all config paths to their source filenames
+  - Always enabled with low overhead (no opt-in required)
+- **CLI `--sources` flag** for `holoconf dump` - Output source files instead of values
+  - `holoconf dump --sources base.yaml override.yaml` - Shows which file each value came from
+  - Supports both text and JSON output formats
+
+#### CLI
+- `holoconf schema template` - Generate a YAML config template from a JSON Schema with defaults and required field markers
+
+#### File Resolver
+- Encoding options for the file resolver:
+  - `encoding=utf-8` (default) - Read file as UTF-8 text
+  - `encoding=ascii` - Read file as ASCII, stripping non-ASCII characters
+  - `encoding=base64` - Read file as binary and return base64-encoded string
+  - `encoding=binary` - Read file as binary and return raw bytes (`Value::Bytes`)
+
+#### Value System
+- Added `Value::Bytes` variant for native binary data support
+  - Serializes to base64 in YAML/JSON output
+  - Returns native Python `bytes` in `to_dict()`
+  - Accessible via `value.is_bytes()` and `value.as_bytes()` in Rust
+
+### Fixed
+
+- **Circular reference detection** - Fixed a critical bug where transitive circular references (e.g., A→B→C→A) caused a stack overflow/segfault instead of returning a proper error message. The resolution now correctly tracks the full resolution stack and detects cycles.
+
+### Tests
+
+- Added unit tests for source tracking (5 tests covering merged configs, single file, null removal, and array replacement)
+- Added unit tests for circular reference detection (4 tests covering direct, chain, self, and nested cycles)
+- Added unit tests for file resolver encoding options (4 tests)
+- Added unit tests for boolean coercion edge cases (case-insensitivity and invalid value rejection)
+- Added acceptance tests for file resolver encoding (3 tests)
+- Added acceptance test for sensitivity inheritance via self-references
+- Re-enabled previously disabled circular reference acceptance tests (2 tests)
+
 ## [0.1.3] - 2026-01-09
 
+No change, debugging release process
+
 ## [0.1.2] - 2026-01-08
+
+No change, debugging release process
 
 ### Added
 

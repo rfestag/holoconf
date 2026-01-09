@@ -310,6 +310,17 @@ fn env_resolver(
 }
 
 /// Built-in file resolver
+///
+/// Usage:
+///   ${file:path/to/file}                    - Read file as text (UTF-8)
+///   ${file:path/to/file,parse=yaml}         - Parse as YAML
+///   ${file:path/to/file,parse=json}         - Parse as JSON
+///   ${file:path/to/file,parse=text}         - Read as text (explicit)
+///   ${file:path/to/file,parse=auto}         - Auto-detect from extension (default)
+///   ${file:path/to/file,encoding=utf-8}     - UTF-8 encoding (default)
+///   ${file:path/to/file,encoding=ascii}     - ASCII encoding (strips non-ASCII)
+///   ${file:path/to/file,encoding=base64}    - Base64 encode the file contents as string
+///   ${file:path/to/file,encoding=binary}    - Return raw bytes as Value::Bytes
 fn file_resolver(
     args: &[String],
     kwargs: &HashMap<String, String>,
@@ -325,6 +336,7 @@ fn file_resolver(
 
     let file_path_str = &args[0];
     let parse_mode = kwargs.get("parse").map(|s| s.as_str()).unwrap_or("auto");
+    let encoding = kwargs.get("encoding").map(|s| s.as_str()).unwrap_or("utf-8");
 
     // Resolve relative paths based on context base path
     let file_path = if Path::new(file_path_str).is_relative() {
@@ -337,9 +349,39 @@ fn file_resolver(
         std::path::PathBuf::from(file_path_str)
     };
 
-    // Read the file
-    let content = std::fs::read_to_string(&file_path)
-        .map_err(|_| Error::file_not_found(file_path_str, Some(ctx.config_path.clone())))?;
+    // Handle binary encoding separately - returns Value::Bytes directly
+    if encoding == "binary" {
+        let bytes = std::fs::read(&file_path)
+            .map_err(|_| Error::file_not_found(file_path_str, Some(ctx.config_path.clone())))?;
+        return Ok(ResolvedValue::new(Value::Bytes(bytes)));
+    }
+
+    // Read the file based on encoding
+    let content = match encoding {
+        "base64" => {
+            // Read as binary and base64 encode
+            use base64::{Engine as _, engine::general_purpose::STANDARD};
+            let bytes = std::fs::read(&file_path)
+                .map_err(|_| Error::file_not_found(file_path_str, Some(ctx.config_path.clone())))?;
+            STANDARD.encode(bytes)
+        }
+        "ascii" => {
+            // Read as UTF-8 but strip non-ASCII characters
+            let raw = std::fs::read_to_string(&file_path)
+                .map_err(|_| Error::file_not_found(file_path_str, Some(ctx.config_path.clone())))?;
+            raw.chars().filter(|c| c.is_ascii()).collect()
+        }
+        _ => {
+            // Default to UTF-8 (including explicit "utf-8")
+            std::fs::read_to_string(&file_path)
+                .map_err(|_| Error::file_not_found(file_path_str, Some(ctx.config_path.clone())))?
+        }
+    };
+
+    // For base64 encoding, always return as text (don't try to parse)
+    if encoding == "base64" {
+        return Ok(ResolvedValue::new(Value::String(content)));
+    }
 
     // Determine parse mode
     let actual_parse_mode = if parse_mode == "auto" {
@@ -891,6 +933,181 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("plain text content"));
+
+        // Cleanup
+        std::fs::remove_file(test_file).ok();
+    }
+
+    #[test]
+    fn test_file_resolver_encoding_utf8() {
+        use std::io::Write;
+
+        // Create a temporary file with UTF-8 content including non-ASCII
+        let temp_dir = std::env::temp_dir();
+        let test_file = temp_dir.join("holoconf_utf8.txt");
+        {
+            let mut file = std::fs::File::create(&test_file).unwrap();
+            writeln!(file, "Hello, 世界! 🌍").unwrap();
+        }
+
+        let mut ctx = ResolverContext::new("test.path");
+        ctx.base_path = Some(temp_dir.clone());
+
+        let args = vec!["holoconf_utf8.txt".to_string()];
+        let mut kwargs = HashMap::new();
+        kwargs.insert("encoding".to_string(), "utf-8".to_string());
+
+        let result = file_resolver(&args, &kwargs, &ctx).unwrap();
+        let content = result.value.as_str().unwrap();
+        assert!(content.contains("世界"));
+        assert!(content.contains("🌍"));
+
+        // Cleanup
+        std::fs::remove_file(test_file).ok();
+    }
+
+    #[test]
+    fn test_file_resolver_encoding_ascii() {
+        use std::io::Write;
+
+        // Create a temporary file with mixed ASCII and non-ASCII content
+        let temp_dir = std::env::temp_dir();
+        let test_file = temp_dir.join("holoconf_ascii.txt");
+        {
+            let mut file = std::fs::File::create(&test_file).unwrap();
+            writeln!(file, "Hello, 世界! Welcome").unwrap();
+        }
+
+        let mut ctx = ResolverContext::new("test.path");
+        ctx.base_path = Some(temp_dir.clone());
+
+        let args = vec!["holoconf_ascii.txt".to_string()];
+        let mut kwargs = HashMap::new();
+        kwargs.insert("encoding".to_string(), "ascii".to_string());
+
+        let result = file_resolver(&args, &kwargs, &ctx).unwrap();
+        let content = result.value.as_str().unwrap();
+        // ASCII mode should strip non-ASCII characters
+        assert!(content.contains("Hello"));
+        assert!(content.contains("Welcome"));
+        assert!(!content.contains("世界"));
+
+        // Cleanup
+        std::fs::remove_file(test_file).ok();
+    }
+
+    #[test]
+    fn test_file_resolver_encoding_base64() {
+        use std::io::Write;
+
+        // Create a temporary file with binary content
+        let temp_dir = std::env::temp_dir();
+        let test_file = temp_dir.join("holoconf_binary.bin");
+        {
+            let mut file = std::fs::File::create(&test_file).unwrap();
+            // Write some bytes that include non-UTF8 sequences
+            file.write_all(b"Hello\x00\x01\x02World").unwrap();
+        }
+
+        let mut ctx = ResolverContext::new("test.path");
+        ctx.base_path = Some(temp_dir.clone());
+
+        let args = vec!["holoconf_binary.bin".to_string()];
+        let mut kwargs = HashMap::new();
+        kwargs.insert("encoding".to_string(), "base64".to_string());
+
+        let result = file_resolver(&args, &kwargs, &ctx).unwrap();
+        let content = result.value.as_str().unwrap();
+
+        // Verify the base64 encoding is correct
+        use base64::{Engine as _, engine::general_purpose::STANDARD};
+        let expected = STANDARD.encode(b"Hello\x00\x01\x02World");
+        assert_eq!(content, expected);
+
+        // Cleanup
+        std::fs::remove_file(test_file).ok();
+    }
+
+    #[test]
+    fn test_file_resolver_encoding_default_is_utf8() {
+        use std::io::Write;
+
+        // Create a temporary file with UTF-8 content
+        let temp_dir = std::env::temp_dir();
+        let test_file = temp_dir.join("holoconf_default_enc.txt");
+        {
+            let mut file = std::fs::File::create(&test_file).unwrap();
+            writeln!(file, "café résumé").unwrap();
+        }
+
+        let mut ctx = ResolverContext::new("test.path");
+        ctx.base_path = Some(temp_dir.clone());
+
+        let args = vec!["holoconf_default_enc.txt".to_string()];
+        let kwargs = HashMap::new(); // No encoding specified
+
+        let result = file_resolver(&args, &kwargs, &ctx).unwrap();
+        let content = result.value.as_str().unwrap();
+        // Default encoding should be UTF-8, preserving accents
+        assert!(content.contains("café"));
+        assert!(content.contains("résumé"));
+
+        // Cleanup
+        std::fs::remove_file(test_file).ok();
+    }
+
+    #[test]
+    fn test_file_resolver_encoding_binary() {
+        use std::io::Write;
+
+        // Create a temporary file with binary content
+        let temp_dir = std::env::temp_dir();
+        let test_file = temp_dir.join("holoconf_binary_bytes.bin");
+        let binary_data: Vec<u8> = vec![0x48, 0x65, 0x6c, 0x6c, 0x6f, 0x00, 0x01, 0x02, 0xFF, 0xFE];
+        {
+            let mut file = std::fs::File::create(&test_file).unwrap();
+            file.write_all(&binary_data).unwrap();
+        }
+
+        let mut ctx = ResolverContext::new("test.path");
+        ctx.base_path = Some(temp_dir.clone());
+
+        let args = vec!["holoconf_binary_bytes.bin".to_string()];
+        let mut kwargs = HashMap::new();
+        kwargs.insert("encoding".to_string(), "binary".to_string());
+
+        let result = file_resolver(&args, &kwargs, &ctx).unwrap();
+
+        // Verify we get Value::Bytes back
+        assert!(result.value.is_bytes());
+        assert_eq!(result.value.as_bytes().unwrap(), &binary_data);
+
+        // Cleanup
+        std::fs::remove_file(test_file).ok();
+    }
+
+    #[test]
+    fn test_file_resolver_encoding_binary_empty() {
+        // Create an empty file
+        let temp_dir = std::env::temp_dir();
+        let test_file = temp_dir.join("holoconf_binary_empty.bin");
+        {
+            std::fs::File::create(&test_file).unwrap();
+        }
+
+        let mut ctx = ResolverContext::new("test.path");
+        ctx.base_path = Some(temp_dir.clone());
+
+        let args = vec!["holoconf_binary_empty.bin".to_string()];
+        let mut kwargs = HashMap::new();
+        kwargs.insert("encoding".to_string(), "binary".to_string());
+
+        let result = file_resolver(&args, &kwargs, &ctx).unwrap();
+
+        // Verify we get empty Value::Bytes
+        assert!(result.value.is_bytes());
+        let empty: &[u8] = &[];
+        assert_eq!(result.value.as_bytes().unwrap(), empty);
 
         // Cleanup
         std::fs::remove_file(test_file).ok();

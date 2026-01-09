@@ -25,6 +25,7 @@ thiserror = "2.0"
 indexmap = { version = "2.0", features = ["serde"] }
 jsonschema = "0.29"
 regex = "1.11"
+base64 = "0.22"
 
 # Async
 tokio = { version = "1.0", features = ["full"] }

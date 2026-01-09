@@ -94,6 +94,31 @@ impl Schema {
     pub fn as_value(&self) -> &serde_json::Value {
         &self.schema
     }
+
+    /// Output schema as YAML
+    pub fn to_yaml(&self) -> Result<String> {
+        serde_yaml::to_string(&self.schema)
+            .map_err(|e| Error::internal(format!("Failed to serialize schema: {}", e)))
+    }
+
+    /// Output schema as JSON
+    pub fn to_json(&self) -> Result<String> {
+        serde_json::to_string_pretty(&self.schema)
+            .map_err(|e| Error::internal(format!("Failed to serialize schema: {}", e)))
+    }
+
+    /// Generate markdown documentation from the schema
+    pub fn to_markdown(&self) -> String {
+        generate_markdown_doc(&self.schema)
+    }
+
+    /// Generate a YAML template from the schema
+    ///
+    /// Creates a configuration template with default values and comments
+    /// indicating required fields and descriptions.
+    pub fn to_template(&self) -> String {
+        generate_template(&self.schema)
+    }
 }
 
 /// A single validation error
@@ -115,6 +140,196 @@ impl std::fmt::Display for ValidationError {
     }
 }
 
+/// Generate markdown documentation from a JSON Schema
+fn generate_markdown_doc(schema: &serde_json::Value) -> String {
+    let mut output = String::new();
+
+    // Get title or use default
+    let title = schema
+        .get("title")
+        .and_then(|v| v.as_str())
+        .unwrap_or("Configuration Reference");
+    output.push_str(&format!("# {}\n\n", title));
+
+    // Get top-level description
+    if let Some(desc) = schema.get("description").and_then(|v| v.as_str()) {
+        output.push_str(&format!("{}\n\n", desc));
+    }
+
+    // Get required fields at root level
+    let root_required: Vec<&str> = schema
+        .get("required")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
+        .unwrap_or_default();
+
+    // Process top-level properties
+    if let Some(properties) = schema.get("properties").and_then(|v| v.as_object()) {
+        for (name, prop_schema) in properties {
+            generate_section(&mut output, name, prop_schema, root_required.contains(&name.as_str()), 2);
+        }
+    }
+
+    output
+}
+
+/// Generate a section for a property (potentially recursive for nested objects)
+fn generate_section(
+    output: &mut String,
+    name: &str,
+    schema: &serde_json::Value,
+    is_required: bool,
+    heading_level: usize,
+) {
+    let heading = "#".repeat(heading_level);
+    let required_marker = if is_required { " (required)" } else { "" };
+
+    // Section heading
+    output.push_str(&format!("{} {}{}\n\n", heading, name, required_marker));
+
+    // Description
+    if let Some(desc) = schema.get("description").and_then(|v| v.as_str()) {
+        output.push_str(&format!("{}\n\n", desc));
+    }
+
+    // Check if this is an object with nested properties
+    let is_object = schema
+        .get("type")
+        .and_then(|v| v.as_str())
+        .map(|t| t == "object")
+        .unwrap_or(false);
+
+    if is_object {
+        if let Some(properties) = schema.get("properties").and_then(|v| v.as_object()) {
+            // Get required fields for this level
+            let required: Vec<&str> = schema
+                .get("required")
+                .and_then(|v| v.as_array())
+                .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
+                .unwrap_or_default();
+
+            // Generate table for immediate properties
+            output.push_str("| Key | Type | Required | Default | Description |\n");
+            output.push_str("|-----|------|----------|---------|-------------|\n");
+
+            for (prop_name, prop_schema) in properties {
+                let prop_type = get_type_string(prop_schema);
+                let prop_required = if required.contains(&prop_name.as_str()) {
+                    "Yes"
+                } else {
+                    "No"
+                };
+                let prop_default = schema_default_string(prop_schema);
+                let prop_desc = prop_schema
+                    .get("description")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("-");
+
+                output.push_str(&format!(
+                    "| {} | {} | {} | {} | {} |\n",
+                    prop_name, prop_type, prop_required, prop_default, prop_desc
+                ));
+            }
+
+            output.push('\n');
+
+            // Recursively generate sections for nested objects
+            for (prop_name, prop_schema) in properties {
+                let prop_is_object = prop_schema
+                    .get("type")
+                    .and_then(|v| v.as_str())
+                    .map(|t| t == "object")
+                    .unwrap_or(false);
+
+                if prop_is_object && prop_schema.get("properties").is_some() {
+                    let nested_required = required.contains(&prop_name.as_str());
+                    generate_section(output, prop_name, prop_schema, nested_required, heading_level + 1);
+                }
+            }
+        }
+    } else {
+        // For non-object types at top level, just show a simple table
+        output.push_str("| Key | Type | Required | Default | Description |\n");
+        output.push_str("|-----|------|----------|---------|-------------|\n");
+
+        let prop_type = get_type_string(schema);
+        let prop_required = if is_required { "Yes" } else { "No" };
+        let prop_default = schema_default_string(schema);
+        let prop_desc = schema
+            .get("description")
+            .and_then(|v| v.as_str())
+            .unwrap_or("-");
+
+        output.push_str(&format!(
+            "| {} | {} | {} | {} | {} |\n\n",
+            name, prop_type, prop_required, prop_default, prop_desc
+        ));
+    }
+}
+
+/// Get a human-readable type string from a schema
+fn get_type_string(schema: &serde_json::Value) -> String {
+    // Handle enum
+    if let Some(enum_vals) = schema.get("enum").and_then(|v| v.as_array()) {
+        let vals: Vec<String> = enum_vals
+            .iter()
+            .filter_map(|v| {
+                if v.is_string() {
+                    Some(format!("\"{}\"", v.as_str().unwrap()))
+                } else {
+                    Some(v.to_string())
+                }
+            })
+            .collect();
+        return format!("enum: {}", vals.join(", "));
+    }
+
+    // Handle type
+    let base_type = schema
+        .get("type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("any");
+
+    // Add constraints info
+    let mut constraints = Vec::new();
+
+    if let Some(min) = schema.get("minimum") {
+        constraints.push(format!("min: {}", min));
+    }
+    if let Some(max) = schema.get("maximum") {
+        constraints.push(format!("max: {}", max));
+    }
+    if let Some(pattern) = schema.get("pattern").and_then(|v| v.as_str()) {
+        constraints.push(format!("pattern: {}", pattern));
+    }
+    if let Some(min_len) = schema.get("minLength") {
+        constraints.push(format!("minLength: {}", min_len));
+    }
+    if let Some(max_len) = schema.get("maxLength") {
+        constraints.push(format!("maxLength: {}", max_len));
+    }
+
+    if constraints.is_empty() {
+        base_type.to_string()
+    } else {
+        format!("{} ({})", base_type, constraints.join(", "))
+    }
+}
+
+/// Get the default value as a string, or "-" if none
+fn schema_default_string(schema: &serde_json::Value) -> String {
+    schema
+        .get("default")
+        .map(|v| {
+            if v.is_string() {
+                format!("\"{}\"", v.as_str().unwrap())
+            } else {
+                v.to_string()
+            }
+        })
+        .unwrap_or_else(|| "-".to_string())
+}
+
 /// Convert a holoconf Value to serde_json::Value
 fn value_to_json(value: &Value) -> serde_json::Value {
     match value {
@@ -125,6 +340,11 @@ fn value_to_json(value: &Value) -> serde_json::Value {
             .map(serde_json::Value::Number)
             .unwrap_or(serde_json::Value::Null),
         Value::String(s) => serde_json::Value::String(s.clone()),
+        Value::Bytes(bytes) => {
+            // Serialize bytes as base64 string
+            use base64::{Engine as _, engine::general_purpose::STANDARD};
+            serde_json::Value::String(STANDARD.encode(bytes))
+        }
         Value::Sequence(seq) => serde_json::Value::Array(seq.iter().map(value_to_json).collect()),
         Value::Mapping(map) => {
             let obj: serde_json::Map<String, serde_json::Value> = map
@@ -133,6 +353,156 @@ fn value_to_json(value: &Value) -> serde_json::Value {
                 .collect();
             serde_json::Value::Object(obj)
         }
+    }
+}
+
+/// Generate a YAML template from a JSON Schema
+fn generate_template(schema: &serde_json::Value) -> String {
+    let mut output = String::new();
+
+    // Get title for header comment
+    if let Some(title) = schema.get("title").and_then(|v| v.as_str()) {
+        output.push_str(&format!("# Generated from: {}\n", title));
+    } else {
+        output.push_str("# Configuration template generated from schema\n");
+    }
+    output.push_str("# Required fields marked with # REQUIRED\n\n");
+
+    // Get required fields at root level
+    let root_required: Vec<&str> = schema
+        .get("required")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
+        .unwrap_or_default();
+
+    // Process top-level properties
+    if let Some(properties) = schema.get("properties").and_then(|v| v.as_object()) {
+        for (name, prop_schema) in properties {
+            let is_required = root_required.contains(&name.as_str());
+            generate_template_property(&mut output, name, prop_schema, is_required, 0);
+        }
+    }
+
+    output
+}
+
+/// Generate template output for a single property
+fn generate_template_property(
+    output: &mut String,
+    name: &str,
+    schema: &serde_json::Value,
+    is_required: bool,
+    indent_level: usize,
+) {
+    let indent = "  ".repeat(indent_level);
+
+    // Build the comment parts
+    let mut comment_parts = Vec::new();
+    if is_required {
+        comment_parts.push("REQUIRED".to_string());
+    }
+    if let Some(desc) = schema.get("description").and_then(|v| v.as_str()) {
+        comment_parts.push(desc.to_string());
+    }
+
+    // Get the type
+    let prop_type = schema.get("type").and_then(|v| v.as_str()).unwrap_or("any");
+
+    // Handle object type
+    if prop_type == "object" {
+        // Write comment if any
+        if !comment_parts.is_empty() {
+            output.push_str(&format!("{}# {}\n", indent, comment_parts.join(" - ")));
+        }
+        output.push_str(&format!("{}{}:\n", indent, name));
+
+        // Get required fields for this object
+        let required: Vec<&str> = schema
+            .get("required")
+            .and_then(|v| v.as_array())
+            .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
+            .unwrap_or_default();
+
+        // Process nested properties
+        if let Some(properties) = schema.get("properties").and_then(|v| v.as_object()) {
+            for (prop_name, prop_schema) in properties {
+                let prop_required = required.contains(&prop_name.as_str());
+                generate_template_property(output, prop_name, prop_schema, prop_required, indent_level + 1);
+            }
+        }
+    } else {
+        // For scalar types, get the default value or a placeholder
+        let value_str = get_template_value(schema, prop_type);
+
+        // Build the line
+        let mut line = format!("{}{}: {}", indent, name, value_str);
+
+        // Add inline comment if there's a description or default info
+        if let Some(default) = schema.get("default") {
+            if !comment_parts.is_empty() {
+                line.push_str(&format!("  # {} (default: {})", comment_parts.join(" - "), format_json_value(default)));
+            } else {
+                line.push_str(&format!("  # default: {}", format_json_value(default)));
+            }
+        } else if !comment_parts.is_empty() {
+            line.push_str(&format!("  # {}", comment_parts.join(" - ")));
+        }
+
+        output.push_str(&line);
+        output.push('\n');
+    }
+}
+
+/// Get an appropriate template value for a property
+fn get_template_value(schema: &serde_json::Value, prop_type: &str) -> String {
+    // Use default value if available
+    if let Some(default) = schema.get("default") {
+        return format_json_value(default);
+    }
+
+    // Use first enum value if it's an enum
+    if let Some(enum_vals) = schema.get("enum").and_then(|v| v.as_array()) {
+        if let Some(first) = enum_vals.first() {
+            return format_json_value(first);
+        }
+    }
+
+    // Otherwise, provide a placeholder based on type
+    match prop_type {
+        "string" => "\"\"".to_string(),
+        "integer" => "0".to_string(),
+        "number" => "0.0".to_string(),
+        "boolean" => "false".to_string(),
+        "array" => "[]".to_string(),
+        "null" => "null".to_string(),
+        _ => "null".to_string(),
+    }
+}
+
+/// Format a JSON value for YAML output
+fn format_json_value(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::Null => "null".to_string(),
+        serde_json::Value::Bool(b) => b.to_string(),
+        serde_json::Value::Number(n) => n.to_string(),
+        serde_json::Value::String(s) => {
+            // Check if we need to quote the string
+            if s.is_empty() || s.contains(':') || s.contains('#') || s.starts_with(' ') || s.ends_with(' ') {
+                format!("\"{}\"", s.replace('"', "\\\""))
+            } else {
+                s.clone()
+            }
+        }
+        serde_json::Value::Array(arr) => {
+            if arr.is_empty() {
+                "[]".to_string()
+            } else {
+                // For non-empty arrays, format as YAML flow style
+                let items: Vec<String> = arr.iter().map(format_json_value).collect();
+                format!("[{}]", items.join(", "))
+            }
+        }
+        serde_json::Value::Object(_) => "{}".to_string(),
     }
 }
 

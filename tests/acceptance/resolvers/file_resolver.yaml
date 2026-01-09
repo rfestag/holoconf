@@ -64,3 +64,38 @@ tests:
       access: content
     then:
       value: "key: value"
+
+  - name: encoding_utf8_default
+    given:
+      files:
+        unicode.txt: "Hello, 世界!"
+      config: |
+        content: ${file:unicode.txt}
+    when:
+      access: content
+    then:
+      # Default encoding is UTF-8
+      value_contains: "世界"
+
+  - name: encoding_utf8_explicit
+    given:
+      files:
+        unicode.txt: "café résumé"
+      config: |
+        content: ${file:unicode.txt,encoding=utf-8}
+    when:
+      access: content
+    then:
+      value_contains: "café"
+
+  - name: encoding_ascii_strips_non_ascii
+    given:
+      files:
+        unicode.txt: "Hello, 世界!"
+      config: |
+        content: ${file:unicode.txt,encoding=ascii}
+    when:
+      access: content
+    then:
+      # ASCII mode should strip non-ASCII characters
+      value: "Hello, !"

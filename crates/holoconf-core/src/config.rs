@@ -34,6 +34,8 @@ pub struct Config {
     raw: Arc<Value>,
     /// Cache of resolved values
     cache: Arc<RwLock<HashMap<String, ResolvedValue>>>,
+    /// Source file for each config path (tracks which file a value came from)
+    source_map: Arc<HashMap<String, String>>,
     /// Resolver registry
     resolvers: Arc<ResolverRegistry>,
     /// Configuration options
@@ -46,6 +48,7 @@ impl Config {
         Self {
             raw: Arc::new(value),
             cache: Arc::new(RwLock::new(HashMap::new())),
+            source_map: Arc::new(HashMap::new()),
             resolvers: Arc::new(ResolverRegistry::with_builtins()),
             options: ConfigOptions::default(),
         }
@@ -56,6 +59,22 @@ impl Config {
         Self {
             raw: Arc::new(value),
             cache: Arc::new(RwLock::new(HashMap::new())),
+            source_map: Arc::new(HashMap::new()),
+            resolvers: Arc::new(ResolverRegistry::with_builtins()),
+            options,
+        }
+    }
+
+    /// Create a Config with options and source map
+    fn with_options_and_sources(
+        value: Value,
+        options: ConfigOptions,
+        source_map: HashMap<String, String>,
+    ) -> Self {
+        Self {
+            raw: Arc::new(value),
+            cache: Arc::new(RwLock::new(HashMap::new())),
+            source_map: Arc::new(source_map),
             resolvers: Arc::new(ResolverRegistry::with_builtins()),
             options,
         }
@@ -66,6 +85,7 @@ impl Config {
         Self {
             raw: Arc::new(value),
             cache: Arc::new(RwLock::new(HashMap::new())),
+            source_map: Arc::new(HashMap::new()),
             resolvers: Arc::new(resolvers),
             options: ConfigOptions::default(),
         }
@@ -93,10 +113,19 @@ impl Config {
         let value: Value =
             serde_yaml::from_str(&content).map_err(|e| Error::parse(e.to_string()))?;
 
+        // Track source for all leaf paths
+        let filename = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default()
+            .to_string();
+        let mut source_map = HashMap::new();
+        value.collect_leaf_paths("", &filename, &mut source_map);
+
         let mut options = ConfigOptions::default();
         options.base_path = path.parent().map(|p| p.to_path_buf());
 
-        Ok(Self::with_options(value, options))
+        Ok(Self::with_options_and_sources(value, options, source_map))
     }
 
     /// Load and merge multiple YAML files
@@ -107,6 +136,8 @@ impl Config {
     /// - Scalars use last-writer-wins
     /// - Arrays are replaced (not concatenated)
     /// - Null values remove keys
+    ///
+    /// Source tracking records which file each value came from.
     pub fn load_merged<P: AsRef<Path>>(paths: &[P]) -> Result<Self> {
         if paths.is_empty() {
             return Ok(Self::new(Value::Mapping(indexmap::IndexMap::new())));
@@ -114,6 +145,7 @@ impl Config {
 
         let mut merged_value: Option<Value> = None;
         let mut last_base_path: Option<PathBuf> = None;
+        let mut source_map: HashMap<String, String> = HashMap::new();
 
         for path in paths {
             let path = path.as_ref();
@@ -123,20 +155,33 @@ impl Config {
             let value: Value =
                 serde_yaml::from_str(&content).map_err(|e| Error::parse(e.to_string()))?;
 
+            let filename = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or_default()
+                .to_string();
+
             last_base_path = path.parent().map(|p| p.to_path_buf());
 
             match &mut merged_value {
-                Some(base) => base.merge(value),
-                None => merged_value = Some(value),
+                Some(base) => {
+                    base.merge_tracking_sources(value, &filename, "", &mut source_map);
+                }
+                None => {
+                    // First file: record all leaf paths
+                    value.collect_leaf_paths("", &filename, &mut source_map);
+                    merged_value = Some(value);
+                }
             }
         }
 
         let mut options = ConfigOptions::default();
         options.base_path = last_base_path;
 
-        Ok(Self::with_options(
+        Ok(Self::with_options_and_sources(
             merged_value.unwrap_or(Value::Mapping(indexmap::IndexMap::new())),
             options,
+            source_map,
         ))
     }
 
@@ -184,8 +229,9 @@ impl Config {
         // Get raw value
         let raw_value = self.raw.get_path(path)?;
 
-        // Resolve the value
-        let resolved = self.resolve_value(raw_value, path)?;
+        // Resolve the value with an empty resolution stack
+        let mut resolution_stack = Vec::new();
+        let resolved = self.resolve_value(raw_value, path, &mut resolution_stack)?;
 
         // Cache the result
         {
@@ -257,76 +303,75 @@ impl Config {
 
     /// Resolve all values in the configuration eagerly
     pub fn resolve_all(&self) -> Result<()> {
-        self.resolve_value_recursive(&self.raw, "")?;
+        let mut resolution_stack = Vec::new();
+        self.resolve_value_recursive(&self.raw, "", &mut resolution_stack)?;
         Ok(())
     }
 
-    /// Export the configuration as a resolved Value
-    pub fn to_value(&self) -> Result<Value> {
-        self.resolve_value_to_value(&self.raw, "")
-    }
-
-    /// Export the raw (unresolved) configuration as a Value
+    /// Export the configuration as a Value
     ///
-    /// This shows the configuration with interpolation placeholders (${...})
-    pub fn to_value_raw(&self) -> Value {
-        (*self.raw).clone()
-    }
-
-    /// Export the resolved configuration with optional redaction
+    /// # Arguments
+    /// * `resolve` - If true, resolve interpolations (${...}). If false, show placeholders.
+    /// * `redact` - If true, replace sensitive values with "[REDACTED]". Only applies when resolve=true.
     ///
-    /// When redact=true, sensitive values are replaced with "[REDACTED]"
-    pub fn to_value_redacted(&self, redact: bool) -> Result<Value> {
+    /// # Examples
+    /// ```ignore
+    /// // Show raw config with placeholders (safest, fastest)
+    /// let raw = config.to_value(false, false)?;
+    ///
+    /// // Resolved with secrets redacted (safe for logs)
+    /// let safe = config.to_value(true, true)?;
+    ///
+    /// // Resolved with secrets visible (use with caution)
+    /// let full = config.to_value(true, false)?;
+    /// ```
+    pub fn to_value(&self, resolve: bool, redact: bool) -> Result<Value> {
+        if !resolve {
+            return Ok((*self.raw).clone());
+        }
+        let mut resolution_stack = Vec::new();
         if redact {
-            self.resolve_value_to_value_redacted(&self.raw, "")
+            self.resolve_value_to_value_redacted(&self.raw, "", &mut resolution_stack)
         } else {
-            self.resolve_value_to_value(&self.raw, "")
+            self.resolve_value_to_value(&self.raw, "", &mut resolution_stack)
         }
     }
 
     /// Export the configuration as YAML
     ///
-    /// By default, resolves all values. Use to_yaml_raw() for unresolved output.
-    pub fn to_yaml(&self) -> Result<String> {
-        let value = self.to_value()?;
-        serde_yaml::to_string(&value).map_err(|e| Error::parse(e.to_string()))
-    }
-
-    /// Export the raw (unresolved) configuration as YAML
+    /// # Arguments
+    /// * `resolve` - If true, resolve interpolations (${...}). If false, show placeholders.
+    /// * `redact` - If true, replace sensitive values with "[REDACTED]". Only applies when resolve=true.
     ///
-    /// Shows interpolation placeholders (${...}) without resolution.
-    pub fn to_yaml_raw(&self) -> Result<String> {
-        serde_yaml::to_string(&*self.raw).map_err(|e| Error::parse(e.to_string()))
-    }
-
-    /// Export the resolved configuration as YAML with optional redaction
+    /// # Examples
+    /// ```ignore
+    /// // Show raw config with placeholders
+    /// let yaml = config.to_yaml(false, false)?;
     ///
-    /// When redact=true, sensitive values are replaced with "[REDACTED]"
-    pub fn to_yaml_redacted(&self, redact: bool) -> Result<String> {
-        let value = self.to_value_redacted(redact)?;
+    /// // Resolved with secrets redacted
+    /// let yaml = config.to_yaml(true, true)?;
+    /// ```
+    pub fn to_yaml(&self, resolve: bool, redact: bool) -> Result<String> {
+        let value = self.to_value(resolve, redact)?;
         serde_yaml::to_string(&value).map_err(|e| Error::parse(e.to_string()))
     }
 
     /// Export the configuration as JSON
     ///
-    /// By default, resolves all values. Use to_json_raw() for unresolved output.
-    pub fn to_json(&self) -> Result<String> {
-        let value = self.to_value()?;
-        serde_json::to_string_pretty(&value).map_err(|e| Error::parse(e.to_string()))
-    }
-
-    /// Export the raw (unresolved) configuration as JSON
+    /// # Arguments
+    /// * `resolve` - If true, resolve interpolations (${...}). If false, show placeholders.
+    /// * `redact` - If true, replace sensitive values with "[REDACTED]". Only applies when resolve=true.
     ///
-    /// Shows interpolation placeholders (${...}) without resolution.
-    pub fn to_json_raw(&self) -> Result<String> {
-        serde_json::to_string_pretty(&*self.raw).map_err(|e| Error::parse(e.to_string()))
-    }
-
-    /// Export the resolved configuration as JSON with optional redaction
+    /// # Examples
+    /// ```ignore
+    /// // Show raw config with placeholders
+    /// let json = config.to_json(false, false)?;
     ///
-    /// When redact=true, sensitive values are replaced with "[REDACTED]"
-    pub fn to_json_redacted(&self, redact: bool) -> Result<String> {
-        let value = self.to_value_redacted(redact)?;
+    /// // Resolved with secrets redacted
+    /// let json = config.to_json(true, true)?;
+    /// ```
+    pub fn to_json(&self, resolve: bool, redact: bool) -> Result<String> {
+        let value = self.to_value(resolve, redact)?;
         serde_json::to_string_pretty(&value).map_err(|e| Error::parse(e.to_string()))
     }
 
@@ -334,6 +379,22 @@ impl Config {
     pub fn clear_cache(&self) {
         let mut cache = self.cache.write().unwrap();
         cache.clear();
+    }
+
+    /// Get the source file for a config path
+    ///
+    /// Returns the filename of the config file that provided this value.
+    /// For merged configs, this returns the file that "won" for this path.
+    pub fn get_source(&self, path: &str) -> Option<&str> {
+        self.source_map.get(path).map(|s| s.as_str())
+    }
+
+    /// Get all source mappings
+    ///
+    /// Returns a map of config paths to their source filenames.
+    /// Useful for debugging which file each value came from.
+    pub fn dump_sources(&self) -> &HashMap<String, String> {
+        &self.source_map
     }
 
     /// Register a custom resolver
@@ -361,7 +422,7 @@ impl Config {
     /// - Resolved values match expected types
     /// - Constraints (min, max, pattern, enum) are checked
     pub fn validate(&self, schema: &crate::schema::Schema) -> Result<()> {
-        let resolved = self.to_value()?;
+        let resolved = self.to_value(true, false)?;
         schema.validate(&resolved)
     }
 
@@ -370,7 +431,7 @@ impl Config {
         &self,
         schema: &crate::schema::Schema,
     ) -> Vec<crate::schema::ValidationError> {
-        match self.to_value() {
+        match self.to_value(true, false) {
             Ok(resolved) => schema.validate_collect(&resolved),
             Err(e) => vec![crate::schema::ValidationError {
                 path: String::new(),
@@ -380,13 +441,18 @@ impl Config {
     }
 
     /// Resolve a single value
-    fn resolve_value(&self, value: &Value, path: &str) -> Result<ResolvedValue> {
+    fn resolve_value(
+        &self,
+        value: &Value,
+        path: &str,
+        resolution_stack: &mut Vec<String>,
+    ) -> Result<ResolvedValue> {
         match value {
             Value::String(s) => {
                 // Use needs_processing to handle both interpolations AND escape sequences
                 if interpolation::needs_processing(s) {
                     let parsed = interpolation::parse(s)?;
-                    self.resolve_interpolation(&parsed, path)
+                    self.resolve_interpolation(&parsed, path, resolution_stack)
                 } else {
                     Ok(ResolvedValue::new(value.clone()))
                 }
@@ -396,7 +462,12 @@ impl Config {
     }
 
     /// Resolve an interpolation expression
-    fn resolve_interpolation(&self, interp: &Interpolation, path: &str) -> Result<ResolvedValue> {
+    fn resolve_interpolation(
+        &self,
+        interp: &Interpolation,
+        path: &str,
+        resolution_stack: &mut Vec<String>,
+    ) -> Result<ResolvedValue> {
         match interp {
             Interpolation::Literal(s) => Ok(ResolvedValue::new(Value::String(s.clone()))),
 
@@ -411,12 +482,12 @@ impl Config {
                 // Resolve arguments
                 let resolved_args: Vec<String> = args
                     .iter()
-                    .map(|arg| self.resolve_arg(arg, path))
+                    .map(|arg| self.resolve_arg(arg, path, resolution_stack))
                     .collect::<Result<Vec<_>>>()?;
 
                 let resolved_kwargs: HashMap<String, String> = kwargs
                     .iter()
-                    .map(|(k, v)| Ok((k.clone(), self.resolve_arg(v, path)?)))
+                    .map(|(k, v)| Ok((k.clone(), self.resolve_arg(v, path, resolution_stack)?)))
                     .collect::<Result<HashMap<_, _>>>()?;
 
                 // Call the resolver
@@ -434,13 +505,12 @@ impl Config {
                     ref_path.clone()
                 };
 
-                // Check for circular reference
-                // For now, simple implementation - full cycle detection would need context tracking
-                if full_path == path {
-                    return Err(Error::circular_reference(
-                        path,
-                        vec![path.to_string(), full_path],
-                    ));
+                // Check for circular reference using the resolution stack
+                if resolution_stack.contains(&full_path) {
+                    // Build the cycle chain for the error message
+                    let mut chain = resolution_stack.clone();
+                    chain.push(full_path.clone());
+                    return Err(Error::circular_reference(path, chain));
                 }
 
                 // Get the referenced value
@@ -449,8 +519,16 @@ impl Config {
                     .get_path(&full_path)
                     .map_err(|_| Error::ref_not_found(&full_path, Some(path.to_string())))?;
 
+                // Push onto the resolution stack before resolving
+                resolution_stack.push(full_path.clone());
+
                 // Resolve it recursively
-                self.resolve_value(ref_value, &full_path)
+                let result = self.resolve_value(ref_value, &full_path, resolution_stack);
+
+                // Pop from the resolution stack after resolving
+                resolution_stack.pop();
+
+                result
             }
 
             Interpolation::Concat(parts) => {
@@ -458,7 +536,7 @@ impl Config {
                 let mut any_sensitive = false;
 
                 for part in parts {
-                    let resolved = self.resolve_interpolation(part, path)?;
+                    let resolved = self.resolve_interpolation(part, path, resolution_stack)?;
                     any_sensitive = any_sensitive || resolved.sensitive;
 
                     match resolved.value {
@@ -477,11 +555,16 @@ impl Config {
     }
 
     /// Resolve an interpolation argument
-    fn resolve_arg(&self, arg: &InterpolationArg, path: &str) -> Result<String> {
+    fn resolve_arg(
+        &self,
+        arg: &InterpolationArg,
+        path: &str,
+        resolution_stack: &mut Vec<String>,
+    ) -> Result<String> {
         match arg {
             InterpolationArg::Literal(s) => Ok(s.clone()),
             InterpolationArg::Nested(interp) => {
-                let resolved = self.resolve_interpolation(interp, path)?;
+                let resolved = self.resolve_interpolation(interp, path, resolution_stack)?;
                 match resolved.value {
                     Value::String(s) => Ok(s),
                     other => Ok(other.to_string()),
@@ -530,12 +613,17 @@ impl Config {
     }
 
     /// Recursively resolve all values
-    fn resolve_value_recursive(&self, value: &Value, path: &str) -> Result<ResolvedValue> {
+    fn resolve_value_recursive(
+        &self,
+        value: &Value,
+        path: &str,
+        resolution_stack: &mut Vec<String>,
+    ) -> Result<ResolvedValue> {
         match value {
             Value::String(s) => {
                 if interpolation::needs_processing(s) {
                     let parsed = interpolation::parse(s)?;
-                    let resolved = self.resolve_interpolation(&parsed, path)?;
+                    let resolved = self.resolve_interpolation(&parsed, path, resolution_stack)?;
 
                     // Cache the result
                     let mut cache = self.cache.write().unwrap();
@@ -549,7 +637,7 @@ impl Config {
             Value::Sequence(seq) => {
                 for (i, item) in seq.iter().enumerate() {
                     let item_path = format!("{}[{}]", path, i);
-                    self.resolve_value_recursive(item, &item_path)?;
+                    self.resolve_value_recursive(item, &item_path, resolution_stack)?;
                 }
                 Ok(ResolvedValue::new(value.clone()))
             }
@@ -560,7 +648,7 @@ impl Config {
                     } else {
                         format!("{}.{}", path, key)
                     };
-                    self.resolve_value_recursive(val, &key_path)?;
+                    self.resolve_value_recursive(val, &key_path, resolution_stack)?;
                 }
                 Ok(ResolvedValue::new(value.clone()))
             }
@@ -569,72 +657,29 @@ impl Config {
     }
 
     /// Resolve a value tree to a new Value
-    fn resolve_value_to_value(&self, value: &Value, path: &str) -> Result<Value> {
+    fn resolve_value_to_value(
+        &self,
+        value: &Value,
+        path: &str,
+        resolution_stack: &mut Vec<String>,
+    ) -> Result<Value> {
         match value {
             Value::String(s) => {
                 if interpolation::needs_processing(s) {
                     let parsed = interpolation::parse(s)?;
-                    let resolved = self.resolve_interpolation(&parsed, path)?;
+                    let resolved = self.resolve_interpolation(&parsed, path, resolution_stack)?;
                     Ok(resolved.value)
                 } else {
                     Ok(value.clone())
                 }
             }
             Value::Sequence(seq) => {
-                let resolved: Result<Vec<Value>> = seq
-                    .iter()
-                    .enumerate()
-                    .map(|(i, item)| {
-                        let item_path = format!("{}[{}]", path, i);
-                        self.resolve_value_to_value(item, &item_path)
-                    })
-                    .collect();
-                Ok(Value::Sequence(resolved?))
-            }
-            Value::Mapping(map) => {
-                let mut resolved = indexmap::IndexMap::new();
-                for (key, val) in map {
-                    let key_path = if path.is_empty() {
-                        key.clone()
-                    } else {
-                        format!("{}.{}", path, key)
-                    };
-                    resolved.insert(key.clone(), self.resolve_value_to_value(val, &key_path)?);
+                let mut resolved_seq = Vec::new();
+                for (i, item) in seq.iter().enumerate() {
+                    let item_path = format!("{}[{}]", path, i);
+                    resolved_seq.push(self.resolve_value_to_value(item, &item_path, resolution_stack)?);
                 }
-                Ok(Value::Mapping(resolved))
-            }
-            _ => Ok(value.clone()),
-        }
-    }
-
-    /// Resolve a value tree to a new Value with sensitive value redaction
-    fn resolve_value_to_value_redacted(&self, value: &Value, path: &str) -> Result<Value> {
-        const REDACTED: &str = "[REDACTED]";
-
-        match value {
-            Value::String(s) => {
-                if interpolation::needs_processing(s) {
-                    let parsed = interpolation::parse(s)?;
-                    let resolved = self.resolve_interpolation(&parsed, path)?;
-                    if resolved.sensitive {
-                        Ok(Value::String(REDACTED.to_string()))
-                    } else {
-                        Ok(resolved.value)
-                    }
-                } else {
-                    Ok(value.clone())
-                }
-            }
-            Value::Sequence(seq) => {
-                let resolved: Result<Vec<Value>> = seq
-                    .iter()
-                    .enumerate()
-                    .map(|(i, item)| {
-                        let item_path = format!("{}[{}]", path, i);
-                        self.resolve_value_to_value_redacted(item, &item_path)
-                    })
-                    .collect();
-                Ok(Value::Sequence(resolved?))
+                Ok(Value::Sequence(resolved_seq))
             }
             Value::Mapping(map) => {
                 let mut resolved = indexmap::IndexMap::new();
@@ -646,7 +691,59 @@ impl Config {
                     };
                     resolved.insert(
                         key.clone(),
-                        self.resolve_value_to_value_redacted(val, &key_path)?,
+                        self.resolve_value_to_value(val, &key_path, resolution_stack)?,
+                    );
+                }
+                Ok(Value::Mapping(resolved))
+            }
+            _ => Ok(value.clone()),
+        }
+    }
+
+    /// Resolve a value tree to a new Value with sensitive value redaction
+    fn resolve_value_to_value_redacted(
+        &self,
+        value: &Value,
+        path: &str,
+        resolution_stack: &mut Vec<String>,
+    ) -> Result<Value> {
+        const REDACTED: &str = "[REDACTED]";
+
+        match value {
+            Value::String(s) => {
+                if interpolation::needs_processing(s) {
+                    let parsed = interpolation::parse(s)?;
+                    let resolved = self.resolve_interpolation(&parsed, path, resolution_stack)?;
+                    if resolved.sensitive {
+                        Ok(Value::String(REDACTED.to_string()))
+                    } else {
+                        Ok(resolved.value)
+                    }
+                } else {
+                    Ok(value.clone())
+                }
+            }
+            Value::Sequence(seq) => {
+                let mut resolved_seq = Vec::new();
+                for (i, item) in seq.iter().enumerate() {
+                    let item_path = format!("{}[{}]", path, i);
+                    resolved_seq.push(
+                        self.resolve_value_to_value_redacted(item, &item_path, resolution_stack)?,
+                    );
+                }
+                Ok(Value::Sequence(resolved_seq))
+            }
+            Value::Mapping(map) => {
+                let mut resolved = indexmap::IndexMap::new();
+                for (key, val) in map {
+                    let key_path = if path.is_empty() {
+                        key.clone()
+                    } else {
+                        format!("{}.{}", path, key)
+                    };
+                    resolved.insert(
+                        key.clone(),
+                        self.resolve_value_to_value_redacted(val, &key_path, resolution_stack)?,
                     );
                 }
                 Ok(Value::Mapping(resolved))
@@ -661,6 +758,7 @@ impl Clone for Config {
         Self {
             raw: Arc::clone(&self.raw),
             cache: Arc::new(RwLock::new(HashMap::new())), // Fresh cache per ADR-010
+            source_map: Arc::clone(&self.source_map),
             resolvers: Arc::clone(&self.resolvers),
             options: self.options.clone(),
         }
@@ -807,6 +905,52 @@ invalid: ${env:HOLOCONF_INVALID}
     }
 
     #[test]
+    fn test_boolean_coercion_case_insensitive() {
+        // Test case-insensitive boolean coercion per ADR-012
+        let yaml = r#"
+lower_true: "true"
+upper_true: "TRUE"
+mixed_true: "True"
+lower_false: "false"
+upper_false: "FALSE"
+mixed_false: "False"
+"#;
+        let config = Config::from_yaml(yaml).unwrap();
+
+        // All variations of "true" should work
+        assert!(config.get_bool("lower_true").unwrap());
+        assert!(config.get_bool("upper_true").unwrap());
+        assert!(config.get_bool("mixed_true").unwrap());
+
+        // All variations of "false" should work
+        assert!(!config.get_bool("lower_false").unwrap());
+        assert!(!config.get_bool("upper_false").unwrap());
+        assert!(!config.get_bool("mixed_false").unwrap());
+    }
+
+    #[test]
+    fn test_boolean_coercion_rejects_invalid() {
+        // Test that invalid boolean strings are rejected per ADR-012
+        let yaml = r#"
+yes_value: "yes"
+no_value: "no"
+one_value: "1"
+zero_value: "0"
+on_value: "on"
+off_value: "off"
+"#;
+        let config = Config::from_yaml(yaml).unwrap();
+
+        // None of these should work
+        assert!(config.get_bool("yes_value").is_err());
+        assert!(config.get_bool("no_value").is_err());
+        assert!(config.get_bool("one_value").is_err());
+        assert!(config.get_bool("zero_value").is_err());
+        assert!(config.get_bool("on_value").is_err());
+        assert!(config.get_bool("off_value").is_err());
+    }
+
+    #[test]
     fn test_caching() {
         std::env::set_var("HOLOCONF_CACHED", "initial");
 
@@ -846,7 +990,7 @@ database:
     }
 
     #[test]
-    fn test_to_yaml() {
+    fn test_to_yaml_resolved() {
         std::env::set_var("HOLOCONF_EXPORT_HOST", "exported-host");
 
         let yaml = r#"
@@ -856,7 +1000,7 @@ server:
 "#;
         let config = Config::from_yaml(yaml).unwrap();
 
-        let exported = config.to_yaml().unwrap();
+        let exported = config.to_yaml(true, false).unwrap();
         assert!(exported.contains("exported-host"));
         assert!(exported.contains("8080"));
 
@@ -906,7 +1050,7 @@ host: ${env:UNDEFINED_HOST,${env:HOLOCONF_DEFAULT_HOST}}
     }
 
     #[test]
-    fn test_to_yaml_raw() {
+    fn test_to_yaml_unresolved() {
         let yaml = r#"
 server:
   host: ${env:MY_HOST}
@@ -914,33 +1058,33 @@ server:
 "#;
         let config = Config::from_yaml(yaml).unwrap();
 
-        let raw = config.to_yaml_raw().unwrap();
+        let raw = config.to_yaml(false, false).unwrap();
         // Should contain the placeholder, not a resolved value
         assert!(raw.contains("${env:MY_HOST}"));
         assert!(raw.contains("8080"));
     }
 
     #[test]
-    fn test_to_json_raw() {
+    fn test_to_json_unresolved() {
         let yaml = r#"
 database:
   url: ${env:DATABASE_URL}
 "#;
         let config = Config::from_yaml(yaml).unwrap();
 
-        let raw = config.to_json_raw().unwrap();
+        let raw = config.to_json(false, false).unwrap();
         // Should contain the placeholder
         assert!(raw.contains("${env:DATABASE_URL}"));
     }
 
     #[test]
-    fn test_to_value_raw() {
+    fn test_to_value_unresolved() {
         let yaml = r#"
 key: ${env:SOME_VAR}
 "#;
         let config = Config::from_yaml(yaml).unwrap();
 
-        let raw = config.to_value_raw();
+        let raw = config.to_value(false, false).unwrap();
         assert_eq!(
             raw.get_path("key").unwrap().as_str(),
             Some("${env:SOME_VAR}")
@@ -957,9 +1101,258 @@ value: ${env:HOLOCONF_NON_SENSITIVE}
         let config = Config::from_yaml(yaml).unwrap();
 
         // With redact=true, but no sensitive values, should show real values
-        let output = config.to_yaml_redacted(true).unwrap();
+        let output = config.to_yaml(true, true).unwrap();
         assert!(output.contains("public-value"));
 
         std::env::remove_var("HOLOCONF_NON_SENSITIVE");
+    }
+
+    #[test]
+    fn test_circular_reference_direct() {
+        // Direct circular reference: a -> b -> a
+        let yaml = r#"
+a: ${b}
+b: ${a}
+"#;
+        let config = Config::from_yaml(yaml).unwrap();
+
+        // Accessing 'a' should detect the circular reference
+        let result = config.get("a");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.to_string().to_lowercase().contains("circular"),
+            "Error should mention 'circular': {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_circular_reference_chain() {
+        // Chain circular reference: first -> second -> third -> first
+        let yaml = r#"
+first: ${second}
+second: ${third}
+third: ${first}
+"#;
+        let config = Config::from_yaml(yaml).unwrap();
+
+        // Accessing 'first' should detect the circular reference chain
+        let result = config.get("first");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.to_string().to_lowercase().contains("circular"),
+            "Error should mention 'circular': {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_circular_reference_self() {
+        // Self-referential: value references itself
+        let yaml = r#"
+value: ${value}
+"#;
+        let config = Config::from_yaml(yaml).unwrap();
+
+        let result = config.get("value");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.to_string().to_lowercase().contains("circular"),
+            "Error should mention 'circular': {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_circular_reference_nested() {
+        // Circular reference in nested structure
+        let yaml = r#"
+database:
+  primary: ${database.secondary}
+  secondary: ${database.primary}
+"#;
+        let config = Config::from_yaml(yaml).unwrap();
+
+        let result = config.get("database.primary");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.to_string().to_lowercase().contains("circular"),
+            "Error should mention 'circular': {}",
+            err
+        );
+    }
+
+    // Source tracking tests
+
+    #[test]
+    fn test_get_source_from_yaml_string() {
+        // Config loaded from YAML string has no source tracking
+        let yaml = r#"
+database:
+  host: localhost
+"#;
+        let config = Config::from_yaml(yaml).unwrap();
+
+        // No source info for YAML string (no filename)
+        assert!(config.get_source("database.host").is_none());
+        assert!(config.dump_sources().is_empty());
+    }
+
+    #[test]
+    fn test_source_tracking_load_merged() {
+        // Create temp files for testing
+        let temp_dir = std::env::temp_dir().join("holoconf_test_sources");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let base_path = temp_dir.join("base.yaml");
+        let override_path = temp_dir.join("override.yaml");
+
+        std::fs::write(
+            &base_path,
+            r#"
+database:
+  host: localhost
+  port: 5432
+api:
+  url: http://localhost
+"#,
+        )
+        .unwrap();
+
+        std::fs::write(
+            &override_path,
+            r#"
+database:
+  host: prod-db.example.com
+api:
+  key: secret123
+"#,
+        )
+        .unwrap();
+
+        let config = Config::load_merged(&[&base_path, &override_path]).unwrap();
+
+        // Check sources
+        assert_eq!(config.get_source("database.host"), Some("override.yaml"));
+        assert_eq!(config.get_source("database.port"), Some("base.yaml"));
+        assert_eq!(config.get_source("api.url"), Some("base.yaml"));
+        assert_eq!(config.get_source("api.key"), Some("override.yaml"));
+
+        // Check dump_sources returns all
+        let sources = config.dump_sources();
+        assert_eq!(sources.len(), 4);
+        assert_eq!(sources.get("database.host").map(|s| s.as_str()), Some("override.yaml"));
+        assert_eq!(sources.get("database.port").map(|s| s.as_str()), Some("base.yaml"));
+
+        // Cleanup
+        std::fs::remove_dir_all(&temp_dir).ok();
+    }
+
+    #[test]
+    fn test_source_tracking_single_file() {
+        let temp_dir = std::env::temp_dir().join("holoconf_test_single");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let config_path = temp_dir.join("config.yaml");
+        std::fs::write(
+            &config_path,
+            r#"
+database:
+  host: localhost
+  port: 5432
+"#,
+        )
+        .unwrap();
+
+        let config = Config::from_yaml_file(&config_path).unwrap();
+
+        // All values should come from config.yaml
+        assert_eq!(config.get_source("database.host"), Some("config.yaml"));
+        assert_eq!(config.get_source("database.port"), Some("config.yaml"));
+
+        // Cleanup
+        std::fs::remove_dir_all(&temp_dir).ok();
+    }
+
+    #[test]
+    fn test_source_tracking_null_removes() {
+        let temp_dir = std::env::temp_dir().join("holoconf_test_null");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let base_path = temp_dir.join("base.yaml");
+        let override_path = temp_dir.join("override.yaml");
+
+        std::fs::write(
+            &base_path,
+            r#"
+database:
+  host: localhost
+  port: 5432
+  debug: true
+"#,
+        )
+        .unwrap();
+
+        std::fs::write(
+            &override_path,
+            r#"
+database:
+  debug: null
+"#,
+        )
+        .unwrap();
+
+        let config = Config::load_merged(&[&base_path, &override_path]).unwrap();
+
+        // debug should be removed
+        assert!(config.get_source("database.debug").is_none());
+        // Others should remain
+        assert_eq!(config.get_source("database.host"), Some("base.yaml"));
+        assert_eq!(config.get_source("database.port"), Some("base.yaml"));
+
+        // Cleanup
+        std::fs::remove_dir_all(&temp_dir).ok();
+    }
+
+    #[test]
+    fn test_source_tracking_array_replacement() {
+        let temp_dir = std::env::temp_dir().join("holoconf_test_array");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let base_path = temp_dir.join("base.yaml");
+        let override_path = temp_dir.join("override.yaml");
+
+        std::fs::write(
+            &base_path,
+            r#"
+servers:
+  - host: server1
+  - host: server2
+"#,
+        )
+        .unwrap();
+
+        std::fs::write(
+            &override_path,
+            r#"
+servers:
+  - host: prod-server
+"#,
+        )
+        .unwrap();
+
+        let config = Config::load_merged(&[&base_path, &override_path]).unwrap();
+
+        // Array is replaced, so only one item from override
+        assert_eq!(config.get_source("servers[0].host"), Some("override.yaml"));
+        // server2 no longer exists
+        assert!(config.get_source("servers[1].host").is_none());
+
+        // Cleanup
+        std::fs::remove_dir_all(&temp_dir).ok();
     }
 }

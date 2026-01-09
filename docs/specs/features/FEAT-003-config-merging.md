@@ -189,21 +189,31 @@ const config = await Config.load(
 
 ### Source Tracking (Debug)
 
-For debugging, track which file each value came from:
+Source tracking is always enabled and records which file each value came from (file-level, no line numbers):
 
 ```python
-config = Config.load("base.yaml", "override.yaml", track_sources=True)
+config = Config.load_merged(["base.yaml", "override.yaml"])
 
-# Get source information
+# Get source file for a specific path
 source = config.get_source("database.host")
-print(source.file)  # "override.yaml"
-print(source.line)  # 5
+print(source)  # "override.yaml"
 
-# Dump all sources
-config.dump_sources()
-# database.host: override.yaml:5
-# database.port: base.yaml:3
-# ...
+# Get all sources as a dict
+sources = config.dump_sources()
+# {"database.host": "override.yaml", "database.port": "base.yaml", ...}
+```
+
+#### CLI Usage
+
+```bash
+# Show source files instead of values
+holoconf dump --sources base.yaml override.yaml
+# Output:
+# database.host: override.yaml
+# database.port: base.yaml
+
+# JSON format
+holoconf dump --sources --format json base.yaml override.yaml
 ```
 
 ## Error Cases
@@ -363,10 +373,11 @@ function merge(base, overlay):
 
 ### Source Tracking
 
-When `track_sources=True`:
-- Store `(file, line, column)` for each leaf value
+Source tracking is always enabled (low overhead):
+- Store filename for each leaf value path
 - Update on merge (overlay source replaces base source)
-- Adds memory overhead; off by default
+- File-level only (no line numbers) - sufficient for debugging merged configs
+- Accessed via `get_source(path)` and `dump_sources()` methods
 
 ### Glob Handling
 

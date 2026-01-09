@@ -14,11 +14,15 @@
 use pyo3::create_exception;
 use pyo3::exceptions::PyException;
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyList};
+use pyo3::types::{PyBytes, PyDict, PyList, PyTuple};
+
+use std::collections::HashMap;
+use std::sync::Arc;
 
 use holoconf_core::{
     error::ErrorKind, Config as CoreConfig, ConfigOptions, Error as CoreError,
     Schema as CoreSchema, Value as CoreValue,
+    resolver::{Resolver, ResolvedValue as CoreResolvedValue, ResolverContext},
 };
 
 // Define exception hierarchy per ADR-008
@@ -89,6 +93,7 @@ fn value_to_py(py: Python<'_>, value: &CoreValue) -> PyResult<PyObject> {
         CoreValue::Integer(i) => Ok(i.into_pyobject(py)?.to_owned().unbind().into_any()),
         CoreValue::Float(f) => Ok(f.into_pyobject(py)?.to_owned().unbind().into_any()),
         CoreValue::String(s) => Ok(s.into_pyobject(py)?.to_owned().unbind().into_any()),
+        CoreValue::Bytes(bytes) => Ok(PyBytes::new(py, bytes).unbind().into_any()),
         CoreValue::Sequence(seq) => {
             let list = PyList::empty(py);
             for item in seq {
@@ -103,6 +108,140 @@ fn value_to_py(py: Python<'_>, value: &CoreValue) -> PyResult<PyObject> {
             }
             Ok(dict.unbind().into_any())
         }
+    }
+}
+
+/// Convert a Python object to a CoreValue
+fn py_to_value(py: Python<'_>, obj: &Bound<'_, PyAny>) -> PyResult<CoreValue> {
+    if obj.is_none() {
+        return Ok(CoreValue::Null);
+    }
+    if let Ok(b) = obj.extract::<bool>() {
+        return Ok(CoreValue::Bool(b));
+    }
+    if let Ok(i) = obj.extract::<i64>() {
+        return Ok(CoreValue::Integer(i));
+    }
+    if let Ok(f) = obj.extract::<f64>() {
+        return Ok(CoreValue::Float(f));
+    }
+    if let Ok(s) = obj.extract::<String>() {
+        return Ok(CoreValue::String(s));
+    }
+    if let Ok(bytes) = obj.extract::<Vec<u8>>() {
+        return Ok(CoreValue::Bytes(bytes));
+    }
+    if let Ok(list) = obj.downcast::<PyList>() {
+        let mut seq = Vec::new();
+        for item in list.iter() {
+            seq.push(py_to_value(py, &item)?);
+        }
+        return Ok(CoreValue::Sequence(seq));
+    }
+    if let Ok(dict) = obj.downcast::<PyDict>() {
+        let mut map = indexmap::IndexMap::new();
+        for (key, val) in dict.iter() {
+            let key_str: String = key.extract()?;
+            map.insert(key_str, py_to_value(py, &val)?);
+        }
+        return Ok(CoreValue::Mapping(map));
+    }
+    // Default to string representation
+    let repr = obj.str()?.to_string();
+    Ok(CoreValue::String(repr))
+}
+
+/// Python wrapper for ResolvedValue
+///
+/// Use this to return sensitive values from custom resolvers.
+#[pyclass(name = "ResolvedValue")]
+struct PyResolvedValue {
+    value: PyObject,
+    sensitive: bool,
+}
+
+#[pymethods]
+impl PyResolvedValue {
+    /// Create a resolved value
+    ///
+    /// Args:
+    ///     value: The resolved value
+    ///     sensitive: Whether the value should be redacted in output (default False)
+    #[new]
+    #[pyo3(signature = (value, sensitive=false))]
+    fn new(value: PyObject, sensitive: bool) -> Self {
+        Self { value, sensitive }
+    }
+}
+
+/// A Python callable wrapped as a Rust Resolver
+struct PyResolver {
+    name: String,
+    callable: PyObject,
+}
+
+impl PyResolver {
+    fn new(name: String, callable: PyObject) -> Self {
+        Self { name, callable }
+    }
+}
+
+// Safety: PyResolver is Send + Sync because we acquire the GIL before calling Python
+unsafe impl Send for PyResolver {}
+unsafe impl Sync for PyResolver {}
+
+impl Resolver for PyResolver {
+    fn resolve(
+        &self,
+        args: &[String],
+        kwargs: &HashMap<String, String>,
+        _ctx: &ResolverContext,
+    ) -> holoconf_core::error::Result<CoreResolvedValue> {
+        Python::with_gil(|py| {
+            // Convert args to Python tuple
+            let py_args = PyTuple::new(py, args).map_err(|e| {
+                CoreError::resolver_custom(&self.name, format!("Failed to convert args: {}", e))
+            })?;
+
+            // Convert kwargs to Python dict
+            let py_kwargs = PyDict::new(py);
+            for (k, v) in kwargs {
+                py_kwargs.set_item(k, v).map_err(|e| {
+                    CoreError::resolver_custom(&self.name, format!("Failed to set kwarg: {}", e))
+                })?;
+            }
+
+            // Call the Python function
+            let result = self.callable.call(py, py_args, Some(&py_kwargs)).map_err(|e| {
+                CoreError::resolver_custom(&self.name, format!("Resolver error: {}", e))
+            })?;
+
+            // Convert result to CoreResolvedValue
+            let result_bound = result.bind(py);
+
+            // Check if result is a PyResolvedValue by downcasting
+            if let Ok(resolved_cell) = result_bound.downcast::<PyResolvedValue>() {
+                let resolved = resolved_cell.borrow();
+                let value = py_to_value(py, resolved.value.bind(py)).map_err(|e| {
+                    CoreError::resolver_custom(&self.name, format!("Failed to convert value: {}", e))
+                })?;
+                if resolved.sensitive {
+                    Ok(CoreResolvedValue::sensitive(value))
+                } else {
+                    Ok(CoreResolvedValue::new(value))
+                }
+            } else {
+                // Plain return value - convert directly
+                let value = py_to_value(py, result_bound).map_err(|e| {
+                    CoreError::resolver_custom(&self.name, format!("Failed to convert value: {}", e))
+                })?;
+                Ok(CoreResolvedValue::new(value))
+            }
+        })
+    }
+
+    fn name(&self) -> &str {
+        &self.name
     }
 }
 
@@ -312,11 +451,7 @@ impl PyConfig {
     ///     The configuration as a Python dictionary
     #[pyo3(signature = (resolve=true, redact=false))]
     fn to_dict(&self, py: Python<'_>, resolve: bool, redact: bool) -> PyResult<PyObject> {
-        let value = if resolve {
-            self.inner.to_value_redacted(redact).map_err(to_py_err)?
-        } else {
-            self.inner.to_value_raw()
-        };
+        let value = self.inner.to_value(resolve, redact).map_err(to_py_err)?;
         value_to_py(py, &value)
     }
 
@@ -330,11 +465,7 @@ impl PyConfig {
     ///     The configuration as a YAML string
     #[pyo3(signature = (resolve=true, redact=false))]
     fn to_yaml(&self, resolve: bool, redact: bool) -> PyResult<String> {
-        if resolve {
-            self.inner.to_yaml_redacted(redact).map_err(to_py_err)
-        } else {
-            self.inner.to_yaml_raw().map_err(to_py_err)
-        }
+        self.inner.to_yaml(resolve, redact).map_err(to_py_err)
     }
 
     /// Export the configuration as JSON
@@ -347,11 +478,7 @@ impl PyConfig {
     ///     The configuration as a JSON string
     #[pyo3(signature = (resolve=true, redact=false))]
     fn to_json(&self, resolve: bool, redact: bool) -> PyResult<String> {
-        if resolve {
-            self.inner.to_json_redacted(redact).map_err(to_py_err)
-        } else {
-            self.inner.to_json_raw().map_err(to_py_err)
-        }
+        self.inner.to_json(resolve, redact).map_err(to_py_err)
     }
 
     /// Clear the resolution cache
@@ -360,6 +487,52 @@ impl PyConfig {
     /// the cache, for example after environment variables have changed.
     fn clear_cache(&self) {
         self.inner.clear_cache();
+    }
+
+    /// Register a custom resolver
+    ///
+    /// The resolver function is called with positional arguments from the interpolation
+    /// and keyword arguments. It should return a value (string, int, float, bool, list, dict)
+    /// or a ResolvedValue for sensitive data.
+    ///
+    /// Args:
+    ///     name: The resolver name (used as ${name:...} in config)
+    ///     func: A callable that takes (*args, **kwargs) and returns a value
+    ///
+    /// Example:
+    ///     >>> def my_resolver(key, default=None):
+    ///     ...     return lookup(key) or default
+    ///     >>> config.register_resolver("myresolver", my_resolver)
+    ///     >>> # Now use: ${myresolver:some_key,fallback_value}
+    fn register_resolver(&mut self, name: String, func: PyObject) -> PyResult<()> {
+        let resolver = PyResolver::new(name, func);
+        self.inner.register_resolver(Arc::new(resolver));
+        Ok(())
+    }
+
+    /// Get the source file for a config path
+    ///
+    /// Returns the filename of the config file that provided this value.
+    /// For merged configs, this returns the file that "won" for this path.
+    ///
+    /// Args:
+    ///     path: The config path (e.g., "database.host")
+    ///
+    /// Returns:
+    ///     The filename or None if source tracking is not available
+    fn get_source(&self, path: &str) -> Option<String> {
+        self.inner.get_source(path).map(|s| s.to_string())
+    }
+
+    /// Get all source mappings
+    ///
+    /// Returns a dict mapping config paths to their source filenames.
+    /// Useful for debugging which file each value came from.
+    ///
+    /// Returns:
+    ///     A dict of {path: filename} entries
+    fn dump_sources(&self) -> HashMap<String, String> {
+        self.inner.dump_sources().clone()
     }
 
     /// Validate the raw (unresolved) configuration against a schema
@@ -479,6 +652,30 @@ impl PySchema {
         Ok(Self { inner })
     }
 
+    /// Output the schema as YAML
+    ///
+    /// Returns:
+    ///     The schema serialized as a YAML string
+    fn to_yaml(&self) -> PyResult<String> {
+        self.inner.to_yaml().map_err(to_py_err)
+    }
+
+    /// Output the schema as JSON
+    ///
+    /// Returns:
+    ///     The schema serialized as a JSON string
+    fn to_json(&self) -> PyResult<String> {
+        self.inner.to_json().map_err(to_py_err)
+    }
+
+    /// Generate markdown documentation from the schema
+    ///
+    /// Returns:
+    ///     Human-readable markdown documentation
+    fn to_markdown(&self) -> String {
+        self.inner.to_markdown()
+    }
+
     fn __repr__(&self) -> String {
         "Schema(<...>)".to_string()
     }
@@ -491,6 +688,7 @@ fn holoconf(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Add classes
     m.add_class::<PyConfig>()?;
     m.add_class::<PySchema>()?;
+    m.add_class::<PyResolvedValue>()?;
 
     // Add exception hierarchy
     m.add("HoloconfError", m.py().get_type::<HoloconfError>())?;

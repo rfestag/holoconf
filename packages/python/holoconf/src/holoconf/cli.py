@@ -87,6 +87,29 @@ def create_parser() -> argparse.ArgumentParser:
     check_parser = subparsers.add_parser("check", help="Quick syntax check without full validation")
     check_parser.add_argument("files", nargs="+", type=Path, help="Configuration file(s) to check")
 
+    # schema command with subcommands
+    schema_parser = subparsers.add_parser("schema", help="Schema-related utilities")
+    schema_subparsers = schema_parser.add_subparsers(dest="schema_command", required=True)
+
+    # schema validate
+    schema_validate_parser = schema_subparsers.add_parser(
+        "validate", help="Validate that a schema file is valid JSON Schema"
+    )
+    schema_validate_parser.add_argument("file", type=Path, help="Schema file to validate")
+
+    # schema docs
+    schema_docs_parser = schema_subparsers.add_parser(
+        "docs", help="Output schema in various formats"
+    )
+    schema_docs_parser.add_argument("file", type=Path, help="Schema file")
+    schema_docs_parser.add_argument(
+        "-f",
+        "--format",
+        choices=["yaml", "yml", "json", "markdown", "md"],
+        default="yaml",
+        help="Output format (default: yaml)",
+    )
+
     return parser
 
 
@@ -250,6 +273,33 @@ def cmd_check(files: list[Path]) -> int:
     return 0 if all_valid else 1
 
 
+def cmd_schema_validate(file: Path) -> int:
+    """Validate that a schema file is valid JSON Schema."""
+    try:
+        Schema.load(str(file))
+        print(f"\033[92m\u2713\033[0m {file}: valid JSON Schema")
+        return 0
+    except HoloconfError as e:
+        print(f"\033[91m\u2717\033[0m {file}: {e}", file=sys.stderr)
+        return 1
+
+
+def cmd_schema_docs(file: Path, output_format: str) -> int:
+    """Output schema in various formats."""
+    try:
+        schema = Schema.load(str(file))
+        if output_format in ("yaml", "yml"):
+            print(schema.to_yaml(), end="")
+        elif output_format == "json":
+            print(schema.to_json(), end="")
+        elif output_format in ("markdown", "md"):
+            print(schema.to_markdown(), end="")
+        return 0
+    except HoloconfError as e:
+        print(f"\033[91mError: {e}\033[0m", file=sys.stderr)
+        return 2
+
+
 def main() -> int:
     """Main entry point for the CLI."""
     parser = create_parser()
@@ -281,6 +331,11 @@ def main() -> int:
         )
     elif args.command == "check":
         return cmd_check(args.files)
+    elif args.command == "schema":
+        if args.schema_command == "validate":
+            return cmd_schema_validate(args.file)
+        elif args.schema_command == "docs":
+            return cmd_schema_docs(args.file, args.format)
     else:
         parser.print_help()
         return 1

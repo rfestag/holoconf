@@ -150,6 +150,26 @@ database:
   vpc_id: "vpc-abc123"
 ```
 
+### Binary Data Handling
+
+Binary data (from the file resolver with `encoding=binary`) is handled as follows:
+
+- **YAML/JSON serialization:** Binary data is encoded as base64 strings
+- **Python `to_dict()`:** Binary data is returned as native Python `bytes` objects
+- **CLI text output:** Binary data is printed as base64-encoded strings
+
+Example:
+```yaml
+# config.yaml
+certificate: ${file:cert.der,encoding=binary}
+
+# Output with to_yaml(resolve=True)
+certificate: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0t...
+
+# Python to_dict()
+{"certificate": b'\x30\x82\x03\x75...'}  # Native bytes
+```
+
 ### Redaction Scope
 
 **Important:** Redaction only applies to serialization methods. Once a value is accessed programmatically, holoconf cannot prevent it from being logged or printed.

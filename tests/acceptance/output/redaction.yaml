@@ -139,3 +139,20 @@ tests:
     then:
       output_not_contains: "fallback_token"
       output_contains: "[REDACTED]"
+
+  # Sensitivity inheritance via self-references per FEAT-002/ADR-009
+  - name: sensitivity_inherited_via_self_reference
+    description: Self-references should inherit sensitivity from the source value
+    given:
+      env:
+        HOLOCONF_SECRET_KEY: "inherited_secret"
+      config: |
+        base_secret: ${env:HOLOCONF_SECRET_KEY,sensitive=true}
+        derived: ${base_secret}
+    when:
+      dump:
+        format: yaml
+        redact: true
+    then:
+      output_not_contains: "inherited_secret"
+      output_contains: "[REDACTED]"

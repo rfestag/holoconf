@@ -66,6 +66,10 @@ enum Commands {
         /// Write to file instead of stdout
         #[arg(short, long)]
         output: Option<PathBuf>,
+
+        /// Show source files instead of values
+        #[arg(long)]
+        sources: bool,
     },
 
     /// Get a specific value from the configuration
@@ -96,6 +100,45 @@ enum Commands {
         #[arg(required = true)]
         files: Vec<PathBuf>,
     },
+
+    /// Schema-related utilities
+    #[command(name = "schema")]
+    Schema {
+        #[command(subcommand)]
+        command: SchemaCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum SchemaCommands {
+    /// Validate that a schema file is valid JSON Schema
+    Validate {
+        /// Schema file to validate
+        #[arg(required = true)]
+        file: PathBuf,
+    },
+
+    /// Generate a config template from schema
+    Template {
+        /// Schema file
+        #[arg(required = true)]
+        file: PathBuf,
+
+        /// Write to file instead of stdout
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
+
+    /// Output schema documentation in various formats
+    Docs {
+        /// Schema file
+        #[arg(required = true)]
+        file: PathBuf,
+
+        /// Output format: yaml (default), json, markdown
+        #[arg(short, long, default_value = "yaml")]
+        format: String,
+    },
 }
 
 /// Run the CLI with the given arguments
@@ -117,7 +160,8 @@ pub fn run() -> ExitCode {
             no_redact,
             format,
             output,
-        } => cmd_dump(files, resolve, no_redact, &format, output),
+            sources,
+        } => cmd_dump(files, resolve, no_redact, &format, output, sources),
 
         Commands::Get {
             files,
@@ -128,6 +172,12 @@ pub fn run() -> ExitCode {
         } => cmd_get(files, &path, resolve, &format, default),
 
         Commands::Check { files } => cmd_check(files),
+
+        Commands::Schema { command } => match command {
+            SchemaCommands::Validate { file } => cmd_schema_validate(file),
+            SchemaCommands::Template { file, output } => cmd_schema_template(file, output),
+            SchemaCommands::Docs { file, format } => cmd_schema_docs(file, &format),
+        },
     }
 }
 
@@ -215,6 +265,7 @@ fn cmd_dump(
     no_redact: bool,
     format: &str,
     output: Option<PathBuf>,
+    sources: bool,
 ) -> ExitCode {
     // Load config
     let config = match load_config(&files) {
@@ -225,23 +276,49 @@ fn cmd_dump(
         }
     };
 
+    // Handle --sources flag: output source files instead of values
+    if sources {
+        let source_map = config.dump_sources();
+        let mut paths: Vec<_> = source_map.keys().collect();
+        paths.sort();
+
+        let content = if format == "json" {
+            // JSON output for sources
+            serde_json::to_string_pretty(&source_map).unwrap_or_else(|_| "{}".to_string())
+        } else {
+            // Text/YAML output for sources (path: filename format)
+            paths
+                .iter()
+                .map(|p| format!("{}: {}", p, source_map[*p]))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+
+        if let Some(output_path) = output {
+            if let Err(e) = std::fs::write(&output_path, &content) {
+                eprintln!("{}: {}", "Error writing file".red(), e);
+                return ExitCode::from(2);
+            }
+            eprintln!("{} Wrote to {}", "✓".green(), output_path.display());
+        } else {
+            println!("{}", content);
+        }
+        return ExitCode::SUCCESS;
+    }
+
     // Generate output
     let result = if resolve {
-        if no_redact {
-            match format {
-                "json" => config.to_json(),
-                _ => config.to_yaml(),
-            }
-        } else {
-            match format {
-                "json" => config.to_json_redacted(true),
-                _ => config.to_yaml_redacted(true),
-            }
+        // Resolved output: redact by default unless --no-redact
+        let redact = !no_redact;
+        match format {
+            "json" => config.to_json(true, redact),
+            _ => config.to_yaml(true, redact),
         }
     } else {
+        // Unresolved output: show raw placeholders
         match format {
-            "json" => config.to_json_raw(),
-            _ => config.to_yaml_raw(),
+            "json" => config.to_json(false, false),
+            _ => config.to_yaml(false, false),
         }
     };
 
@@ -292,9 +369,9 @@ fn cmd_get(
         Ok(value) => {
             match format {
                 "json" => {
-                    // Convert to JSON for complex values
-                    let json_val = value_to_json(&value);
-                    println!("{}", serde_json::to_string_pretty(&json_val).unwrap());
+                    // Use serde_json::to_string which uses our Serialize impl
+                    // This handles Value::Bytes as base64 automatically
+                    println!("{}", serde_json::to_string_pretty(&value).unwrap());
                 }
                 "yaml" => {
                     let yaml = serde_yaml::to_string(&value).unwrap();
@@ -308,6 +385,11 @@ fn cmd_get(
                         holoconf_core::Value::Float(f) => println!("{}", f),
                         holoconf_core::Value::Bool(b) => println!("{}", b),
                         holoconf_core::Value::Null => println!("null"),
+                        holoconf_core::Value::Bytes(bytes) => {
+                            // For bytes, output as base64
+                            use base64::{Engine as _, engine::general_purpose::STANDARD};
+                            println!("{}", STANDARD.encode(bytes));
+                        }
                         _ => {
                             // For complex values, output as YAML
                             let yaml = serde_yaml::to_string(&value).unwrap();
@@ -378,25 +460,74 @@ fn cmd_check(files: Vec<PathBuf>) -> ExitCode {
     }
 }
 
-/// Convert holoconf Value to serde_json::Value
-fn value_to_json(value: &holoconf_core::Value) -> serde_json::Value {
-    match value {
-        holoconf_core::Value::Null => serde_json::Value::Null,
-        holoconf_core::Value::Bool(b) => serde_json::Value::Bool(*b),
-        holoconf_core::Value::Integer(i) => serde_json::Value::Number((*i).into()),
-        holoconf_core::Value::Float(f) => serde_json::Number::from_f64(*f)
-            .map(serde_json::Value::Number)
-            .unwrap_or(serde_json::Value::Null),
-        holoconf_core::Value::String(s) => serde_json::Value::String(s.clone()),
-        holoconf_core::Value::Sequence(seq) => {
-            serde_json::Value::Array(seq.iter().map(value_to_json).collect())
+fn cmd_schema_validate(file: PathBuf) -> ExitCode {
+    match Schema::from_file(&file) {
+        Ok(_) => {
+            println!("{} {}: valid JSON Schema", "✓".green(), file.display());
+            ExitCode::SUCCESS
         }
-        holoconf_core::Value::Mapping(map) => {
-            let obj: serde_json::Map<String, serde_json::Value> = map
-                .iter()
-                .map(|(k, v)| (k.clone(), value_to_json(v)))
-                .collect();
-            serde_json::Value::Object(obj)
+        Err(e) => {
+            eprintln!("{} {}: {}", "✗".red(), file.display(), e);
+            ExitCode::from(1)
         }
     }
 }
+
+fn cmd_schema_template(file: PathBuf, output: Option<PathBuf>) -> ExitCode {
+    let schema = match Schema::from_file(&file) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("{}", e.to_string().red());
+            return ExitCode::from(2);
+        }
+    };
+
+    let template = schema.to_template();
+
+    if let Some(output_path) = output {
+        if let Err(e) = std::fs::write(&output_path, &template) {
+            eprintln!("{}: {}", "Error writing file".red(), e);
+            return ExitCode::from(2);
+        }
+        eprintln!("{} Wrote template to {}", "✓".green(), output_path.display());
+    } else {
+        print!("{}", template);
+    }
+
+    ExitCode::SUCCESS
+}
+
+fn cmd_schema_docs(file: PathBuf, format: &str) -> ExitCode {
+    let schema = match Schema::from_file(&file) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("{}", e.to_string().red());
+            return ExitCode::from(2);
+        }
+    };
+
+    let output = match format {
+        "yaml" | "yml" => schema.to_yaml(),
+        "json" => schema.to_json(),
+        "markdown" | "md" => Ok(schema.to_markdown()),
+        _ => {
+            eprintln!(
+                "Unsupported format: {}. Use yaml, json, or markdown.",
+                format
+            );
+            return ExitCode::from(1);
+        }
+    };
+
+    match output {
+        Ok(s) => {
+            print!("{}", s);
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("{}", e.to_string().red());
+            ExitCode::from(1)
+        }
+    }
+}
+
