@@ -199,20 +199,32 @@ jobs:
     name: Publish to crates.io
     needs: [validate]
     runs-on: ubuntu-latest
+    environment: crates-io
+    permissions:
+      id-token: write  # Required for OIDC trusted publishing
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Authenticate with crates.io
+        uses: rust-lang/crates-io-auth-action@v1
+        id: crates-io-auth
+
       - name: Publish holoconf-core
-        run: cargo publish -p holoconf-core --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish -p holoconf-core
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.crates-io-auth.outputs.token }}
 
       - name: Wait for crates.io to index
         run: sleep 30
 
       - name: Publish holoconf-cli
-        run: cargo publish -p holoconf-cli --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish -p holoconf-cli
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.crates-io-auth.outputs.token }}
 
   # ==========================================================================
   # Publish to PyPI
