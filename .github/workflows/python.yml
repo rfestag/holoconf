@@ -87,14 +87,15 @@ jobs:
         with:
           target: ${{ matrix.target }}
           manylinux: ${{ matrix.manylinux || 'auto' }}
-          args: --release --out dist -m packages/python/holoconf/pyproject.toml
+          args: --release --out dist
+          working-directory: packages/python/holoconf
           sccache: true
 
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
           name: wheels-${{ matrix.target }}
-          path: dist/*.whl
+          path: packages/python/holoconf/dist/*.whl
 
   # Build source distribution
   sdist:
@@ -105,12 +106,13 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           command: sdist
-          args: --out dist -m packages/python/holoconf/pyproject.toml
+          args: --out dist
+          working-directory: packages/python/holoconf
       - name: Upload sdist
         uses: actions/upload-artifact@v4
         with:
           name: wheels-sdist
-          path: dist/*.tar.gz
+          path: packages/python/holoconf/dist/*.tar.gz
 
   # Publish to PyPI on tag
   publish:
