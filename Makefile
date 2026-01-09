@@ -434,6 +434,8 @@ endif
 	@echo "  ✓ Working directory clean"
 	@echo "  ✓ On main branch"
 	@echo ""
+	@echo "→ Cleaning build cache (avoid stale venv references)..."
+	@cargo clean --quiet
 	@echo "→ Running tests..."
 	@$(MAKE) test
 	@echo ""
