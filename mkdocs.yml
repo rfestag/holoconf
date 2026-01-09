@@ -72,6 +72,10 @@ markdown_extensions:
   - toc:
       permalink: true
 
+  # Snippets for including files from outside docs/
+  - pymdownx.snippets:
+      base_path: ["."]
+
 hooks:
   - tools/mkdocs_hooks.py
 

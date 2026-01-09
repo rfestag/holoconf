@@ -93,26 +93,21 @@ jobs:
           name: wheels-${{ matrix.target }}
           path: packages/python/holoconf/dist/*.whl
 
-  # Build Linux aarch64 wheels using QEMU emulation
+  # Build Linux aarch64 wheels using cross-compilation
   build-linux-aarch64:
     name: Build wheels (aarch64-unknown-linux-gnu)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm64
-
-      - name: Build wheels
+      - name: Build wheels (cross-compile)
         uses: PyO3/maturin-action@v1
         with:
           target: aarch64-unknown-linux-gnu
           manylinux: manylinux_2_28
-          args: --release --out dist
+          args: --release --out dist --zig
           working-directory: packages/python/holoconf
-          docker-options: --platform linux/arm64
+          sccache: true
 
       - name: Upload wheels
         uses: actions/upload-artifact@v4
