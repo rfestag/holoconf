@@ -1,0 +1,249 @@
+suite: cli_commands
+description: CLI command acceptance tests
+
+tests:
+  # GET command tests
+  - name: cli_get_simple_value
+    given:
+      config: |
+        database:
+          host: localhost
+          port: 5432
+    when:
+      cli: get {config_file} database.host
+    then:
+      stdout: "localhost"
+      exit_code: 0
+
+  - name: cli_get_nested_value
+    given:
+      config: |
+        database:
+          host: localhost
+    when:
+      cli: get {config_file} database.host --format json
+    then:
+      stdout_contains: "localhost"
+      exit_code: 0
+
+  - name: cli_get_with_resolve
+    given:
+      env:
+        HOLOCONF_DB_HOST: "production.db"
+      config: |
+        database:
+          host: ${env:HOLOCONF_DB_HOST}
+    when:
+      cli: get {config_file} database.host --resolve
+    then:
+      stdout: "production.db"
+      exit_code: 0
+
+  - name: cli_get_not_found
+    given:
+      config: |
+        existing: value
+    when:
+      cli: get {config_file} nonexistent
+    then:
+      stderr_contains: "not found"
+      exit_code: 1
+
+  - name: cli_get_with_default
+    given:
+      config: |
+        existing: value
+    when:
+      cli: get {config_file} nonexistent --default fallback
+    then:
+      stdout: "fallback"
+      exit_code: 0
+
+  - name: cli_get_integer_value
+    given:
+      config: |
+        server:
+          port: 8080
+    when:
+      cli: get {config_file} server.port
+    then:
+      stdout: "8080"
+      exit_code: 0
+
+  - name: cli_get_boolean_value
+    given:
+      config: |
+        feature:
+          enabled: true
+    when:
+      cli: get {config_file} feature.enabled
+    then:
+      # Note: Python outputs "True", Rust outputs "true"
+      stdout_contains: "rue"
+      exit_code: 0
+
+  # DUMP command tests
+  - name: cli_dump_yaml
+    given:
+      config: |
+        key: value
+    when:
+      cli: dump {config_file}
+    then:
+      stdout_contains: "key:"
+      exit_code: 0
+
+  - name: cli_dump_json
+    given:
+      config: |
+        key: value
+    when:
+      cli: dump {config_file} --format json
+    then:
+      stdout_contains: '"key"'
+      exit_code: 0
+
+  - name: cli_dump_resolved
+    given:
+      env:
+        HOLOCONF_VALUE: "resolved"
+      config: |
+        key: ${env:HOLOCONF_VALUE}
+    when:
+      cli: dump {config_file} --resolve
+    then:
+      stdout_contains: "resolved"
+      exit_code: 0
+
+  - name: cli_dump_nested_structure
+    given:
+      config: |
+        database:
+          host: localhost
+          port: 5432
+        cache:
+          enabled: true
+    when:
+      cli: dump {config_file}
+    then:
+      stdout_contains: "database:"
+      stdout_contains: "cache:"
+      exit_code: 0
+
+  # CHECK command tests
+  - name: cli_check_valid_yaml
+    given:
+      config: |
+        valid: yaml
+    when:
+      cli: check {config_file}
+    then:
+      stdout_contains: "valid"
+      exit_code: 0
+
+  - name: cli_check_invalid_yaml
+    given:
+      config_raw: "invalid: [unclosed"
+    when:
+      cli: check {config_file}
+    then:
+      # Note: Error message varies by implementation
+      # Rust: "Invalid YAML", Python: "Parse error"
+      exit_code: 1
+
+  - name: cli_check_multiple_files
+    given:
+      config: |
+        first: file
+      config2: |
+        second: file
+    when:
+      cli: check {config_file} {config2_file}
+    then:
+      stdout_contains: "valid"
+      exit_code: 0
+
+  # VALIDATE command tests
+  - name: cli_validate_success
+    given:
+      config: |
+        name: test
+        port: 8080
+      schema: |
+        type: object
+        properties:
+          name:
+            type: string
+          port:
+            type: integer
+        required:
+          - name
+    when:
+      cli: validate {config_file} --schema {schema_file}
+    then:
+      stdout_contains: "valid"
+      exit_code: 0
+
+  - name: cli_validate_failure_wrong_type
+    given:
+      config: |
+        port: "not_a_number"
+      schema: |
+        type: object
+        properties:
+          port:
+            type: integer
+    when:
+      cli: validate {config_file} --schema {schema_file}
+    then:
+      exit_code: 1
+
+  - name: cli_validate_failure_missing_required
+    given:
+      config: |
+        optional: value
+      schema: |
+        type: object
+        properties:
+          required_field:
+            type: string
+        required:
+          - required_field
+    when:
+      cli: validate {config_file} --schema {schema_file}
+    then:
+      exit_code: 1
+
+  - name: cli_validate_json_output
+    given:
+      config: |
+        name: test
+      schema: |
+        type: object
+        properties:
+          name:
+            type: string
+    when:
+      cli: validate {config_file} --schema {schema_file} --format json
+    then:
+      stdout_contains: '"valid"'
+      exit_code: 0
+
+  # Error cases
+  - name: cli_get_file_not_found
+    given:
+      config: |
+        placeholder: value
+    when:
+      cli: get /nonexistent/path.yaml key
+    then:
+      exit_code: 2
+
+  - name: cli_dump_file_not_found
+    given:
+      config: |
+        placeholder: value
+    when:
+      cli: dump /nonexistent/path.yaml
+    then:
+      exit_code: 2

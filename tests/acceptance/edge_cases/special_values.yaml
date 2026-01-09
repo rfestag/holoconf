@@ -1,0 +1,172 @@
+suite: special_values
+description: Edge case handling for special values and characters
+
+tests:
+  - name: empty_string_value
+    given:
+      config: |
+        empty: ""
+    when:
+      access: empty
+    then:
+      value: ""
+
+  - name: whitespace_only_string
+    given:
+      config: |
+        spaces: "   "
+    when:
+      access: spaces
+    then:
+      value: "   "
+
+  - name: unicode_in_value
+    given:
+      config: |
+        greeting: "Hello, 世界!"
+    when:
+      access: greeting
+    then:
+      value: "Hello, 世界!"
+
+  - name: unicode_in_key
+    given:
+      config: |
+        日本語: japanese
+    when:
+      access: 日本語
+    then:
+      value: "japanese"
+
+  - name: emoji_in_value
+    given:
+      config: |
+        mood: "happy 😊"
+    when:
+      access: mood
+    then:
+      value: "happy 😊"
+
+  - name: newline_in_multiline_string
+    given:
+      config: |
+        multi: |
+          line one
+          line two
+    when:
+      access: multi
+    then:
+      value: "line one\nline two\n"
+
+  - name: null_value
+    given:
+      config: |
+        nothing: null
+    when:
+      access: nothing
+    then:
+      value: null
+
+  - name: boolean_true
+    given:
+      config: |
+        flag: true
+    when:
+      access: flag
+    then:
+      value: true
+
+  - name: boolean_false
+    given:
+      config: |
+        flag: false
+    when:
+      access: flag
+    then:
+      value: false
+
+  - name: integer_value
+    given:
+      config: |
+        count: 42
+    when:
+      access: count
+    then:
+      value: 42
+
+  - name: negative_integer
+    given:
+      config: |
+        offset: -10
+    when:
+      access: offset
+    then:
+      value: -10
+
+  - name: float_value
+    given:
+      config: |
+        ratio: 3.14159
+    when:
+      access: ratio
+    then:
+      value: 3.14159
+
+  - name: scientific_notation
+    given:
+      config: |
+        big: 1.5e10
+    when:
+      access: big
+    then:
+      value: 15000000000.0
+
+  - name: empty_array
+    given:
+      config: |
+        items: []
+    when:
+      access: items
+    then:
+      value: []
+
+  - name: empty_object
+    given:
+      config: |
+        config: {}
+    when:
+      access: config
+    then:
+      value: {}
+
+  - name: deeply_nested_access
+    given:
+      config: |
+        level1:
+          level2:
+            level3:
+              level4:
+                level5:
+                  value: deep
+    when:
+      access: level1.level2.level3.level4.level5.value
+    then:
+      value: "deep"
+
+  - name: special_characters_in_value
+    given:
+      config: |
+        special: "a$b{c}d[e]f"
+    when:
+      access: special
+    then:
+      value: "a$b{c}d[e]f"
+
+  - name: backslash_in_value
+    given:
+      config: |
+        path: "C:\\Users\\test"
+    when:
+      access: path
+    then:
+      value: "C:\\Users\\test"

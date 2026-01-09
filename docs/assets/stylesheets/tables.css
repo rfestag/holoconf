@@ -1,0 +1,240 @@
+/* Header logo size override */
+.md-header__button.md-logo img {
+  width: 30px;
+  height: 30px;
+}
+
+/* Custom theme colors to match RestMachine */
+:root {
+  --md-primary-fg-color: #354f7a;
+  --md-primary-fg-color--light: #526fa0;
+  --md-primary-fg-color--dark: #243754;
+  --md-primary-bg-color: #ffffff;
+  --md-primary-bg-color--light: #f5f5f5;
+  --md-accent-fg-color: #354f7a;
+  --md-accent-fg-color--transparent: rgba(53, 79, 122, 0.1);
+}
+
+/* Dark mode adjustments */
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: #526fa0;
+  --md-primary-fg-color--light: #7da3d1;
+  --md-primary-fg-color--dark: #354f7a;
+  --md-accent-fg-color: #526fa0;
+  --md-accent-fg-color--transparent: rgba(82, 111, 160, 0.1);
+}
+
+/* Searchable table styles */
+
+.searchable-table {
+  margin: 0;
+  width: 100%;
+}
+
+/* Make table fill full width with no gap */
+/* Override MkDocs Material's scrollwrap containers */
+.searchable-table .md-typeset__table {
+  width: 100%;
+}
+
+.searchable-table table {
+  width: 100% !important;
+  min-width: 100%;
+  margin-top: 0;
+  display: table;
+  table-layout: fixed;
+}
+
+/* Make table rows and cells fill the width */
+.searchable-table table thead,
+.searchable-table table tbody,
+.searchable-table table tr {
+  width: 100%;
+  display: table;
+  table-layout: fixed;
+}
+
+/* Allow the middle column (Title/Description) to expand */
+.searchable-table table th:first-child,
+.searchable-table table td:first-child {
+  width: 15%;
+}
+
+.searchable-table table th:last-child,
+.searchable-table table td:last-child {
+  width: 15%;
+}
+
+/* Controls wrapper - flexbox layout for search and filters */
+/* Match MkDocs Material table negative margins */
+.table-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0 -0.8rem 0.5rem -0.8rem;
+  padding: 0 0.8rem;
+  max-width: calc(100% + 1.6rem);
+  box-sizing: border-box;
+}
+
+/* Ensure inputs use border-box */
+.table-controls * {
+  box-sizing: border-box;
+}
+
+/* Prevent overflow from flex items */
+.table-search-wrapper {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.table-search {
+  width: 100%;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.85rem;
+  border: 1px solid var(--md-default-fg-color--lighter);
+  border-radius: 4px;
+  background: var(--md-default-bg-color);
+  color: var(--md-default-fg-color);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.table-search:focus {
+  outline: none;
+  border-color: var(--md-accent-fg-color);
+  box-shadow: 0 0 0 2px rgba(var(--md-accent-fg-color--transparent), 0.2);
+}
+
+.table-search::placeholder {
+  color: var(--md-default-fg-color--light);
+}
+
+/* Status filter dropdown */
+.table-status-wrapper {
+  flex: 0 0 auto;
+}
+
+.table-status-filter {
+  padding: 0.4rem 0.6rem;
+  font-size: 0.85rem;
+  border: 1px solid var(--md-default-fg-color--lighter);
+  border-radius: 4px;
+  background: var(--md-default-bg-color);
+  color: var(--md-default-fg-color);
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  min-width: 120px;
+}
+
+.table-status-filter:focus {
+  outline: none;
+  border-color: var(--md-accent-fg-color);
+  box-shadow: 0 0 0 2px rgba(var(--md-accent-fg-color--transparent), 0.2);
+}
+
+.table-status-filter:hover {
+  border-color: var(--md-default-fg-color--light);
+}
+
+/* Sortable header styles */
+.searchable-table th.sortable {
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.searchable-table th.sortable:hover {
+  background: var(--md-default-fg-color--lightest);
+}
+
+.searchable-table th .th-content {
+  display: inline;
+}
+
+.searchable-table th .sort-icon {
+  display: inline-block;
+  width: 1em;
+  margin-left: 0.25em;
+  opacity: 0.3;
+  font-size: 0.75em;
+  vertical-align: middle;
+}
+
+.searchable-table th .sort-icon::after {
+  content: "▲▼";
+  font-size: 0.7em;
+  letter-spacing: -0.2em;
+}
+
+.searchable-table th.sort-asc .sort-icon,
+.searchable-table th.sort-desc .sort-icon {
+  opacity: 1;
+}
+
+.searchable-table th.sort-asc .sort-icon::after {
+  content: "▲";
+}
+
+.searchable-table th.sort-desc .sort-icon::after {
+  content: "▼";
+}
+
+/* Pagination styles */
+/* Match MkDocs Material table negative margins */
+.table-pagination {
+  margin: 0.5rem -0.8rem 0 -0.8rem;
+  padding: 0 0.8rem;
+}
+
+.pagination-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+}
+
+.pagination-info {
+  font-size: 0.8rem;
+  color: var(--md-default-fg-color--light);
+  margin-right: 1rem;
+}
+
+.pagination-btn {
+  min-width: 2rem;
+  height: 2rem;
+  padding: 0 0.5rem;
+  border: 1px solid var(--md-default-fg-color--lighter);
+  border-radius: 4px;
+  background: var(--md-default-bg-color);
+  color: var(--md-default-fg-color);
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.pagination-btn:hover:not(:disabled) {
+  background: var(--md-accent-fg-color--transparent);
+  border-color: var(--md-accent-fg-color);
+}
+
+.pagination-btn.active {
+  background: var(--md-accent-fg-color);
+  border-color: var(--md-accent-fg-color);
+  color: var(--md-accent-bg-color);
+}
+
+.pagination-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.pagination-ellipsis {
+  padding: 0 0.25rem;
+  color: var(--md-default-fg-color--light);
+}
+
+/* Make table rows animate */
+.searchable-table tbody tr {
+  transition: opacity 0.15s;
+}

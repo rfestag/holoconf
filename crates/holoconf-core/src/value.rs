@@ -681,4 +681,368 @@ mod tests {
         assert_eq!(base.get_path("a").unwrap().as_i64(), Some(1));
         assert_eq!(base.get_path("b").unwrap().as_i64(), Some(2));
     }
+
+    // Additional tests for improved coverage
+
+    #[test]
+    fn test_from_i32() {
+        let v: Value = 42i32.into();
+        assert_eq!(v, Value::Integer(42));
+    }
+
+    #[test]
+    fn test_from_vec_values() {
+        let vec: Vec<Value> = vec![Value::Integer(1), Value::Integer(2)];
+        let v: Value = vec.into();
+        assert!(v.is_sequence());
+        assert_eq!(v.as_sequence().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn test_from_vec_strings() {
+        let vec: Vec<&str> = vec!["a", "b", "c"];
+        let v: Value = vec.into();
+        assert!(v.is_sequence());
+        assert_eq!(v.as_sequence().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn test_from_indexmap() {
+        let mut map = IndexMap::new();
+        map.insert("key".to_string(), Value::Integer(42));
+        let v: Value = map.into();
+        assert!(v.is_mapping());
+    }
+
+    #[test]
+    fn test_display_null() {
+        assert_eq!(format!("{}", Value::Null), "null");
+    }
+
+    #[test]
+    fn test_display_bool() {
+        assert_eq!(format!("{}", Value::Bool(true)), "true");
+        assert_eq!(format!("{}", Value::Bool(false)), "false");
+    }
+
+    #[test]
+    fn test_display_integer() {
+        assert_eq!(format!("{}", Value::Integer(42)), "42");
+        assert_eq!(format!("{}", Value::Integer(-123)), "-123");
+    }
+
+    #[test]
+    fn test_display_float() {
+        let display = format!("{}", Value::Float(3.14));
+        assert!(display.starts_with("3.14"));
+    }
+
+    #[test]
+    fn test_display_string() {
+        assert_eq!(format!("{}", Value::String("hello".into())), "hello");
+    }
+
+    #[test]
+    fn test_display_sequence() {
+        let seq = Value::Sequence(vec![Value::Integer(1), Value::Integer(2), Value::Integer(3)]);
+        assert_eq!(format!("{}", seq), "[1, 2, 3]");
+    }
+
+    #[test]
+    fn test_display_empty_sequence() {
+        let seq = Value::Sequence(vec![]);
+        assert_eq!(format!("{}", seq), "[]");
+    }
+
+    #[test]
+    fn test_display_mapping() {
+        let mut map = IndexMap::new();
+        map.insert("a".to_string(), Value::Integer(1));
+        let mapping = Value::Mapping(map);
+        assert_eq!(format!("{}", mapping), "{a: 1}");
+    }
+
+    #[test]
+    fn test_display_empty_mapping() {
+        let mapping = Value::Mapping(IndexMap::new());
+        assert_eq!(format!("{}", mapping), "{}");
+    }
+
+    #[test]
+    fn test_as_str_non_string() {
+        assert!(Value::Integer(42).as_str().is_none());
+        assert!(Value::Bool(true).as_str().is_none());
+        assert!(Value::Null.as_str().is_none());
+    }
+
+    #[test]
+    fn test_as_bool_non_bool() {
+        assert!(Value::Integer(42).as_bool().is_none());
+        assert!(Value::String("true".into()).as_bool().is_none());
+    }
+
+    #[test]
+    fn test_as_i64_non_integer() {
+        assert!(Value::String("42".into()).as_i64().is_none());
+        assert!(Value::Float(42.0).as_i64().is_none());
+    }
+
+    #[test]
+    fn test_as_f64_non_numeric() {
+        assert!(Value::String("3.14".into()).as_f64().is_none());
+        assert!(Value::Bool(true).as_f64().is_none());
+    }
+
+    #[test]
+    fn test_as_sequence_non_sequence() {
+        assert!(Value::Integer(42).as_sequence().is_none());
+        assert!(Value::Mapping(IndexMap::new()).as_sequence().is_none());
+    }
+
+    #[test]
+    fn test_as_mapping_non_mapping() {
+        assert!(Value::Integer(42).as_mapping().is_none());
+        assert!(Value::Sequence(vec![]).as_mapping().is_none());
+    }
+
+    #[test]
+    fn test_type_name() {
+        assert_eq!(Value::Null.type_name(), "null");
+        assert_eq!(Value::Bool(true).type_name(), "boolean");
+        assert_eq!(Value::Integer(42).type_name(), "integer");
+        assert_eq!(Value::Float(3.14).type_name(), "float");
+        assert_eq!(Value::String("s".into()).type_name(), "string");
+        assert_eq!(Value::Sequence(vec![]).type_name(), "sequence");
+        assert_eq!(Value::Mapping(IndexMap::new()).type_name(), "mapping");
+    }
+
+    #[test]
+    fn test_default() {
+        let v: Value = Default::default();
+        assert!(v.is_null());
+    }
+
+    #[test]
+    fn test_get_path_empty() {
+        let v = Value::Integer(42);
+        assert_eq!(v.get_path("").unwrap(), &Value::Integer(42));
+    }
+
+    #[test]
+    fn test_get_path_on_non_mapping() {
+        let v = Value::Integer(42);
+        assert!(v.get_path("key").is_err());
+    }
+
+    #[test]
+    fn test_get_path_array_out_of_bounds() {
+        let mut map = IndexMap::new();
+        map.insert(
+            "items".to_string(),
+            Value::Sequence(vec![Value::Integer(1)]),
+        );
+        let v = Value::Mapping(map);
+        assert!(v.get_path("items[99]").is_err());
+    }
+
+    #[test]
+    fn test_get_path_array_on_non_sequence() {
+        let mut map = IndexMap::new();
+        map.insert("key".to_string(), Value::Integer(42));
+        let v = Value::Mapping(map);
+        assert!(v.get_path("key[0]").is_err());
+    }
+
+    #[test]
+    fn test_get_path_mut_empty() {
+        let mut v = Value::Integer(42);
+        let result = v.get_path_mut("").unwrap();
+        *result = Value::Integer(100);
+        assert_eq!(v, Value::Integer(100));
+    }
+
+    #[test]
+    fn test_get_path_mut_modify() {
+        let mut map = IndexMap::new();
+        map.insert("key".to_string(), Value::Integer(42));
+        let mut v = Value::Mapping(map);
+
+        *v.get_path_mut("key").unwrap() = Value::Integer(100);
+        assert_eq!(v.get_path("key").unwrap().as_i64(), Some(100));
+    }
+
+    #[test]
+    fn test_get_path_mut_not_found() {
+        let mut map = IndexMap::new();
+        map.insert("key".to_string(), Value::Integer(42));
+        let mut v = Value::Mapping(map);
+        assert!(v.get_path_mut("nonexistent").is_err());
+    }
+
+    #[test]
+    fn test_get_path_mut_on_non_mapping() {
+        let mut v = Value::Integer(42);
+        assert!(v.get_path_mut("key").is_err());
+    }
+
+    #[test]
+    fn test_get_path_mut_array() {
+        let mut map = IndexMap::new();
+        map.insert(
+            "items".to_string(),
+            Value::Sequence(vec![Value::Integer(1), Value::Integer(2)]),
+        );
+        let mut v = Value::Mapping(map);
+
+        *v.get_path_mut("items[1]").unwrap() = Value::Integer(99);
+        assert_eq!(v.get_path("items[1]").unwrap().as_i64(), Some(99));
+    }
+
+    #[test]
+    fn test_get_path_mut_array_out_of_bounds() {
+        let mut map = IndexMap::new();
+        map.insert(
+            "items".to_string(),
+            Value::Sequence(vec![Value::Integer(1)]),
+        );
+        let mut v = Value::Mapping(map);
+        assert!(v.get_path_mut("items[99]").is_err());
+    }
+
+    #[test]
+    fn test_get_path_mut_array_on_non_sequence() {
+        let mut map = IndexMap::new();
+        map.insert("key".to_string(), Value::Integer(42));
+        let mut v = Value::Mapping(map);
+        assert!(v.get_path_mut("key[0]").is_err());
+    }
+
+    #[test]
+    fn test_set_path_empty() {
+        let mut v = Value::Integer(42);
+        v.set_path("", Value::Integer(100)).unwrap();
+        assert_eq!(v, Value::Integer(100));
+    }
+
+    #[test]
+    fn test_set_path_simple() {
+        let mut map = IndexMap::new();
+        map.insert("key".to_string(), Value::Integer(42));
+        let mut v = Value::Mapping(map);
+
+        v.set_path("key", Value::Integer(100)).unwrap();
+        assert_eq!(v.get_path("key").unwrap().as_i64(), Some(100));
+    }
+
+    #[test]
+    fn test_set_path_new_key() {
+        let mut map = IndexMap::new();
+        map.insert("existing".to_string(), Value::Integer(1));
+        let mut v = Value::Mapping(map);
+
+        v.set_path("new_key", Value::Integer(42)).unwrap();
+        assert_eq!(v.get_path("new_key").unwrap().as_i64(), Some(42));
+    }
+
+    #[test]
+    fn test_set_path_creates_intermediate_mappings() {
+        let mut v = Value::Mapping(IndexMap::new());
+        v.set_path("a.b.c", Value::Integer(42)).unwrap();
+        assert_eq!(v.get_path("a.b.c").unwrap().as_i64(), Some(42));
+    }
+
+    #[test]
+    fn test_set_path_array_element() {
+        let mut map = IndexMap::new();
+        map.insert(
+            "items".to_string(),
+            Value::Sequence(vec![Value::Integer(1), Value::Integer(2)]),
+        );
+        let mut v = Value::Mapping(map);
+
+        v.set_path("items[0]", Value::Integer(99)).unwrap();
+        assert_eq!(v.get_path("items[0]").unwrap().as_i64(), Some(99));
+    }
+
+    #[test]
+    fn test_set_path_array_out_of_bounds() {
+        let mut map = IndexMap::new();
+        map.insert(
+            "items".to_string(),
+            Value::Sequence(vec![Value::Integer(1)]),
+        );
+        let mut v = Value::Mapping(map);
+        assert!(v.set_path("items[99]", Value::Integer(42)).is_err());
+    }
+
+    #[test]
+    fn test_set_path_on_non_mapping() {
+        let mut v = Value::Integer(42);
+        assert!(v.set_path("key", Value::Integer(1)).is_err());
+    }
+
+    #[test]
+    fn test_set_path_key_on_non_mapping_intermediate() {
+        let mut map = IndexMap::new();
+        map.insert("key".to_string(), Value::Integer(42));
+        let mut v = Value::Mapping(map);
+        // Trying to set "key.subkey" when "key" is an integer
+        assert!(v.set_path("key.subkey", Value::Integer(1)).is_err());
+    }
+
+    #[test]
+    fn test_set_path_index_on_non_sequence() {
+        let mut map = IndexMap::new();
+        map.insert("key".to_string(), Value::Integer(42));
+        let mut v = Value::Mapping(map);
+        assert!(v.set_path("key[0]", Value::Integer(1)).is_err());
+    }
+
+    #[test]
+    fn test_set_path_intermediate_index_out_of_bounds() {
+        let mut map = IndexMap::new();
+        map.insert(
+            "items".to_string(),
+            Value::Sequence(vec![Value::Mapping(IndexMap::new())]),
+        );
+        let mut v = Value::Mapping(map);
+        assert!(v.set_path("items[99].key", Value::Integer(1)).is_err());
+    }
+
+    #[test]
+    fn test_merged_non_mutating() {
+        let mut base_map = IndexMap::new();
+        base_map.insert("a".to_string(), Value::Integer(1));
+        let base = Value::Mapping(base_map);
+
+        let mut overlay_map = IndexMap::new();
+        overlay_map.insert("b".to_string(), Value::Integer(2));
+        let overlay = Value::Mapping(overlay_map);
+
+        let result = base.merged(overlay);
+
+        assert_eq!(result.get_path("a").unwrap().as_i64(), Some(1));
+        assert_eq!(result.get_path("b").unwrap().as_i64(), Some(2));
+    }
+
+    #[test]
+    fn test_parse_path_invalid_index() {
+        assert!(parse_path("items[abc]").is_err());
+    }
+
+    #[test]
+    fn test_parse_path_unexpected_bracket() {
+        assert!(parse_path("items]").is_err());
+    }
+
+    #[test]
+    fn test_is_type_negative_cases() {
+        let integer = Value::Integer(42);
+        assert!(!integer.is_null());
+        assert!(!integer.is_bool());
+        assert!(!integer.is_float());
+        assert!(!integer.is_string());
+        assert!(!integer.is_sequence());
+        assert!(!integer.is_mapping());
+    }
 }

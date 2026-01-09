@@ -5,7 +5,7 @@
 
 ## Overview
 
-holoconf supports validating configuration against JSON Schema, helping you catch configuration errors early and enforce structure requirements.
+HoloConf supports validating configuration against JSON Schema, helping you catch configuration errors early and enforce structure requirements.
 
 ## Basic Validation
 
@@ -75,7 +75,7 @@ holoconf supports validating configuration against JSON Schema, helping you catc
 
 ## Type Coercion
 
-When validation is enabled, holoconf can automatically coerce values to match the schema:
+When validation is enabled, HoloConf can automatically coerce values to match the schema:
 
 ```yaml
 # config.yaml

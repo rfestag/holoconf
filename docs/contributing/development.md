@@ -1,6 +1,6 @@
 # Development Setup
 
-This guide helps you set up a development environment for holoconf.
+This guide helps you set up a development environment for HoloConf.
 
 ## Prerequisites
 

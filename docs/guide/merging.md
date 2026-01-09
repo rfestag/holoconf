@@ -5,7 +5,7 @@
 
 ## Overview
 
-holoconf allows you to merge multiple configuration files, enabling patterns like:
+HoloConf allows you to merge multiple configuration files, enabling patterns like:
 
 - Base configuration with environment-specific overrides
 - Shared defaults with local customizations

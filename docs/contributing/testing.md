@@ -1,6 +1,6 @@
 # Testing
 
-holoconf uses a multi-layered testing strategy to ensure correctness across all language bindings.
+HoloConf uses a multi-layered testing strategy to ensure correctness across all language bindings.
 
 ## Test Layers
 
@@ -44,91 +44,7 @@ python tools/test_runner.py --driver python 'tests/acceptance/**/*.yaml' -v
 python tools/test_runner.py --driver python tests/acceptance/resolvers/env.yaml -v
 ```
 
-## Acceptance Test Format
-
-Acceptance tests are defined in YAML and run against all language bindings. This ensures consistent behavior across languages.
-
-### Basic Structure
-
-```yaml
-name: "Feature name"
-description: "What this test file covers"
-
-tests:
-  - name: "Test case description"
-    config:
-      key: value
-      nested:
-        path: "${env:HOME}"
-    assertions:
-      - path: "key"
-        expected: "value"
-```
-
-### Assertions
-
-```yaml
-assertions:
-  # Exact value match
-  - path: "database.port"
-    expected: 5432
-
-  # Pattern match (regex)
-  - path: "app.version"
-    expected_pattern: "^\\d+\\.\\d+\\.\\d+$"
-
-  # Type check
-  - path: "app.debug"
-    expected_type: "boolean"
-
-  # Error expectation
-  - path: "missing.key"
-    expected_error: "PathNotFoundError"
-```
-
-### Environment Setup
-
-```yaml
-tests:
-  - name: "Environment variable resolution"
-    env:
-      DATABASE_URL: "postgres://localhost/test"
-    config:
-      db_url: "${env:DATABASE_URL}"
-    assertions:
-      - path: "db_url"
-        expected: "postgres://localhost/test"
-```
-
-### File Fixtures
-
-```yaml
-tests:
-  - name: "File include"
-    files:
-      secrets.yaml: |
-        api_key: "secret123"
-    config:
-      secrets: "${file:secrets.yaml}"
-    assertions:
-      - path: "secrets.api_key"
-        expected: "secret123"
-```
-
-## Test Organization
-
-```
-tests/acceptance/
-├── api/                  # API behavior tests
-├── interpolation/        # Interpolation syntax tests
-├── merging/              # Config merging tests
-├── resolvers/            # Resolver tests
-│   ├── env.yaml          # Environment resolver
-│   ├── file.yaml         # File resolver
-│   └── self-ref.yaml     # Self-reference resolver
-├── schema/               # Schema validation tests
-└── serialization/        # Export/dump tests
-```
+See [Acceptance Tests](acceptance-tests.md) for test format details and the full test matrix.
 
 ## Writing Good Tests
 
@@ -146,34 +62,6 @@ tests/acceptance/
 - Don't rely on external services
 - Don't use random/time-dependent data
 - Don't write overly complex test configs
-
-## Test Coverage
-
-### Adding Tests for New Features
-
-1. **Create acceptance tests first** (TDD approach):
-   ```bash
-   # Create test file
-   touch tests/acceptance/feature/new-feature.yaml
-   ```
-
-2. **Define expected behavior** in YAML
-
-3. **Run tests** (they should fail initially):
-   ```bash
-   python tools/test_runner.py --driver python tests/acceptance/feature/new-feature.yaml
-   ```
-
-4. **Implement the feature**
-
-5. **Verify tests pass** for all drivers
-
-### Test Requirements for PRs
-
-- All new features must have acceptance tests
-- Bug fixes should include regression tests
-- Tests must pass for all language bindings
-- No decrease in overall test coverage
 
 ## Debugging Tests
 
@@ -203,6 +91,63 @@ database:
 print(config.dump(resolve=True))
 ```
 
+## Code Coverage
+
+### Coverage Goals
+
+| Package | Target | Notes |
+|---------|--------|-------|
+| **holoconf-core** (Rust) | 80% | Core logic, all public APIs |
+| **holoconf** (Python) | 80% | Bindings and Python-specific code |
+| **holoconf-cli** | 70% | CLI commands and argument handling |
+
+### Generating Coverage Reports
+
+#### Rust Coverage
+
+```bash
+# Generate HTML coverage report
+make coverage-rust
+
+# View report
+open target/llvm-cov/html/index.html
+```
+
+Requires `cargo-llvm-cov`:
+```bash
+cargo install cargo-llvm-cov
+```
+
+#### Python Coverage
+
+```bash
+cd packages/python/holoconf
+pytest --cov=holoconf --cov-report=html tests/
+open htmlcov/index.html
+```
+
+#### Full Coverage (Rust + Python + Acceptance)
+
+```bash
+make coverage-full
+```
+
+This generates a combined report covering:
+
+- Rust unit tests
+- Python unit tests
+- Acceptance tests run through both drivers
+
+### Coverage in CI
+
+Coverage reports are automatically generated on pull requests. The CI will:
+
+1. Run all test suites with coverage instrumentation
+2. Generate combined coverage reports
+3. Post coverage summary as a PR comment
+4. Fail if coverage drops below thresholds
+
 ## See Also
 
+- [Acceptance Tests](acceptance-tests.md) - Cross-language acceptance test details
 - [ADR-013 Testing Architecture](../adr/ADR-013-testing-architecture.md) - Design rationale for the testing approach

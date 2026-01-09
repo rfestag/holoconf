@@ -1,12 +1,27 @@
-# holoconf
+<div style="display: flex; align-items: center; gap: 2rem; padding: 1.5rem 0;">
+  <img src="images/logo.svg" alt="HoloConf Logo" style="width: 120px; height: auto; flex-shrink: 0;">
+  <div>
+    <h1 style="margin: 0; font-size: 2.5rem;">HoloConf</h1>
+    <p style="font-size: 1.1rem; color: #666; margin: 0.5rem 0 0 0;">
+      Multi-language hierarchical configuration library
+    </p>
+  </div>
+</div>
 
-[![CI](https://github.com/rfestag/holoconf/actions/workflows/rust.yml/badge.svg)](https://github.com/rfestag/holoconf/actions/workflows/rust.yml)
-[![PyPI](https://img.shields.io/pypi/v/holoconf)](https://pypi.org/project/holoconf/)
-[![crates.io](https://img.shields.io/crates/v/holoconf-core)](https://crates.io/crates/holoconf-core)
+<p style="text-align: center; margin-bottom: 2rem;">
+<a href="https://github.com/rfestag/holoconf/actions/workflows/rust.yml"><img src="https://github.com/rfestag/holoconf/actions/workflows/rust.yml/badge.svg" alt="CI"></a>
+<a href="https://pypi.org/project/holoconf/"><img src="https://img.shields.io/pypi/v/holoconf" alt="PyPI"></a>
+<a href="https://crates.io/crates/holoconf-core"><img src="https://img.shields.io/crates/v/holoconf-core" alt="crates.io"></a>
+</p>
 
-**Multi-language hierarchical configuration library**
+## Overview
 
-holoconf provides a consistent, powerful configuration management experience across multiple programming languages. Write your configuration once in YAML or JSON, and access it seamlessly from Python, Rust, JavaScript, Go, and more.
+HoloConf provides a consistent, powerful configuration management experience across multiple programming languages. Write your configuration once in YAML or JSON, and access it seamlessly from Python, Rust, JavaScript, Go, and more.
+
+<div style="text-align: center; margin: 2rem 0;">
+  <a href="guide/getting-started/" style="display: inline-block; padding: 0.75rem 2rem; background: #354f7a; color: white; text-decoration: none; border-radius: 0.25rem; font-weight: bold; margin: 0.5rem;">Get Started</a>
+  <a href="api/python/" style="display: inline-block; padding: 0.75rem 2rem; border: 2px solid #354f7a; color: #354f7a; text-decoration: none; border-radius: 0.25rem; font-weight: bold; margin: 0.5rem;">API Reference</a>
+</div>
 
 ## Features
 

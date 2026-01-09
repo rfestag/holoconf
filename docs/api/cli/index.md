@@ -1,4 +1,4 @@
-# holoconf-cli
+# HoloConf CLI
 
 The `holoconf` CLI provides tools for inspecting, validating, and exporting configuration files from the command line.
 
@@ -34,7 +34,7 @@ Choose your preferred installation method:
     pipx install holoconf
     ```
 
-    Keeps holoconf isolated from your project's dependencies. Best for global CLI tools.
+    Keeps HoloConf isolated from your project's dependencies. Best for global CLI tools.
 
 === "Binary (Direct)"
 

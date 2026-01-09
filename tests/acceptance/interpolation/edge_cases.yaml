@@ -1,0 +1,172 @@
+suite: interpolation_edge_cases
+description: Edge cases for interpolation per ADR-002
+
+tests:
+  - name: interpolation_at_start
+    given:
+      env:
+        HOLOCONF_PREFIX: "hello"
+      config: |
+        greeting: ${env:HOLOCONF_PREFIX} world
+    when:
+      access: greeting
+    then:
+      value: "hello world"
+
+  - name: interpolation_at_end
+    given:
+      env:
+        HOLOCONF_SUFFIX: "world"
+      config: |
+        greeting: hello ${env:HOLOCONF_SUFFIX}
+    when:
+      access: greeting
+    then:
+      value: "hello world"
+
+  - name: adjacent_interpolations
+    given:
+      env:
+        HOLOCONF_A: "foo"
+        HOLOCONF_B: "bar"
+      config: |
+        combined: ${env:HOLOCONF_A}${env:HOLOCONF_B}
+    when:
+      access: combined
+    then:
+      value: "foobar"
+
+  - name: empty_env_value
+    given:
+      env:
+        HOLOCONF_EMPTY: ""
+      config: |
+        value: prefix-${env:HOLOCONF_EMPTY}-suffix
+    when:
+      access: value
+    then:
+      value: "prefix--suffix"
+
+  - name: env_value_with_spaces
+    given:
+      env:
+        HOLOCONF_SPACED: "hello world"
+      config: |
+        message: ${env:HOLOCONF_SPACED}
+    when:
+      access: message
+    then:
+      value: "hello world"
+
+  - name: env_value_with_special_chars
+    given:
+      env:
+        HOLOCONF_SPECIAL: "a!b@c#d$e%f"
+      config: |
+        value: ${env:HOLOCONF_SPECIAL}
+    when:
+      access: value
+    then:
+      value: "a!b@c#d$e%f"
+
+  - name: self_reference_numeric_value
+    given:
+      config: |
+        base:
+          port: 8080
+        derived:
+          url: "http://localhost:${base.port}"
+    when:
+      access: derived.url
+    then:
+      value: "http://localhost:8080"
+
+  - name: reference_to_array_element
+    given:
+      config: |
+        hosts:
+          - primary.example.com
+          - secondary.example.com
+        primary: ${hosts[0]}
+    when:
+      access: primary
+    then:
+      value: "primary.example.com"
+
+  - name: reference_to_nested_array
+    given:
+      config: |
+        services:
+          - name: web
+            port: 80
+          - name: api
+            port: 8080
+        api_port: ${services[1].port}
+    when:
+      access: api_port
+    then:
+      value: 8080
+
+  - name: unicode_in_resolved_value
+    given:
+      env:
+        HOLOCONF_UNICODE: "こんにちは"
+      config: |
+        greeting: ${env:HOLOCONF_UNICODE}
+    when:
+      access: greeting
+    then:
+      value: "こんにちは"
+
+  - name: interpolation_preserves_type_integer
+    given:
+      config: |
+        config:
+          port: 3000
+        server:
+          port: ${config.port}
+    when:
+      access: server.port
+    then:
+      value: 3000
+
+  - name: interpolation_preserves_type_boolean
+    given:
+      config: |
+        defaults:
+          debug: true
+        app:
+          debug: ${defaults.debug}
+    when:
+      access: app.debug
+    then:
+      value: true
+
+  - name: interpolation_mixed_with_text_coerces_to_string
+    given:
+      config: |
+        config:
+          port: 3000
+        url: "http://localhost:${config.port}/api"
+    when:
+      access: url
+    then:
+      value: "http://localhost:3000/api"
+
+  - name: double_escaped_dollar
+    given:
+      config: |
+        literal: "\\${not_a_var}"
+    when:
+      access: literal
+    then:
+      value: "${not_a_var}"
+
+  - name: multiple_escapes_in_string
+    given:
+      config: |
+        template: "Cost: \\${price} each, Total: \\${total}"
+    when:
+      access: template
+    then:
+      value: "Cost: ${price} each, Total: ${total}"

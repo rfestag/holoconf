@@ -1,19 +1,26 @@
 # Feature Specifications
 
-This directory contains feature specifications for holoconf. Each spec defines a user-facing capability built on top of the architectural decisions in `/docs/adr/`.
+This directory contains feature specifications for HoloConf. Each spec defines a user-facing capability built on top of the architectural decisions in [ADRs](../../adr/README.md).
 
-## Feature Spec Format
+## What is a Feature Spec?
 
-Each feature spec includes:
-- **Overview**: What the feature does
-- **User Stories**: Who needs this and why
-- **API Surface**: How users interact with the feature
-- **Behavior**: Detailed behavior specification
-- **Error Cases**: What can go wrong and how it's handled
-- **Examples**: Concrete usage examples
-- **Dependencies**: Which ADRs and other features this depends on
+A feature spec is a document that defines the expected behavior of a user-facing capability. Feature specs help us:
 
-## Index
+- Define clear acceptance criteria before implementation
+- Ensure consistent behavior across language bindings
+- Provide a reference for writing acceptance tests
+- Document the public API surface
+
+## Feature Status
+
+- **Draft** - Initial specification, under development
+- **Review** - Ready for review, may change
+- **Accepted** - Approved and ready for implementation
+- **Implemented** - Fully implemented and tested
+
+## Features
+
+<div class="searchable-table" data-page-size="10" markdown>
 
 | Feature | Description | Status |
 |---------|-------------|--------|
@@ -23,3 +30,16 @@ Each feature spec includes:
 | [FEAT-004](FEAT-004-schema-validation.md) | Schema Validation | Draft |
 | [FEAT-005](FEAT-005-serialization.md) | Serialization and Export | Draft |
 | [FEAT-006](FEAT-006-cli.md) | Command Line Interface | Draft |
+
+</div>
+
+## Creating a New Feature Spec
+
+1. Copy `template.md` to `FEAT-NNN-short-title.md`
+2. Fill in all sections
+3. Submit for review
+4. Update this index
+
+## Template
+
+See [template.md](template.md) for the feature spec template.

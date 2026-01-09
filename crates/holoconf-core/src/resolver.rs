@@ -257,9 +257,15 @@ impl ResolverRegistry {
 }
 
 /// Built-in environment variable resolver
+///
+/// Usage:
+///   ${env:VAR_NAME}                      - Get env var (error if not set)
+///   ${env:VAR_NAME,default}              - Get env var with default
+///   ${env:VAR_NAME,sensitive=true}       - Mark as sensitive for redaction
+///   ${env:VAR_NAME,default,sensitive=true} - Both default and sensitive
 fn env_resolver(
     args: &[String],
-    _kwargs: &HashMap<String, String>,
+    kwargs: &HashMap<String, String>,
     ctx: &ResolverContext,
 ) -> Result<ResolvedValue> {
     if args.is_empty() {
@@ -270,11 +276,29 @@ fn env_resolver(
     let var_name = &args[0];
     let default_value = args.get(1);
 
+    // Check if sensitive=true is set in kwargs
+    let is_sensitive = kwargs
+        .get("sensitive")
+        .map(|v| v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+
     match std::env::var(var_name) {
-        Ok(value) => Ok(ResolvedValue::new(Value::String(value))),
+        Ok(value) => {
+            let resolved_value = Value::String(value);
+            if is_sensitive {
+                Ok(ResolvedValue::sensitive(resolved_value))
+            } else {
+                Ok(ResolvedValue::new(resolved_value))
+            }
+        }
         Err(_) => {
             if let Some(default) = default_value {
-                Ok(ResolvedValue::new(Value::String(default.clone())))
+                let resolved_value = Value::String(default.clone());
+                if is_sensitive {
+                    Ok(ResolvedValue::sensitive(resolved_value))
+                } else {
+                    Ok(ResolvedValue::new(resolved_value))
+                }
             } else {
                 Err(Error::env_not_found(
                     var_name,
@@ -434,6 +458,55 @@ mod tests {
     }
 
     #[test]
+    fn test_env_resolver_sensitive_kwarg() {
+        std::env::set_var("HOLOCONF_SENSITIVE_VAR", "secret_value");
+
+        let ctx = ResolverContext::new("test.path");
+        let args = vec!["HOLOCONF_SENSITIVE_VAR".to_string()];
+        let mut kwargs = HashMap::new();
+        kwargs.insert("sensitive".to_string(), "true".to_string());
+
+        let result = env_resolver(&args, &kwargs, &ctx).unwrap();
+        assert_eq!(result.value.as_str(), Some("secret_value"));
+        assert!(result.sensitive);
+
+        std::env::remove_var("HOLOCONF_SENSITIVE_VAR");
+    }
+
+    #[test]
+    fn test_env_resolver_sensitive_false() {
+        std::env::set_var("HOLOCONF_NON_SENSITIVE", "public_value");
+
+        let ctx = ResolverContext::new("test.path");
+        let args = vec!["HOLOCONF_NON_SENSITIVE".to_string()];
+        let mut kwargs = HashMap::new();
+        kwargs.insert("sensitive".to_string(), "false".to_string());
+
+        let result = env_resolver(&args, &kwargs, &ctx).unwrap();
+        assert_eq!(result.value.as_str(), Some("public_value"));
+        assert!(!result.sensitive);
+
+        std::env::remove_var("HOLOCONF_NON_SENSITIVE");
+    }
+
+    #[test]
+    fn test_env_resolver_sensitive_with_default() {
+        std::env::remove_var("HOLOCONF_SENSITIVE_DEFAULT");
+
+        let ctx = ResolverContext::new("test.path");
+        let args = vec![
+            "HOLOCONF_SENSITIVE_DEFAULT".to_string(),
+            "default_secret".to_string(),
+        ];
+        let mut kwargs = HashMap::new();
+        kwargs.insert("sensitive".to_string(), "true".to_string());
+
+        let result = env_resolver(&args, &kwargs, &ctx).unwrap();
+        assert_eq!(result.value.as_str(), Some("default_secret"));
+        assert!(result.sensitive);
+    }
+
+    #[test]
     fn test_resolver_registry() {
         let registry = ResolverRegistry::with_builtins();
 
@@ -571,5 +644,250 @@ mod tests {
     fn test_registry_with_http() {
         let registry = ResolverRegistry::with_builtins();
         assert!(registry.contains("http"));
+    }
+
+    // Additional edge case tests for improved coverage
+
+    #[test]
+    fn test_env_resolver_no_args() {
+        let ctx = ResolverContext::new("test.path");
+        let args = vec![];
+        let kwargs = HashMap::new();
+
+        let result = env_resolver(&args, &kwargs, &ctx);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("requires"));
+    }
+
+    #[test]
+    fn test_file_resolver_no_args() {
+        let ctx = ResolverContext::new("test.path");
+        let args = vec![];
+        let kwargs = HashMap::new();
+
+        let result = file_resolver(&args, &kwargs, &ctx);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("requires"));
+    }
+
+    #[test]
+    fn test_http_resolver_no_args() {
+        let ctx = ResolverContext::new("test.path");
+        let args = vec![];
+        let kwargs = HashMap::new();
+
+        let result = http_resolver(&args, &kwargs, &ctx);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("requires"));
+    }
+
+    #[test]
+    fn test_unknown_resolver() {
+        let registry = ResolverRegistry::with_builtins();
+        let ctx = ResolverContext::new("test.path");
+
+        let result = registry.resolve("unknown_resolver", &[], &HashMap::new(), &ctx);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("unknown_resolver"));
+    }
+
+    #[test]
+    fn test_resolved_value_from_traits() {
+        let from_value: ResolvedValue = Value::String("test".to_string()).into();
+        assert_eq!(from_value.value.as_str(), Some("test"));
+        assert!(!from_value.sensitive);
+
+        let from_string: ResolvedValue = "hello".to_string().into();
+        assert_eq!(from_string.value.as_str(), Some("hello"));
+
+        let from_str: ResolvedValue = "world".into();
+        assert_eq!(from_str.value.as_str(), Some("world"));
+    }
+
+    #[test]
+    fn test_resolver_context_with_base_path() {
+        let ctx = ResolverContext::new("test")
+            .with_base_path(std::path::PathBuf::from("/tmp"));
+        assert_eq!(ctx.base_path, Some(std::path::PathBuf::from("/tmp")));
+    }
+
+    #[test]
+    fn test_resolver_context_with_config_root() {
+        use std::sync::Arc;
+        let root = Arc::new(Value::String("root".to_string()));
+        let ctx = ResolverContext::new("test").with_config_root(root.clone());
+        assert!(ctx.config_root.is_some());
+    }
+
+    #[test]
+    fn test_resolver_context_resolution_chain() {
+        let mut ctx = ResolverContext::new("root");
+        ctx.push_resolution("a");
+        ctx.push_resolution("b");
+        ctx.push_resolution("c");
+
+        let chain = ctx.get_resolution_chain();
+        assert_eq!(chain, vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn test_registry_get_resolver() {
+        let registry = ResolverRegistry::with_builtins();
+
+        let env_resolver = registry.get("env");
+        assert!(env_resolver.is_some());
+        assert_eq!(env_resolver.unwrap().name(), "env");
+
+        let missing = registry.get("nonexistent");
+        assert!(missing.is_none());
+    }
+
+    #[test]
+    fn test_registry_default() {
+        let registry = ResolverRegistry::default();
+        // Default registry is empty
+        assert!(!registry.contains("env"));
+    }
+
+    #[test]
+    fn test_fn_resolver_name() {
+        let resolver = FnResolver::new("my_resolver", |_, _, _| {
+            Ok(ResolvedValue::new("test"))
+        });
+        assert_eq!(resolver.name(), "my_resolver");
+    }
+
+    #[test]
+    fn test_file_resolver_json() {
+        use std::io::Write;
+
+        // Create a temporary JSON file
+        let temp_dir = std::env::temp_dir();
+        let test_file = temp_dir.join("holoconf_test.json");
+        {
+            let mut file = std::fs::File::create(&test_file).unwrap();
+            writeln!(file, r#"{{"key": "value", "number": 42}}"#).unwrap();
+        }
+
+        let mut ctx = ResolverContext::new("test.path");
+        ctx.base_path = Some(temp_dir.clone());
+
+        let args = vec!["holoconf_test.json".to_string()];
+        let kwargs = HashMap::new();
+
+        let result = file_resolver(&args, &kwargs, &ctx).unwrap();
+        assert!(result.value.is_mapping());
+
+        // Cleanup
+        std::fs::remove_file(test_file).ok();
+    }
+
+    #[test]
+    fn test_file_resolver_absolute_path() {
+        use std::io::Write;
+
+        // Create a temporary file
+        let temp_dir = std::env::temp_dir();
+        let test_file = temp_dir.join("holoconf_abs_test.txt");
+        {
+            let mut file = std::fs::File::create(&test_file).unwrap();
+            writeln!(file, "absolute path content").unwrap();
+        }
+
+        let ctx = ResolverContext::new("test.path");
+        // No base path - using absolute path directly
+        let args = vec![test_file.to_string_lossy().to_string()];
+        let mut kwargs = HashMap::new();
+        kwargs.insert("parse".to_string(), "text".to_string());
+
+        let result = file_resolver(&args, &kwargs, &ctx).unwrap();
+        assert!(result.value.as_str().unwrap().contains("absolute path content"));
+
+        // Cleanup
+        std::fs::remove_file(test_file).ok();
+    }
+
+    #[test]
+    fn test_file_resolver_invalid_yaml() {
+        use std::io::Write;
+
+        // Create a temporary file with invalid YAML
+        let temp_dir = std::env::temp_dir();
+        let test_file = temp_dir.join("holoconf_invalid.yaml");
+        {
+            let mut file = std::fs::File::create(&test_file).unwrap();
+            writeln!(file, "key: [invalid").unwrap();
+        }
+
+        let mut ctx = ResolverContext::new("test.path");
+        ctx.base_path = Some(temp_dir.clone());
+
+        let args = vec!["holoconf_invalid.yaml".to_string()];
+        let kwargs = HashMap::new();
+
+        let result = file_resolver(&args, &kwargs, &ctx);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("parse") || err.to_string().contains("YAML"));
+
+        // Cleanup
+        std::fs::remove_file(test_file).ok();
+    }
+
+    #[test]
+    fn test_file_resolver_invalid_json() {
+        use std::io::Write;
+
+        // Create a temporary file with invalid JSON
+        let temp_dir = std::env::temp_dir();
+        let test_file = temp_dir.join("holoconf_invalid.json");
+        {
+            let mut file = std::fs::File::create(&test_file).unwrap();
+            writeln!(file, "{{invalid json}}").unwrap();
+        }
+
+        let mut ctx = ResolverContext::new("test.path");
+        ctx.base_path = Some(temp_dir.clone());
+
+        let args = vec!["holoconf_invalid.json".to_string()];
+        let kwargs = HashMap::new();
+
+        let result = file_resolver(&args, &kwargs, &ctx);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("parse") || err.to_string().contains("JSON"));
+
+        // Cleanup
+        std::fs::remove_file(test_file).ok();
+    }
+
+    #[test]
+    fn test_file_resolver_unknown_extension() {
+        use std::io::Write;
+
+        // Create a temporary file with unknown extension (treated as text)
+        let temp_dir = std::env::temp_dir();
+        let test_file = temp_dir.join("holoconf_test.xyz");
+        {
+            let mut file = std::fs::File::create(&test_file).unwrap();
+            writeln!(file, "plain text content").unwrap();
+        }
+
+        let mut ctx = ResolverContext::new("test.path");
+        ctx.base_path = Some(temp_dir.clone());
+
+        let args = vec!["holoconf_test.xyz".to_string()];
+        let kwargs = HashMap::new();
+
+        let result = file_resolver(&args, &kwargs, &ctx).unwrap();
+        // Unknown extension defaults to text mode
+        assert!(result.value.as_str().unwrap().contains("plain text content"));
+
+        // Cleanup
+        std::fs::remove_file(test_file).ok();
     }
 }

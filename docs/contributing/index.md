@@ -1,6 +1,6 @@
-# Contributing to holoconf
+# Contributing to HoloConf
 
-Thank you for your interest in contributing to holoconf! This section provides guidelines for contributors.
+Thank you for your interest in contributing to HoloConf! This section provides guidelines for contributors.
 
 ## Quick Links
 
@@ -18,7 +18,7 @@ Found a bug? [Open an issue](https://github.com/rfestag/holoconf/issues/new) wit
 - A clear description of the problem
 - Steps to reproduce
 - Expected vs actual behavior
-- Your environment (OS, Python/Rust version, holoconf version)
+- Your environment (OS, Python/Rust version, HoloConf version)
 
 ### Feature Requests
 

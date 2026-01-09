@@ -1,6 +1,6 @@
 # Architecture Decision Records
 
-This directory contains Architecture Decision Records (ADRs) for the holoconf project.
+This directory contains Architecture Decision Records (ADRs) for the HoloConf project.
 
 ## What is an ADR?
 
@@ -18,7 +18,9 @@ An ADR is a document that captures an important architectural decision made alon
 - **Superseded** - Replaced by a newer ADR
 - **Deprecated** - No longer relevant
 
-## Index
+## Architecture Decisions
+
+<div class="searchable-table" data-page-size="10" markdown>
 
 | ADR | Title | Status |
 |-----|-------|--------|
@@ -35,6 +37,11 @@ An ADR is a document that captures an important architectural decision made alon
 | [ADR-011](ADR-011-interpolation-syntax.md) | Interpolation Syntax | **Accepted** |
 | [ADR-012](ADR-012-type-coercion.md) | Type Coercion | **Accepted** |
 | [ADR-013](ADR-013-testing-architecture.md) | Testing Architecture | **Accepted** |
+| [ADR-014](ADR-014-code-quality-tooling.md) | Code Quality Tooling | **Accepted** |
+| [ADR-015](ADR-015-documentation-site.md) | Documentation Site | **Accepted** |
+| [ADR-016](ADR-016-pyo3-api-documentation.md) | PyO3 API Documentation | **Accepted** |
+
+</div>
 
 ## Creating a New ADR
 

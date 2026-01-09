@@ -1,0 +1,141 @@
+suite: redaction
+description: Sensitive value redaction behavior
+
+tests:
+  # Values are redacted when marked as sensitive via the sensitive=true kwarg
+  # on resolvers. Use ${env:VAR,sensitive=true} to mark env values as sensitive.
+
+  - name: sensitive_env_value_redacted_yaml
+    given:
+      env:
+        HOLOCONF_SECRET: "my_secret_value"
+      config: |
+        database:
+          host: localhost
+          password: ${env:HOLOCONF_SECRET,sensitive=true}
+    when:
+      dump:
+        format: yaml
+        redact: true
+    then:
+      output_contains: "host: localhost"
+      output_contains: "[REDACTED]"
+      output_not_contains: "my_secret_value"
+
+  - name: sensitive_env_value_redacted_json
+    given:
+      env:
+        HOLOCONF_API_KEY: "secret_api_key"
+      config: |
+        api_key: ${env:HOLOCONF_API_KEY,sensitive=true}
+    when:
+      dump:
+        format: json
+        redact: true
+    then:
+      output_contains: "[REDACTED]"
+      output_not_contains: "secret_api_key"
+
+  - name: multiple_sensitive_values_redacted
+    given:
+      env:
+        HOLOCONF_PASSWORD: "db_pass"
+        HOLOCONF_TOKEN: "auth_token"
+      config: |
+        database:
+          password: ${env:HOLOCONF_PASSWORD,sensitive=true}
+        auth:
+          token: ${env:HOLOCONF_TOKEN,sensitive=true}
+    when:
+      dump:
+        format: yaml
+        redact: true
+    then:
+      output_not_contains: "db_pass"
+      output_not_contains: "auth_token"
+      output_contains: "[REDACTED]"
+
+  - name: non_sensitive_env_not_redacted
+    description: Env values without sensitive=true are NOT redacted
+    given:
+      env:
+        HOLOCONF_PUBLIC: "public_value"
+      config: |
+        public: ${env:HOLOCONF_PUBLIC}
+    when:
+      dump:
+        format: yaml
+        redact: true
+    then:
+      output_contains: "public_value"
+
+  - name: mixed_sensitive_and_non_sensitive
+    given:
+      env:
+        HOLOCONF_PUBLIC: "visible"
+        HOLOCONF_SECRET: "hidden"
+      config: |
+        public_value: ${env:HOLOCONF_PUBLIC}
+        secret_value: ${env:HOLOCONF_SECRET,sensitive=true}
+    when:
+      dump:
+        format: yaml
+        redact: true
+    then:
+      output_contains: "visible"
+      output_not_contains: "hidden"
+      output_contains: "[REDACTED]"
+
+  - name: static_values_not_redacted
+    description: Static config values are never marked as sensitive
+    given:
+      config: |
+        database:
+          host: localhost
+          password: static_secret
+    when:
+      dump:
+        format: yaml
+        redact: true
+    then:
+      output_contains: "password: static_secret"
+
+  - name: no_redact_shows_sensitive_values
+    given:
+      env:
+        HOLOCONF_SECRET: "visible_secret"
+      config: |
+        password: ${env:HOLOCONF_SECRET,sensitive=true}
+    when:
+      dump:
+        format: yaml
+        redact: false
+    then:
+      output_contains: "visible_secret"
+
+  - name: sensitive_value_in_string_redacted
+    given:
+      env:
+        HOLOCONF_HOST: "secret.db.com"
+      config: |
+        url: "postgresql://${env:HOLOCONF_HOST,sensitive=true}/db"
+    when:
+      dump:
+        format: yaml
+        redact: true
+    then:
+      output_not_contains: "secret.db.com"
+      output_contains: "[REDACTED]"
+
+  - name: sensitive_with_default_value
+    description: Default values can also be marked sensitive
+    given:
+      config: |
+        token: ${env:HOLOCONF_NONEXISTENT_TOKEN,fallback_token,sensitive=true}
+    when:
+      dump:
+        format: yaml
+        redact: true
+    then:
+      output_not_contains: "fallback_token"
+      output_contains: "[REDACTED]"

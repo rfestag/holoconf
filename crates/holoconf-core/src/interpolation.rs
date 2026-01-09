@@ -584,4 +584,178 @@ mod tests {
         let result = parse("${env:VAR");
         assert!(result.is_err());
     }
+
+    // Edge case tests for improved coverage
+
+    #[test]
+    fn test_parse_empty_interpolation() {
+        let result = parse("${}");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("Empty"));
+    }
+
+    #[test]
+    fn test_parse_resolver_no_args() {
+        // Resolver with colon but no args - returns empty arg list
+        let result = parse("${env:}").unwrap();
+        if let Interpolation::Resolver { name, args, .. } = result {
+            assert_eq!(name, "env");
+            // Empty resolver has no args (or one empty arg depending on implementation)
+            // The current behavior returns an empty arg list
+            assert!(args.is_empty() || (args.len() == 1 && args[0] == InterpolationArg::Literal("".into())));
+        } else {
+            panic!("Expected Resolver");
+        }
+    }
+
+    #[test]
+    fn test_parse_whitespace_in_interpolation() {
+        let result = parse("${ env:VAR }").unwrap();
+        if let Interpolation::Resolver { name, .. } = result {
+            assert_eq!(name, "env");
+        } else {
+            panic!("Expected Resolver");
+        }
+    }
+
+    #[test]
+    fn test_parse_multiple_escapes() {
+        let result = parse(r"\${first}\${second}").unwrap();
+        assert_eq!(result, Interpolation::Literal("${first}${second}".into()));
+    }
+
+    #[test]
+    fn test_parse_interpolation_at_start() {
+        let result = parse("${env:VAR}suffix").unwrap();
+        if let Interpolation::Concat(parts) = result {
+            assert_eq!(parts.len(), 2);
+            assert!(matches!(parts[0], Interpolation::Resolver { .. }));
+            assert_eq!(parts[1], Interpolation::Literal("suffix".into()));
+        } else {
+            panic!("Expected Concat");
+        }
+    }
+
+    #[test]
+    fn test_parse_interpolation_at_end() {
+        let result = parse("prefix${env:VAR}").unwrap();
+        if let Interpolation::Concat(parts) = result {
+            assert_eq!(parts.len(), 2);
+            assert_eq!(parts[0], Interpolation::Literal("prefix".into()));
+            assert!(matches!(parts[1], Interpolation::Resolver { .. }));
+        } else {
+            panic!("Expected Concat");
+        }
+    }
+
+    #[test]
+    fn test_parse_adjacent_interpolations() {
+        let result = parse("${env:A}${env:B}").unwrap();
+        if let Interpolation::Concat(parts) = result {
+            assert_eq!(parts.len(), 2);
+            assert!(matches!(parts[0], Interpolation::Resolver { .. }));
+            assert!(matches!(parts[1], Interpolation::Resolver { .. }));
+        } else {
+            panic!("Expected Concat");
+        }
+    }
+
+    #[test]
+    fn test_parse_deeply_nested_path() {
+        let result = parse("${a.b.c.d.e.f.g.h}").unwrap();
+        if let Interpolation::SelfRef { path, relative } = result {
+            assert_eq!(path, "a.b.c.d.e.f.g.h");
+            assert!(!relative);
+        } else {
+            panic!("Expected SelfRef");
+        }
+    }
+
+    #[test]
+    fn test_parse_multiple_array_indices() {
+        let result = parse("${matrix[0][1][2]}").unwrap();
+        if let Interpolation::SelfRef { path, .. } = result {
+            assert_eq!(path, "matrix[0][1][2]");
+        } else {
+            panic!("Expected SelfRef");
+        }
+    }
+
+    #[test]
+    fn test_parse_mixed_path_and_array() {
+        let result = parse("${data.items[0].nested[1].value}").unwrap();
+        if let Interpolation::SelfRef { path, .. } = result {
+            assert_eq!(path, "data.items[0].nested[1].value");
+        } else {
+            panic!("Expected SelfRef");
+        }
+    }
+
+    #[test]
+    fn test_parse_underscore_in_identifiers() {
+        let result = parse("${my_var.some_path}").unwrap();
+        if let Interpolation::SelfRef { path, .. } = result {
+            assert_eq!(path, "my_var.some_path");
+        } else {
+            panic!("Expected SelfRef");
+        }
+    }
+
+    #[test]
+    fn test_parse_resolver_with_multiple_args() {
+        let result = parse("${resolver:arg1,arg2,arg3}").unwrap();
+        if let Interpolation::Resolver { name, args, .. } = result {
+            assert_eq!(name, "resolver");
+            assert_eq!(args.len(), 3);
+        } else {
+            panic!("Expected Resolver");
+        }
+    }
+
+    #[test]
+    fn test_parse_mixed_escaped_and_interpolation() {
+        let result = parse(r"literal \${escaped} ${env:VAR} more").unwrap();
+        if let Interpolation::Concat(parts) = result {
+            assert!(parts.len() >= 3);
+        } else {
+            panic!("Expected Concat");
+        }
+    }
+
+    #[test]
+    fn test_needs_processing() {
+        assert!(needs_processing("${env:VAR}"));
+        assert!(needs_processing(r"\${escaped}"));
+        assert!(!needs_processing("no special chars"));
+        assert!(!needs_processing("just $dollar"));
+    }
+
+    #[test]
+    fn test_parse_invalid_char_in_path() {
+        let result = parse("${path!invalid}");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_interpolation_arg_methods() {
+        let lit = InterpolationArg::Literal("test".into());
+        assert!(lit.is_literal());
+        assert_eq!(lit.as_literal(), Some("test"));
+
+        let nested = InterpolationArg::Nested(Box::new(Interpolation::Literal("x".into())));
+        assert!(!nested.is_literal());
+        assert_eq!(nested.as_literal(), None);
+    }
+
+    #[test]
+    fn test_parse_relative_parent_reference() {
+        let result = parse("${..parent.value}").unwrap();
+        if let Interpolation::SelfRef { path, relative } = result {
+            assert!(relative);
+            assert_eq!(path, "..parent.value");
+        } else {
+            panic!("Expected relative SelfRef");
+        }
+    }
 }

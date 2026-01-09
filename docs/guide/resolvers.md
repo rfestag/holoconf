@@ -5,7 +5,7 @@
 
 ## Overview
 
-Resolvers are the mechanism holoconf uses to dynamically compute configuration values. Each resolver handles a specific type of value source.
+Resolvers are the mechanism HoloConf uses to dynamically compute configuration values. Each resolver handles a specific type of value source.
 
 ## Built-in Resolvers
 

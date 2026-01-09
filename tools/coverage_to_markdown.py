@@ -100,6 +100,17 @@ def parse_llvm_cov_json(json_path: Path) -> dict:
     }
 
 
+# Files to exclude from per-file display (tested via acceptance tests, not unit tests)
+EXCLUDED_FILES = {"cli.rs", "main.rs"}
+
+# Package groupings for rollup display
+PACKAGE_GROUPS = {
+    "holoconf-core": ["config.rs", "value.rs", "resolver.rs", "interpolation.rs", "schema.rs", "error.rs"],
+    "holoconf-cli": ["cli.rs", "main.rs"],
+    "holoconf-python": ["lib.rs"],
+}
+
+
 def parse_lcov(lcov_path: Path) -> dict:
     """Parse LCOV format coverage data."""
     files = []
@@ -138,6 +149,7 @@ def parse_lcov(lcov_path: Path) -> dict:
                     "covered": current_lines_hit,
                     "total": current_lines_found,
                     "status": status,
+                    "excluded": name in EXCLUDED_FILES,
                 })
 
             total_lines_found += current_lines_found
@@ -146,33 +158,91 @@ def parse_lcov(lcov_path: Path) -> dict:
 
     total_pct = (total_lines_hit / total_lines_found * 100) if total_lines_found > 0 else 0
 
+    # Calculate package-level rollups
+    packages = {}
+    for pkg_name, pkg_files in PACKAGE_GROUPS.items():
+        pkg_covered = sum(f["covered"] for f in files if f["name"] in pkg_files)
+        pkg_total = sum(f["total"] for f in files if f["name"] in pkg_files)
+        pkg_pct = (pkg_covered / pkg_total * 100) if pkg_total > 0 else 0
+        if pkg_total > 0:
+            packages[pkg_name] = {
+                "coverage": f"{pkg_pct:.1f}%",
+                "covered": pkg_covered,
+                "total": pkg_total,
+                "status": "🟢" if pkg_pct >= 80 else ("🟡" if pkg_pct >= 50 else "🔴"),
+            }
+
+    # Calculate library-only coverage (excluding CLI)
+    lib_files = [f for f in files if not f.get("excluded", False)]
+    lib_covered = sum(f["covered"] for f in lib_files)
+    lib_total = sum(f["total"] for f in lib_files)
+    lib_pct = (lib_covered / lib_total * 100) if lib_total > 0 else 0
+
     return {
         "files": files,
+        "packages": packages,
         "total_coverage": f"{total_pct:.1f}%",
+        "lib_coverage": f"{lib_pct:.1f}%",
         "lines_covered": total_lines_hit,
         "lines_valid": total_lines_found,
+        "lib_covered": lib_covered,
+        "lib_total": lib_total,
     }
 
 
 def to_markdown(data: dict, title: str = None, detail: bool = True) -> str:
-    """Convert coverage data to markdown table."""
+    """Convert coverage data to markdown table.
+
+    For Rust coverage (with packages), shows:
+    - Package-level summary
+    - Per-file details (excluding CLI files which are tested via acceptance tests)
+    - Library coverage (excluding CLI) as the main metric
+    """
     lines = []
 
     if title:
         lines.append(f"### {title}")
         lines.append("")
 
-    if detail and data["files"]:
-        lines.append("| File | Coverage | Status |")
-        lines.append("|------|----------|--------|")
-        for f in sorted(data["files"], key=lambda x: x["name"]):
-            lines.append(f"| `{f['name']}` | {f['coverage']} | {f['status']} |")
+    # Show package-level rollups if available
+    packages = data.get("packages", {})
+    if detail and packages:
+        lines.append("| Package | Coverage | Status |")
+        lines.append("|---------|----------|--------|")
+        for pkg_name in ["holoconf-core", "holoconf-python", "holoconf-cli"]:
+            if pkg_name in packages:
+                pkg = packages[pkg_name]
+                note = " *(acceptance tested)*" if pkg_name == "holoconf-cli" else ""
+                lines.append(f"| {pkg_name}{note} | {pkg['coverage']} | {pkg['status']} |")
         lines.append("")
 
-    total = data.get("total_coverage", "N/A")
-    covered = data.get("lines_covered", 0)
-    valid = data.get("lines_valid", 0)
-    lines.append(f"**Total: {total}** ({covered}/{valid} lines)")
+    # Show per-file details (excluding CLI files)
+    if detail and data.get("files"):
+        # Filter out excluded files for display
+        display_files = [f for f in data["files"] if not f.get("excluded", False)]
+        if display_files:
+            lines.append("<details>")
+            lines.append("<summary>Per-file coverage</summary>")
+            lines.append("")
+            lines.append("| File | Coverage | Status |")
+            lines.append("|------|----------|--------|")
+            for f in sorted(display_files, key=lambda x: x["name"]):
+                lines.append(f"| `{f['name']}` | {f['coverage']} | {f['status']} |")
+            lines.append("")
+            lines.append("</details>")
+            lines.append("")
+
+    # Show library coverage as the main metric (excludes CLI)
+    lib_coverage = data.get("lib_coverage")
+    if lib_coverage:
+        lib_covered = data.get("lib_covered", 0)
+        lib_total = data.get("lib_total", 0)
+        lines.append(f"**Library Coverage: {lib_coverage}** ({lib_covered}/{lib_total} lines)")
+    else:
+        total = data.get("total_coverage", "N/A")
+        covered = data.get("lines_covered", 0)
+        valid = data.get("lines_valid", 0)
+        lines.append(f"**Total: {total}** ({covered}/{valid} lines)")
 
     return "\n".join(lines)
 
@@ -223,7 +293,11 @@ def humanize_name(name: str) -> str:
 
 
 def acceptance_to_markdown(data: dict, detail: bool = True) -> str:
-    """Convert acceptance test results to markdown."""
+    """Convert acceptance test results to markdown.
+
+    When detail=True, generates a summary table by suite showing pass rates.
+    When detail=False, only shows overall summary.
+    """
     lines = []
     drivers = sorted(data["drivers"].keys())
 
@@ -231,42 +305,37 @@ def acceptance_to_markdown(data: dict, detail: bool = True) -> str:
         return "No acceptance test results found."
 
     if detail and data["suites"]:
-        # Header row
-        header = "| Suite | Test |"
-        separator = "|-------|------|"
+        # Summary table by suite with pass rates
+        header = "| Suite | Tests |"
+        separator = "|:------|------:|"
         for driver in drivers:
             header += f" {driver.title()} |"
-            separator += "--------|"
+            separator += ":------:|"
         lines.append(header)
         lines.append(separator)
 
-        # Data rows grouped by suite
+        # Calculate per-suite stats
         for suite_name in sorted(data["suites"].keys()):
             suite = data["suites"][suite_name]
             tests = suite["tests"]
+            test_count = len(tests)
 
-            for i, test_name in enumerate(sorted(tests.keys())):
-                # Show suite name only on first row
-                suite_display = humanize_name(suite_name) if i == 0 else ""
-                row = f"| {suite_display} | {humanize_name(test_name)} |"
+            row = f"| {humanize_name(suite_name)} | {test_count} |"
 
-                for driver in drivers:
-                    passed = tests[test_name].get(driver)
-                    if passed is True:
-                        row += " ✅ |"
-                    elif passed is False:
-                        row += " ❌ |"
-                    else:
-                        row += " ⏳ |"
-                lines.append(row)
+            for driver in drivers:
+                passed = sum(1 for t in tests.values() if t.get(driver) is True)
+                pct = int(passed / test_count * 100) if test_count > 0 else 0
+                row += f" {pct}% |"
+            lines.append(row)
 
         lines.append("")
 
-    # Summary
+    # Overall summary
     summary_parts = []
     for driver in drivers:
         info = data["drivers"][driver]
-        summary_parts.append(f"**{driver.title()}**: {info['passed']}/{info['total']}")
+        pct = (info['passed'] / info['total'] * 100) if info['total'] > 0 else 0
+        summary_parts.append(f"**{driver.title()}**: {info['passed']}/{info['total']} ({pct:.0f}%)")
     lines.append(" | ".join(summary_parts))
 
     return "\n".join(lines)

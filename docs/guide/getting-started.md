@@ -1,6 +1,6 @@
 # Getting Started
 
-This guide walks you through installing holoconf and creating your first configuration.
+This guide walks you through installing HoloConf and creating your first configuration.
 
 ## Installation
 
@@ -55,7 +55,7 @@ logging:
   format: json
 ```
 
-This configuration demonstrates several holoconf features:
+This configuration demonstrates several HoloConf features:
 
 - **Nested structure** - Values organized hierarchically
 - **Environment variables** - `${env:VAR_NAME}` resolves to environment variable values
@@ -126,7 +126,7 @@ This configuration demonstrates several holoconf features:
 
 ## Working with Nested Values
 
-holoconf supports deep nesting and provides convenient access patterns:
+HoloConf supports deep nesting and provides convenient access patterns:
 
 === "Python"
 
@@ -173,7 +173,7 @@ holoconf supports deep nesting and provides convenient access patterns:
 
 ## Error Handling
 
-holoconf provides descriptive errors to help you debug configuration issues:
+HoloConf provides descriptive errors to help you debug configuration issues:
 
 === "Python"
 

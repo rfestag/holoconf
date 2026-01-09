@@ -14,11 +14,12 @@ import glob
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass, asdict
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
@@ -99,6 +100,10 @@ class Driver:
         """Get the error type name from an exception."""
         return type(error).__name__
 
+    def run_cli(self, command: str, env: Dict[str, str]) -> Tuple[int, str, str]:
+        """Run CLI command and return (exit_code, stdout, stderr)."""
+        raise NotImplementedError
+
 
 class RustDriver(Driver):
     """Driver for testing the Rust core directly via Python bindings."""
@@ -113,6 +118,39 @@ class RustDriver(Driver):
                 "Could not import holoconf. "
                 "Build with: cd packages/python/holoconf && maturin develop"
             )
+        # Find the holoconf CLI binary
+        self.cli_path = self._find_cli()
+
+    def _find_cli(self) -> Optional[str]:
+        """Find the holoconf CLI binary."""
+        # Check common locations
+        candidates = [
+            "target/release/holoconf",
+            "target/debug/holoconf",
+            shutil.which("holoconf"),
+        ]
+        for path in candidates:
+            if path and Path(path).exists():
+                return str(Path(path).resolve())
+        return None
+
+    def run_cli(self, command: str, env: Dict[str, str]) -> Tuple[int, str, str]:
+        """Run CLI command and return (exit_code, stdout, stderr)."""
+        if not self.cli_path:
+            raise RuntimeError(
+                "holoconf CLI not found. Build with: cargo build --release"
+            )
+        full_command = f"{self.cli_path} {command}"
+        env_copy = os.environ.copy()
+        env_copy.update(env)
+        result = subprocess.run(
+            full_command,
+            shell=True,
+            capture_output=True,
+            text=True,
+            env=env_copy,
+        )
+        return result.returncode, result.stdout, result.stderr
 
     def load_config(self, yaml_content: str, base_path: Optional[str] = None) -> Any:
         return self.Config.loads(yaml_content, base_path=base_path)
@@ -155,6 +193,20 @@ class PythonDriver(Driver):
                 "Could not import holoconf. "
                 "Build with: cd packages/python/holoconf && maturin develop"
             )
+
+    def run_cli(self, command: str, env: Dict[str, str]) -> Tuple[int, str, str]:
+        """Run CLI command via Python module and return (exit_code, stdout, stderr)."""
+        full_command = f"{sys.executable} -m holoconf {command}"
+        env_copy = os.environ.copy()
+        env_copy.update(env)
+        result = subprocess.run(
+            full_command,
+            shell=True,
+            capture_output=True,
+            text=True,
+            env=env_copy,
+        )
+        return result.returncode, result.stdout, result.stderr
 
     def load_merged(self, file_paths: List[str]) -> Any:
         return self.Config.load_merged(file_paths)
@@ -217,34 +269,242 @@ def load_test_suite(file_path: str) -> TestSuite:
     )
 
 
+def run_cli_test(
+    driver: Driver,
+    test: TestCase,
+    suite_name: str,
+    temp_files: Dict[str, str],
+    env: Dict[str, str],
+) -> TestResult:
+    """Run a CLI-based test."""
+    command_template = test.when["cli"]
+
+    # Substitute file placeholders like {config_file}, {schema_file}
+    command = command_template
+    for placeholder, filepath in temp_files.items():
+        command = command.replace(f"{{{placeholder}}}", filepath)
+
+    try:
+        exit_code, stdout, stderr = driver.run_cli(command, env)
+    except Exception as e:
+        return TestResult(
+            test_name=test.name,
+            suite_name=suite_name,
+            passed=False,
+            error=f"CLI execution failed: {e}",
+        )
+
+    # Check exit_code
+    if "exit_code" in test.then:
+        expected_code = test.then["exit_code"]
+        if exit_code != expected_code:
+            return TestResult(
+                test_name=test.name,
+                suite_name=suite_name,
+                passed=False,
+                error="Exit code mismatch",
+                expected=expected_code,
+                actual=exit_code,
+            )
+
+    # Check stdout exact match
+    if "stdout" in test.then:
+        expected_stdout = test.then["stdout"]
+        if stdout.strip() != expected_stdout.strip():
+            return TestResult(
+                test_name=test.name,
+                suite_name=suite_name,
+                passed=False,
+                error="Stdout mismatch",
+                expected=expected_stdout,
+                actual=stdout.strip(),
+            )
+
+    # Check stdout_contains (can be string or list)
+    if "stdout_contains" in test.then:
+        contains = test.then["stdout_contains"]
+        if isinstance(contains, str):
+            contains = [contains]
+        for expected in contains:
+            if expected not in stdout:
+                return TestResult(
+                    test_name=test.name,
+                    suite_name=suite_name,
+                    passed=False,
+                    error="Stdout missing expected content",
+                    expected=f"contains '{expected}'",
+                    actual=stdout[:200],
+                )
+
+    # Check stderr_contains (can be string or list)
+    if "stderr_contains" in test.then:
+        contains = test.then["stderr_contains"]
+        if isinstance(contains, str):
+            contains = [contains]
+        for expected in contains:
+            if expected.lower() not in stderr.lower():
+                return TestResult(
+                    test_name=test.name,
+                    suite_name=suite_name,
+                    passed=False,
+                    error="Stderr missing expected content",
+                    expected=f"contains '{expected}'",
+                    actual=stderr[:200],
+                )
+
+    return TestResult(
+        test_name=test.name,
+        suite_name=suite_name,
+        passed=True,
+    )
+
+
+def run_dump_test(
+    driver: Driver,
+    test: TestCase,
+    suite_name: str,
+    temp_files: Dict[str, str],
+    base_path: str,
+) -> TestResult:
+    """Run a dump/export test using the library API."""
+    dump_config = test.when["dump"]
+    export_format = dump_config.get("format", "yaml")
+    resolve = dump_config.get("resolve", True)
+    redact = dump_config.get("redact", False)
+
+    # Load config
+    config_yaml = test.given.get("config", "")
+    try:
+        config = driver.load_config(config_yaml, base_path=base_path)
+    except Exception as e:
+        return TestResult(
+            test_name=test.name,
+            suite_name=suite_name,
+            passed=False,
+            error=f"Failed to load config: {e}",
+        )
+
+    # Export
+    try:
+        if export_format == "yaml":
+            result = driver.export_yaml(config, resolve=resolve, redact=redact)
+        elif export_format == "json":
+            result = driver.export_json(config, resolve=resolve, redact=redact)
+        else:
+            return TestResult(
+                test_name=test.name,
+                suite_name=suite_name,
+                passed=False,
+                error=f"Unknown dump format: {export_format}",
+            )
+    except Exception as e:
+        return TestResult(
+            test_name=test.name,
+            suite_name=suite_name,
+            passed=False,
+            error=f"Dump failed: {e}",
+        )
+
+    # Check output_contains (can be string or list)
+    if "output_contains" in test.then:
+        contains = test.then["output_contains"]
+        if isinstance(contains, str):
+            contains = [contains]
+        for expected in contains:
+            if expected not in result:
+                return TestResult(
+                    test_name=test.name,
+                    suite_name=suite_name,
+                    passed=False,
+                    error="Output missing expected content",
+                    expected=f"contains '{expected}'",
+                    actual=result[:300],
+                )
+
+    # Check output_not_contains (can be string or list)
+    if "output_not_contains" in test.then:
+        not_contains = test.then["output_not_contains"]
+        if isinstance(not_contains, str):
+            not_contains = [not_contains]
+        for unexpected in not_contains:
+            if unexpected in result:
+                return TestResult(
+                    test_name=test.name,
+                    suite_name=suite_name,
+                    passed=False,
+                    error="Output contains unexpected content",
+                    expected=f"does not contain '{unexpected}'",
+                    actual=result[:300],
+                )
+
+    return TestResult(
+        test_name=test.name,
+        suite_name=suite_name,
+        passed=True,
+    )
+
+
 def run_test(driver: Driver, test: TestCase, suite_name: str) -> TestResult:
     """Run a single test case."""
     env = test.given.get("env", {})
     files = test.given.get("files", {})
     config_merge = test.given.get("config_merge", [])
     temp_dir = None
+    temp_files = {}  # Track created temp files for CLI substitution
 
     try:
         # Set up environment
         driver.setup_env(env)
 
-        # Set up temp files if needed
-        base_path = None
+        # Create temp directory
+        temp_dir = tempfile.mkdtemp(prefix="holoconf_test_")
+        base_path = temp_dir
+
+        # Set up explicit files first
         if files:
-            temp_dir = tempfile.mkdtemp(prefix="holoconf_test_")
-            base_path = temp_dir
             for filename, content in files.items():
                 file_path = Path(temp_dir) / filename
                 file_path.parent.mkdir(parents=True, exist_ok=True)
                 file_path.write_text(content)
+                temp_files[filename] = str(file_path)
 
-        # Load config - either merged or single
+        # Create temp config file(s) from given.config
+        config_yaml = test.given.get("config", "")
+        config_raw = test.given.get("config_raw", "")  # Raw content, don't parse
+        if config_yaml or config_raw:
+            config_file = Path(temp_dir) / "config.yaml"
+            config_file.write_text(config_raw if config_raw else config_yaml)
+            temp_files["config_file"] = str(config_file)
+
+        # Create temp config2 file if present
+        config2_yaml = test.given.get("config2", "")
+        if config2_yaml:
+            config2_file = Path(temp_dir) / "config2.yaml"
+            config2_file.write_text(config2_yaml)
+            temp_files["config2_file"] = str(config2_file)
+
+        # Create temp schema file if present
+        schema_yaml = test.given.get("schema", "")
+        if schema_yaml:
+            schema_file = Path(temp_dir) / "schema.yaml"
+            schema_file.write_text(schema_yaml)
+            temp_files["schema_file"] = str(schema_file)
+
+        # Handle CLI tests first (don't need to load config into memory)
+        if "cli" in test.when:
+            return run_cli_test(driver, test, suite_name, temp_files, env)
+
+        # Handle dump tests (test the dump/export functionality)
+        if "dump" in test.when:
+            return run_dump_test(driver, test, suite_name, temp_files, base_path)
+
+        # For non-CLI tests, load config into memory
+        config = None
         if config_merge:
             # Merge multiple files
             file_paths = [str(Path(temp_dir) / f) for f in config_merge]
             config = driver.load_merged(file_paths)
-        else:
-            config_yaml = test.given.get("config", "")
+        elif config_yaml:
             config = driver.load_config(config_yaml, base_path=base_path)
 
         # Execute action - check export first since it may also have access

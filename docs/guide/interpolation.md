@@ -5,7 +5,7 @@
 
 ## Overview
 
-holoconf supports interpolation syntax to dynamically resolve values at access time. The general syntax is:
+HoloConf supports interpolation syntax to dynamically resolve values at access time. The general syntax is:
 
 ```
 ${resolver:argument}

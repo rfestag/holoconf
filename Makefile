@@ -160,18 +160,21 @@ test-python:
 	@echo "→ Running Python tests..."
 	cd packages/python/holoconf && pytest tests/ -v
 
+# Python executable - use venv if available
+VENV_PYTHON := packages/python/holoconf/.venv/bin/python
+
 test-acceptance:
 	@echo "→ Running acceptance tests (Rust driver)..."
-	python tools/test_runner.py --driver rust 'tests/acceptance/**/*.yaml' -v
+	$(VENV_PYTHON) tools/test_runner.py --driver rust 'tests/acceptance/**/*.yaml' -v
 	@echo "→ Running acceptance tests (Python driver)..."
-	python tools/test_runner.py --driver python 'tests/acceptance/**/*.yaml' -v
+	$(VENV_PYTHON) tools/test_runner.py --driver python 'tests/acceptance/**/*.yaml' -v
 
 # Generate JSON results for documentation matrix
 test-acceptance-json:
 	@echo "→ Running acceptance tests and generating JSON results..."
 	@mkdir -p coverage/acceptance
-	python tools/test_runner.py --driver rust 'tests/acceptance/**/*.yaml' --json coverage/acceptance/rust.json || true
-	python tools/test_runner.py --driver python 'tests/acceptance/**/*.yaml' --json coverage/acceptance/python.json || true
+	$(VENV_PYTHON) tools/test_runner.py --driver rust 'tests/acceptance/**/*.yaml' --json coverage/acceptance/rust.json || true
+	$(VENV_PYTHON) tools/test_runner.py --driver python 'tests/acceptance/**/*.yaml' --json coverage/acceptance/python.json || true
 	@echo "✓ Results written to coverage/acceptance/"
 
 # =============================================================================
@@ -323,11 +326,11 @@ $(DOCS_VENV)/bin/mkdocs:
 docs: docs-build
 	@echo "✓ Documentation built in site/"
 
-docs-build: $(MKDOCS)
+docs-build: $(MKDOCS) test-acceptance-json
 	@echo "→ Building documentation..."
 	$(MKDOCS) build --strict
 
-docs-serve: $(MKDOCS)
+docs-serve: $(MKDOCS) test-acceptance-json
 	@echo "→ Starting documentation server..."
 	@echo "→ Open http://127.0.0.1:8000 in your browser"
 	$(MKDOCS) serve
