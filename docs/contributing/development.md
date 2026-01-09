@@ -4,7 +4,7 @@ This guide helps you set up a development environment for HoloConf.
 
 ## Prerequisites
 
-- **Rust** 1.75 or later ([rustup.rs](https://rustup.rs/))
+- **Rust** 1.88 or later ([rustup.rs](https://rustup.rs/))
 - **Python** 3.8 or later
 - **maturin** for building Python bindings
 
