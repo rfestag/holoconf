@@ -6,7 +6,8 @@ through the Python bindings.
 """
 
 import pytest
-from holoconf import Config, Schema, HoloconfError
+
+from holoconf import Config, HoloconfError, Schema
 
 
 class TestSchemaValidation:

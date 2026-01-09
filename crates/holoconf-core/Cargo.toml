@@ -1,5 +1,9 @@
 [package]
 name = "holoconf-core"
+
+[package.metadata.cargo-machete]
+# These dependencies are planned for future features
+ignored = ["regex", "thiserror", "ureq"]
 version.workspace = true
 edition.workspace = true
 license.workspace = true

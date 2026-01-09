@@ -603,7 +603,10 @@ mod tests {
             assert_eq!(name, "env");
             // Empty resolver has no args (or one empty arg depending on implementation)
             // The current behavior returns an empty arg list
-            assert!(args.is_empty() || (args.len() == 1 && args[0] == InterpolationArg::Literal("".into())));
+            assert!(
+                args.is_empty()
+                    || (args.len() == 1 && args[0] == InterpolationArg::Literal("".into()))
+            );
         } else {
             panic!("Expected Resolver");
         }

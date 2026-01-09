@@ -20,7 +20,7 @@ class Config:
     """
 
     @staticmethod
-    def load(path: str, allow_http: bool = False) -> "Config":
+    def load(path: str, allow_http: bool = False) -> Config:
         """Load configuration from a YAML file.
 
         Args:
@@ -37,7 +37,7 @@ class Config:
         ...
 
     @staticmethod
-    def loads(yaml: str, base_path: str | None = None, allow_http: bool = False) -> "Config":
+    def loads(yaml: str, base_path: str | None = None, allow_http: bool = False) -> Config:
         """Load configuration from a YAML string.
 
         Args:
@@ -54,7 +54,7 @@ class Config:
         ...
 
     @staticmethod
-    def from_json(json: str) -> "Config":
+    def from_json(json: str) -> Config:
         """Load configuration from a JSON string.
 
         Args:
@@ -69,7 +69,7 @@ class Config:
         ...
 
     @staticmethod
-    def load_merged(paths: list[str]) -> "Config":
+    def load_merged(paths: list[str]) -> Config:
         """Load and merge multiple YAML files.
 
         Files are merged in order, with later files overriding earlier ones.
@@ -218,7 +218,7 @@ class Config:
         """
         ...
 
-    def merge(self, other: "Config") -> None:
+    def merge(self, other: Config) -> None:
         """Merge another config into this one.
 
         The other config's values override this config's values.
@@ -248,7 +248,7 @@ class Config:
         """
         ...
 
-    def validate(self, schema: "Schema") -> None:
+    def validate(self, schema: Schema) -> None:
         """Validate the resolved configuration against a schema.
 
         This resolves all values first, then validates the resolved values
@@ -263,7 +263,7 @@ class Config:
         """
         ...
 
-    def validate_raw(self, schema: "Schema") -> None:
+    def validate_raw(self, schema: Schema) -> None:
         """Validate the raw (unresolved) configuration against a schema.
 
         This performs structural validation before resolution, checking that
@@ -278,7 +278,7 @@ class Config:
         """
         ...
 
-    def validate_collect(self, schema: "Schema") -> list[str]:
+    def validate_collect(self, schema: Schema) -> list[str]:
         """Validate and collect all errors (instead of failing on first).
 
         Args:
@@ -310,7 +310,7 @@ class Schema:
     """
 
     @staticmethod
-    def load(path: str) -> "Schema":
+    def load(path: str) -> Schema:
         """Load a schema from a file (JSON or YAML based on extension).
 
         Args:
@@ -326,7 +326,7 @@ class Schema:
         ...
 
     @staticmethod
-    def from_yaml(yaml: str) -> "Schema":
+    def from_yaml(yaml: str) -> Schema:
         """Load a schema from a YAML string.
 
         Args:
@@ -341,7 +341,7 @@ class Schema:
         ...
 
     @staticmethod
-    def from_json(json: str) -> "Schema":
+    def from_json(json: str) -> Schema:
         """Load a schema from a JSON string.
 
         Args:

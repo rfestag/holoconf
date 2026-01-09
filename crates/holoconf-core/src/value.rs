@@ -744,7 +744,11 @@ mod tests {
 
     #[test]
     fn test_display_sequence() {
-        let seq = Value::Sequence(vec![Value::Integer(1), Value::Integer(2), Value::Integer(3)]);
+        let seq = Value::Sequence(vec![
+            Value::Integer(1),
+            Value::Integer(2),
+            Value::Integer(3),
+        ]);
         assert_eq!(format!("{}", seq), "[1, 2, 3]");
     }
 

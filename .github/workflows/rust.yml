@@ -73,11 +73,16 @@ jobs:
       - name: Build Python bindings for acceptance tests
         working-directory: packages/python/holoconf
         run: |
-          python -m pip install maturin pyyaml
+          python -m venv .venv
+          source .venv/bin/activate
+          pip install maturin pyyaml
           maturin develop
 
       - name: Run acceptance tests (via Python bindings)
-        run: python tools/test_runner.py --driver rust 'tests/acceptance/**/*.yaml' -v
+        working-directory: packages/python/holoconf
+        run: |
+          source .venv/bin/activate
+          python ../../../tools/test_runner.py --driver rust '../../../tests/acceptance/**/*.yaml' -v
 
   # Build CLI binary
   build-cli:

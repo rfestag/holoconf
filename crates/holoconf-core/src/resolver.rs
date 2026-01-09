@@ -710,8 +710,7 @@ mod tests {
 
     #[test]
     fn test_resolver_context_with_base_path() {
-        let ctx = ResolverContext::new("test")
-            .with_base_path(std::path::PathBuf::from("/tmp"));
+        let ctx = ResolverContext::new("test").with_base_path(std::path::PathBuf::from("/tmp"));
         assert_eq!(ctx.base_path, Some(std::path::PathBuf::from("/tmp")));
     }
 
@@ -755,9 +754,7 @@ mod tests {
 
     #[test]
     fn test_fn_resolver_name() {
-        let resolver = FnResolver::new("my_resolver", |_, _, _| {
-            Ok(ResolvedValue::new("test"))
-        });
+        let resolver = FnResolver::new("my_resolver", |_, _, _| Ok(ResolvedValue::new("test")));
         assert_eq!(resolver.name(), "my_resolver");
     }
 
@@ -805,7 +802,11 @@ mod tests {
         kwargs.insert("parse".to_string(), "text".to_string());
 
         let result = file_resolver(&args, &kwargs, &ctx).unwrap();
-        assert!(result.value.as_str().unwrap().contains("absolute path content"));
+        assert!(result
+            .value
+            .as_str()
+            .unwrap()
+            .contains("absolute path content"));
 
         // Cleanup
         std::fs::remove_file(test_file).ok();
@@ -885,7 +886,11 @@ mod tests {
 
         let result = file_resolver(&args, &kwargs, &ctx).unwrap();
         // Unknown extension defaults to text mode
-        assert!(result.value.as_str().unwrap().contains("plain text content"));
+        assert!(result
+            .value
+            .as_str()
+            .unwrap()
+            .contains("plain text content"));
 
         // Cleanup
         std::fs::remove_file(test_file).ok();
