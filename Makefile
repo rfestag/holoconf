@@ -454,3 +454,88 @@ endif
 	@echo "To publish, run:"
 	@echo "  git push origin main --tags"
 	@echo "══════════════════════════════════════════════════════════════════"
+
+# ============================================================================
+# Manual Publishing (for bootstrapping before CI trusted publishing)
+# ============================================================================
+
+# Publish Rust crates to crates.io (skips already-published versions)
+# Requires: cargo login (or CARGO_REGISTRY_TOKEN env var)
+publish-crates:
+	@echo "══════════════════════════════════════════════════════════════════"
+	@echo "Publishing Rust crates to crates.io"
+	@echo "══════════════════════════════════════════════════════════════════"
+	@echo ""
+	@echo "→ Publishing holoconf-core..."
+	@cd crates/holoconf-core && { \
+		output=$$(cargo publish 2>&1); \
+		status=$$?; \
+		if [ $$status -eq 0 ]; then \
+			echo "  ✓ holoconf-core published"; \
+			echo ""; \
+			echo "→ Waiting for crates.io to index holoconf-core..."; \
+			sleep 30; \
+		elif echo "$$output" | grep -q "already exists"; then \
+			echo "  ✓ holoconf-core already published (skipping)"; \
+		else \
+			echo "$$output"; \
+			exit 1; \
+		fi; \
+	}
+	@echo ""
+	@echo "→ Publishing holoconf-cli..."
+	@cd crates/holoconf-cli && { \
+		output=$$(cargo publish 2>&1); \
+		status=$$?; \
+		if [ $$status -eq 0 ]; then \
+			echo "  ✓ holoconf-cli published"; \
+		elif echo "$$output" | grep -q "already exists"; then \
+			echo "  ✓ holoconf-cli already published (skipping)"; \
+		else \
+			echo "$$output"; \
+			exit 1; \
+		fi; \
+	}
+	@echo ""
+	@echo "══════════════════════════════════════════════════════════════════"
+	@echo "✓ Rust crates published!"
+	@echo "══════════════════════════════════════════════════════════════════"
+
+# Build Python wheels for the current platform
+# Requires: maturin
+build-wheel: $(VENV_PYTHON)
+	@echo "→ Building Python wheel..."
+	cd packages/python/holoconf && $(CURDIR)/$(VENV_MATURIN) build --release
+	@echo "  ✓ Wheel built in packages/python/holoconf/target/wheels/"
+
+# Publish Python package to PyPI
+# Requires: twine (pip install twine), PyPI credentials (~/.pypirc or TWINE_* env vars)
+publish-pypi: $(VENV_PYTHON)
+	@echo "══════════════════════════════════════════════════════════════════"
+	@echo "Publishing Python package to PyPI"
+	@echo "══════════════════════════════════════════════════════════════════"
+	@echo ""
+	@echo "→ Installing twine if needed..."
+	@$(PYTHON_VENV)/bin/pip install --quiet twine
+	@echo ""
+	@echo "→ Building wheel..."
+	cd packages/python/holoconf && $(CURDIR)/$(VENV_MATURIN) build --release
+	@echo ""
+	@echo "→ Uploading to PyPI..."
+	$(PYTHON_VENV)/bin/twine upload packages/python/holoconf/target/wheels/*.whl
+	@echo ""
+	@echo "══════════════════════════════════════════════════════════════════"
+	@echo "✓ Python package published!"
+	@echo "══════════════════════════════════════════════════════════════════"
+
+# Publish all packages locally (for bootstrapping)
+# Usage: make publish-local
+publish-local: publish-crates publish-pypi
+	@echo ""
+	@echo "══════════════════════════════════════════════════════════════════"
+	@echo "✓ All packages published!"
+	@echo ""
+	@echo "You can now set up trusted publishing in GitHub:"
+	@echo "  - PyPI: Add OIDC publisher in project settings"
+	@echo "  - crates.io: Add CARGO_REGISTRY_TOKEN to repo secrets"
+	@echo "══════════════════════════════════════════════════════════════════"

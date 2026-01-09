@@ -12,6 +12,6 @@ name = "_holoconf"
 crate-type = ["cdylib"]
 
 [dependencies]
-holoconf-core = { path = "../holoconf-core" }
+holoconf-core.workspace = true
 pyo3 = { version = "0.24", features = ["extension-module"] }
 serde_yaml = "0.9"

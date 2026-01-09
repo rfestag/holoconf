@@ -184,6 +184,30 @@ Review: Do the changelog entries above cover these changes?
 
 This is a review tool, not a gate—use your judgment to determine if changes warrant changelog entries.
 
+### Bootstrapping: Manual Publishing
+
+For the initial release, trusted publishing (PyPI OIDC) requires the package to exist first. Use manual publishing to bootstrap:
+
+```bash
+# Publish Rust crates (requires: cargo login)
+make publish-crates
+
+# Publish Python wheel (requires: twine + ~/.pypirc or TWINE_* env vars)
+make publish-pypi
+
+# Publish all packages
+make publish-local
+```
+
+**One-time setup:**
+
+1. **crates.io**: Run `cargo login` with your API token from https://crates.io/settings/tokens
+2. **PyPI**: Create `~/.pypirc` or set `TWINE_USERNAME` and `TWINE_PASSWORD` env vars
+
+After the initial publish, configure CI trusted publishing:
+- **PyPI**: Add OIDC publisher in project settings (no token needed)
+- **crates.io**: Add `CARGO_REGISTRY_TOKEN` to GitHub repo secrets
+
 ### Required Secrets
 
 | Secret | Purpose | Configuration |
