@@ -40,6 +40,7 @@ An ADR is a document that captures an important architectural decision made alon
 | [ADR-014](ADR-014-code-quality-tooling.md) | Code Quality Tooling | **Accepted** |
 | [ADR-015](ADR-015-documentation-site.md) | Documentation Site | **Accepted** |
 | [ADR-016](ADR-016-pyo3-api-documentation.md) | PyO3 API Documentation | **Accepted** |
+| [ADR-017](ADR-017-release-process.md) | Release Process | **Accepted** |
 
 </div>
 

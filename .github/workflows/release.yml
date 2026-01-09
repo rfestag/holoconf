@@ -1,0 +1,309 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write  # For creating GitHub releases
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ==========================================================================
+  # Validation - ensure all tests pass before releasing
+  # ==========================================================================
+  validate:
+    name: Validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run Rust tests
+        run: cargo test --all-features --workspace
+
+      - name: Build and test Python
+        working-directory: packages/python/holoconf
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate
+          pip install ".[dev]"
+          maturin develop
+          pytest tests/ -v
+
+  # ==========================================================================
+  # Build Python wheels for all platforms
+  # ==========================================================================
+  build-python:
+    name: Build Python (${{ matrix.target }})
+    needs: [validate]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            manylinux: auto
+          - os: macos-15
+            target: x86_64-apple-darwin
+          - os: macos-14
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          manylinux: ${{ matrix.manylinux || 'auto' }}
+          args: --release --out dist
+          working-directory: packages/python/holoconf
+          sccache: true
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.target }}
+          path: packages/python/holoconf/dist/*.whl
+
+  build-python-linux-aarch64:
+    name: Build Python (aarch64-unknown-linux-gnu)
+    needs: [validate]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build wheels (cross-compile)
+        uses: PyO3/maturin-action@v1
+        with:
+          target: aarch64-unknown-linux-gnu
+          manylinux: auto
+          args: --release --out dist -i python3.9 -i python3.10 -i python3.11 -i python3.12
+          working-directory: packages/python/holoconf
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-aarch64-unknown-linux-gnu
+          path: packages/python/holoconf/dist/*.whl
+
+  build-python-sdist:
+    name: Build Python sdist
+    needs: [validate]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build sdist
+        uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist
+          working-directory: packages/python/holoconf
+
+      - name: Upload sdist
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-sdist
+          path: packages/python/holoconf/dist/*.tar.gz
+
+  # ==========================================================================
+  # Build CLI binaries for all platforms
+  # ==========================================================================
+  build-cli:
+    name: Build CLI (${{ matrix.target }})
+    needs: [validate]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact: holoconf
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            artifact: holoconf
+            cross: true
+          - os: macos-15
+            target: x86_64-apple-darwin
+            artifact: holoconf
+          - os: macos-14
+            target: aarch64-apple-darwin
+            artifact: holoconf
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: holoconf.exe
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross
+        if: matrix.cross
+        run: cargo install cross --locked
+
+      - name: Build CLI (native)
+        if: ${{ !matrix.cross }}
+        run: cargo build --release --package holoconf-cli --target ${{ matrix.target }}
+
+      - name: Build CLI (cross)
+        if: matrix.cross
+        run: cross build --release --package holoconf-cli --target ${{ matrix.target }}
+
+      - name: Create tarball (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          cd target/${{ matrix.target }}/release
+          tar -czvf ../../../holoconf-${{ matrix.target }}.tar.gz ${{ matrix.artifact }}
+
+      - name: Create zip (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          cd target/${{ matrix.target }}/release
+          Compress-Archive -Path ${{ matrix.artifact }} -DestinationPath ../../../holoconf-${{ matrix.target }}.zip
+
+      - name: Upload CLI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-${{ matrix.target }}
+          path: holoconf-${{ matrix.target }}.*
+
+  # ==========================================================================
+  # Publish to crates.io
+  # ==========================================================================
+  publish-crates:
+    name: Publish to crates.io
+    needs: [validate]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Publish holoconf-core
+        run: cargo publish -p holoconf-core --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Wait for crates.io to index
+        run: sleep 30
+
+      - name: Publish holoconf-cli
+        run: cargo publish -p holoconf-cli --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  # ==========================================================================
+  # Publish to PyPI
+  # ==========================================================================
+  publish-pypi:
+    name: Publish to PyPI
+    needs: [build-python, build-python-linux-aarch64, build-python-sdist]
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/holoconf
+    permissions:
+      id-token: write  # Trusted publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          path: dist
+          merge-multiple: true
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+  # ==========================================================================
+  # Publish to npm (placeholder for future Node.js bindings)
+  # ==========================================================================
+  # publish-npm:
+  #   name: Publish to npm
+  #   needs: [validate]
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #
+  #     - uses: actions/setup-node@v4
+  #       with:
+  #         node-version: "20"
+  #         registry-url: "https://registry.npmjs.org"
+  #
+  #     - name: Publish to npm
+  #       working-directory: packages/node/holoconf
+  #       run: npm publish --access public
+  #       env:
+  #         NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  # ==========================================================================
+  # Create GitHub Release
+  # ==========================================================================
+  github-release:
+    name: Create GitHub Release
+    needs: [publish-crates, publish-pypi, build-cli]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download CLI artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: cli-*
+          path: artifacts
+          merge-multiple: true
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Extract changelog for this version
+        id: changelog
+        run: |
+          # Extract the changelog section for this version
+          VERSION="${{ steps.version.outputs.version }}"
+          VERSION_NUMBER="${VERSION#v}"
+
+          # Get content between this version and the next version header
+          CHANGELOG=$(awk "/## \[${VERSION_NUMBER}\]/{flag=1; next} /## \[/{flag=0} flag" CHANGELOG.md)
+
+          # If no specific version found, use Unreleased section
+          if [ -z "$CHANGELOG" ]; then
+            CHANGELOG=$(awk '/## \[Unreleased\]/{flag=1; next} /## \[/{flag=0} flag' CHANGELOG.md)
+          fi
+
+          # Write to file to preserve newlines
+          echo "$CHANGELOG" > release_notes.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: ${{ steps.version.outputs.version }}
+          body_path: release_notes.md
+          files: |
+            artifacts/*
+          draft: false
+          prerelease: ${{ contains(github.ref, '-alpha') || contains(github.ref, '-beta') || contains(github.ref, '-rc') }}

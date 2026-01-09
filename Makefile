@@ -5,7 +5,7 @@
         security security-rust security-python test test-rust test-python \
         test-acceptance test-acceptance-json build clean check all audit-unsafe semver-check sbom \
         docs docs-serve docs-build coverage coverage-rust coverage-python coverage-html \
-        coverage-acceptance coverage-full
+        coverage-acceptance coverage-full release release-check changelog-check
 
 # Default target
 help:
@@ -43,6 +43,11 @@ help:
 	@echo "Documentation:"
 	@echo "  make docs          - Build documentation site"
 	@echo "  make docs-serve    - Serve documentation locally (with live reload)"
+	@echo ""
+	@echo "Release:"
+	@echo "  make release-check         - Run all pre-release checks (no changes made)"
+	@echo "  make changelog-check       - Review changes that may need changelog entries"
+	@echo "  make release VERSION=x.y.z - Prepare a release (update versions, changelog, tag)"
 	@echo ""
 	@echo "Other:"
 	@echo "  make install-tools - Install required dev tools (cargo-deny, cargo-audit, etc.)"
@@ -156,21 +161,24 @@ test-rust:
 	@echo "→ Running Rust tests..."
 	cargo test --all
 
-test-python:
+# Python venv paths
+PYTHON_VENV := packages/python/holoconf/.venv
+VENV_PYTHON := $(PYTHON_VENV)/bin/python
+VENV_PYTEST := $(PYTHON_VENV)/bin/pytest
+VENV_MATURIN := $(PYTHON_VENV)/bin/maturin
+
+test-python: $(VENV_PYTHON)
 	@echo "→ Running Python tests..."
-	cd packages/python/holoconf && pytest tests/ -v
+	cd packages/python/holoconf && $(CURDIR)/$(VENV_PYTEST) tests/ -v
 
-# Python executable - use venv if available
-VENV_PYTHON := packages/python/holoconf/.venv/bin/python
-
-test-acceptance:
+test-acceptance: $(VENV_PYTHON)
 	@echo "→ Running acceptance tests (Rust driver)..."
 	$(VENV_PYTHON) tools/test_runner.py --driver rust 'tests/acceptance/**/*.yaml' -v
 	@echo "→ Running acceptance tests (Python driver)..."
 	$(VENV_PYTHON) tools/test_runner.py --driver python 'tests/acceptance/**/*.yaml' -v
 
 # Generate JSON results for documentation matrix
-test-acceptance-json:
+test-acceptance-json: $(VENV_PYTHON)
 	@echo "→ Running acceptance tests and generating JSON results..."
 	@mkdir -p coverage/acceptance
 	$(VENV_PYTHON) tools/test_runner.py --driver rust 'tests/acceptance/**/*.yaml' --json coverage/acceptance/rust.json || true
@@ -192,16 +200,11 @@ coverage-rust:
 	cargo llvm-cov --all-features --workspace --lcov --output-path $(COVERAGE_DIR)/rust-lcov.info
 	@echo "✓ Rust coverage: $(COVERAGE_DIR)/rust-lcov.info"
 
-coverage-python:
+coverage-python: $(VENV_PYTHON)
 	@echo "→ Running Python tests with coverage..."
 	@mkdir -p $(COVERAGE_DIR)
-	cd packages/python/holoconf && pytest tests/ --cov=holoconf --cov-report=xml:../../../$(COVERAGE_DIR)/python-coverage.xml --cov-report=term
+	cd packages/python/holoconf && $(CURDIR)/$(VENV_PYTEST) tests/ --cov=holoconf --cov-report=xml:../../../$(COVERAGE_DIR)/python-coverage.xml --cov-report=term
 	@echo "✓ Python coverage: $(COVERAGE_DIR)/python-coverage.xml"
-
-# Python venv paths
-PYTHON_VENV := packages/python/holoconf/.venv
-VENV_PYTHON := $(PYTHON_VENV)/bin/python
-VENV_MATURIN := $(PYTHON_VENV)/bin/maturin
 
 # Run acceptance tests with Rust coverage instrumentation
 # This measures which Rust code is exercised by the acceptance test suite
@@ -250,11 +253,11 @@ coverage-full:
 	'
 	@echo "✓ Combined Rust coverage: $(COVERAGE_DIR)/rust-lcov.info"
 
-coverage-html:
+coverage-html: $(VENV_PYTHON)
 	@echo "→ Generating HTML coverage reports..."
 	@mkdir -p docs/coverage/rust docs/coverage/python
 	cargo llvm-cov --all-features --workspace --html --output-dir docs/coverage/rust
-	cd packages/python/holoconf && pytest tests/ --cov=holoconf --cov-report=html:../../../docs/coverage/python || true
+	cd packages/python/holoconf && $(CURDIR)/$(VENV_PYTEST) tests/ --cov=holoconf --cov-report=html:../../../docs/coverage/python || true
 	@echo "✓ HTML reports generated in docs/coverage/"
 	@echo "  Rust:   docs/coverage/rust/html/index.html"
 	@echo "  Python: docs/coverage/python/index.html"
@@ -350,3 +353,104 @@ clean:
 	find . -type d -name "*.egg-info" -exec rm -rf {} + 2>/dev/null || true
 	find . -type f -name "*.so" -delete 2>/dev/null || true
 	@echo "✓ Clean complete"
+
+# =============================================================================
+# Release
+# =============================================================================
+
+# Ensure Python venv exists (created by this target if missing)
+$(VENV_PYTHON):
+	@echo "→ Python venv not found, creating..."
+	python -m venv $(PYTHON_VENV)
+	$(PYTHON_VENV)/bin/pip install --quiet -e "packages/python/holoconf[dev]"
+	cd packages/python/holoconf && $(CURDIR)/$(PYTHON_VENV)/bin/maturin develop
+	@echo "  ✓ Python venv created"
+
+# Run all pre-release checks without making any changes
+# Use this to verify everything is ready before running `make release`
+release-check: $(VENV_PYTHON)
+	@echo "══════════════════════════════════════════════════════════════════"
+	@echo "Running pre-release checks (no changes will be made)"
+	@echo "══════════════════════════════════════════════════════════════════"
+	@echo ""
+	@echo "→ Checking working directory..."
+	@if [ -n "$$(git status --porcelain)" ]; then \
+		echo "  ⚠ Warning: Working directory has uncommitted changes"; \
+	else \
+		echo "  ✓ Working directory clean"; \
+	fi
+	@if [ "$$(git branch --show-current)" != "main" ]; then \
+		echo "  ⚠ Warning: Not on main branch (current: $$(git branch --show-current))"; \
+	else \
+		echo "  ✓ On main branch"; \
+	fi
+	@echo ""
+	@echo "→ Running tests..."
+	@$(MAKE) test
+	@echo ""
+	@echo "→ Checking semver compatibility..."
+	@$(MAKE) semver-check || echo "  ⚠ semver-checks not available (first release?)"
+	@echo ""
+	@echo "→ Reviewing changelog coverage..."
+	@$(VENV_PYTHON) tools/changelog_check.py
+	@echo ""
+	@echo "══════════════════════════════════════════════════════════════════"
+	@echo "✓ Pre-release checks complete!"
+	@echo ""
+	@echo "If everything looks good, run:"
+	@echo "  make release VERSION=x.y.z"
+	@echo "══════════════════════════════════════════════════════════════════"
+
+# Review changes since last release that may need changelog entries
+changelog-check: $(VENV_PYTHON)
+	@echo "→ Checking changelog coverage..."
+	@$(VENV_PYTHON) tools/changelog_check.py
+
+# Prepare a release: update versions, changelog, commit, and tag
+# Usage: make release VERSION=0.2.0
+#
+# After running this, push with: git push origin main --tags
+release:
+ifndef VERSION
+	$(error VERSION is required. Usage: make release VERSION=0.1.0)
+endif
+	@echo "══════════════════════════════════════════════════════════════════"
+	@echo "Preparing release v$(VERSION)"
+	@echo "══════════════════════════════════════════════════════════════════"
+	@echo ""
+	@echo "→ Pre-flight checks..."
+	@if [ -n "$$(git status --porcelain)" ]; then \
+		echo "Error: Working directory has uncommitted changes"; \
+		exit 1; \
+	fi
+	@if [ "$$(git branch --show-current)" != "main" ]; then \
+		echo "Error: Must be on main branch to release"; \
+		exit 1; \
+	fi
+	@echo "  ✓ Working directory clean"
+	@echo "  ✓ On main branch"
+	@echo ""
+	@echo "→ Running tests..."
+	@$(MAKE) test
+	@echo ""
+	@echo "→ Updating versions to $(VERSION)..."
+	@sed -i 's/^version = ".*"/version = "$(VERSION)"/' Cargo.toml
+	@sed -i 's/^version = ".*"/version = "$(VERSION)"/' packages/python/holoconf/pyproject.toml
+	@echo "  ✓ Updated Cargo.toml"
+	@echo "  ✓ Updated pyproject.toml"
+	@echo ""
+	@echo "→ Updating CHANGELOG.md..."
+	@sed -i 's/## \[Unreleased\]/## [Unreleased]\n\n## [$(VERSION)] - $(shell date +%Y-%m-%d)/' CHANGELOG.md
+	@echo "  ✓ Moved [Unreleased] to [$(VERSION)]"
+	@echo ""
+	@echo "→ Creating release commit and tag..."
+	@git add -A
+	@git commit -m "chore: release v$(VERSION)"
+	@git tag "v$(VERSION)"
+	@echo ""
+	@echo "══════════════════════════════════════════════════════════════════"
+	@echo "✓ Release v$(VERSION) prepared!"
+	@echo ""
+	@echo "To publish, run:"
+	@echo "  git push origin main --tags"
+	@echo "══════════════════════════════════════════════════════════════════"
