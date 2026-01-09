@@ -1,9 +1,5 @@
 [package]
 name = "holoconf-core"
-
-[package.metadata.cargo-machete]
-# These dependencies are planned for future features
-ignored = ["regex", "thiserror", "ureq"]
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -12,6 +8,10 @@ rust-version.workspace = true
 description = "Core configuration library with resolver support"
 keywords = ["config", "configuration", "yaml", "resolver"]
 categories = ["config", "development-tools"]
+
+[package.metadata.cargo-machete]
+# These dependencies are planned for future features
+ignored = ["regex", "thiserror", "ureq"]
 
 [features]
 default = []

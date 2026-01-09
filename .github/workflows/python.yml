@@ -21,6 +21,8 @@ jobs:
           python-version: "3.12"
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
       - name: Build and install
         working-directory: packages/python/holoconf
         run: |

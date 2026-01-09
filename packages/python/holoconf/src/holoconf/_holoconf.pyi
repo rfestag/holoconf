@@ -297,7 +297,6 @@ class Config:
         """Attribute access: config.key."""
         ...
 
-
 class Schema:
     """Schema for validating configuration against JSON Schema.
 
@@ -355,7 +354,6 @@ class Schema:
         """
         ...
 
-
 class HoloconfError(Exception):
     """Base exception for all holoconf errors.
 
@@ -367,8 +365,8 @@ class HoloconfError(Exception):
         ... except HoloconfError as e:
         ...     print(f"Configuration error: {e}")
     """
-    ...
 
+    ...
 
 class ParseError(HoloconfError):
     """Error parsing configuration (YAML/JSON syntax).
@@ -376,8 +374,8 @@ class ParseError(HoloconfError):
     Raised when YAML or JSON content cannot be parsed due to syntax errors,
     malformed content, or encoding issues.
     """
-    ...
 
+    ...
 
 class ValidationError(HoloconfError):
     """Schema validation error.
@@ -386,8 +384,8 @@ class ValidationError(HoloconfError):
     Common causes include missing required fields, type mismatches,
     and constraint violations.
     """
-    ...
 
+    ...
 
 class ResolverError(HoloconfError):
     """Error during value resolution.
@@ -396,8 +394,8 @@ class ResolverError(HoloconfError):
     include missing environment variables (without defaults), file not found
     for file resolver, HTTP request failures, or invalid resolver syntax.
     """
-    ...
 
+    ...
 
 class PathNotFoundError(HoloconfError):
     """Requested path does not exist in configuration.
@@ -406,8 +404,8 @@ class PathNotFoundError(HoloconfError):
     Check for typos in the path name, missing configuration sections,
     or incorrect path separators (use '.' not '/').
     """
-    ...
 
+    ...
 
 class CircularReferenceError(HoloconfError):
     """Circular reference detected in configuration.
@@ -416,8 +414,8 @@ class CircularReferenceError(HoloconfError):
     This occurs when interpolations form a cycle, such as a value
     referencing itself or indirect circular dependencies.
     """
-    ...
 
+    ...
 
 class TypeCoercionError(HoloconfError):
     """Failed to coerce value to requested type.
@@ -426,4 +424,5 @@ class TypeCoercionError(HoloconfError):
     For example, calling get_int() on a non-numeric string,
     or get_bool() on a string other than "true"/"false".
     """
+
     ...

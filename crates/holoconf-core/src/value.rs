@@ -733,8 +733,8 @@ mod tests {
 
     #[test]
     fn test_display_float() {
-        let display = format!("{}", Value::Float(3.14));
-        assert!(display.starts_with("3.14"));
+        let display = format!("{}", Value::Float(1.5));
+        assert!(display.starts_with("1.5"));
     }
 
     #[test]
@@ -814,7 +814,7 @@ mod tests {
         assert_eq!(Value::Null.type_name(), "null");
         assert_eq!(Value::Bool(true).type_name(), "boolean");
         assert_eq!(Value::Integer(42).type_name(), "integer");
-        assert_eq!(Value::Float(3.14).type_name(), "float");
+        assert_eq!(Value::Float(1.23).type_name(), "float");
         assert_eq!(Value::String("s".into()).type_name(), "string");
         assert_eq!(Value::Sequence(vec![]).type_name(), "sequence");
         assert_eq!(Value::Mapping(IndexMap::new()).type_name(), "mapping");
