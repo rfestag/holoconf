@@ -29,8 +29,10 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/holoconf/holoconf"
-Repository = "https://github.com/holoconf/holoconf"
+Homepage = "https://rfestag.github.io/holoconf/"
+Documentation = "https://rfestag.github.io/holoconf/"
+Repository = "https://github.com/rfestag/holoconf"
+Changelog = "https://github.com/rfestag/holoconf/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 dev = [

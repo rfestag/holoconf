@@ -6,6 +6,8 @@ license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 description = "Core configuration library with resolver support"
+readme = "README.md"
+documentation = "https://rfestag.github.io/holoconf/"
 keywords = ["config", "configuration", "yaml", "resolver"]
 categories = ["config", "development-tools"]
 

@@ -6,6 +6,10 @@ license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 description = "Command-line interface for holoconf configuration management"
+readme = "README.md"
+documentation = "https://rfestag.github.io/holoconf/"
+keywords = ["config", "configuration", "cli", "yaml"]
+categories = ["command-line-utilities", "config"]
 
 [lib]
 name = "holoconf_cli"
