@@ -172,6 +172,8 @@ test-python: $(VENV_PYTHON)
 	cd packages/python/holoconf && $(CURDIR)/$(VENV_PYTEST) tests/ -v
 
 test-acceptance: $(VENV_PYTHON)
+	@echo "→ Building CLI for acceptance tests..."
+	cargo build --package holoconf-cli
 	@echo "→ Running acceptance tests (Rust driver)..."
 	$(VENV_PYTHON) tools/test_runner.py --driver rust 'tests/acceptance/**/*.yaml' -v
 	@echo "→ Running acceptance tests (Python driver)..."
@@ -179,6 +181,8 @@ test-acceptance: $(VENV_PYTHON)
 
 # Generate JSON results for documentation matrix
 test-acceptance-json: $(VENV_PYTHON)
+	@echo "→ Building CLI for acceptance tests..."
+	@cargo build --package holoconf-cli
 	@echo "→ Running acceptance tests and generating JSON results..."
 	@mkdir -p coverage/acceptance
 	$(VENV_PYTHON) tools/test_runner.py --driver rust 'tests/acceptance/**/*.yaml' --json coverage/acceptance/rust.json || true
