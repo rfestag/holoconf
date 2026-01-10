@@ -1,0 +1,99 @@
+name: Feature Request
+description: Suggest a new feature or enhancement
+title: "[Feature]: "
+labels: ["enhancement", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting an improvement!
+
+        **Note:** Approved features require a spec in `docs/specs/features/` before implementation.
+        Architectural decisions are documented in `docs/adr/`. See [CLAUDE.md](../blob/main/CLAUDE.md) for the workflow.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-submission Checks
+      options:
+        - label: I searched existing issues and feature requests
+          required: true
+
+  - type: dropdown
+    id: package
+    attributes:
+      label: Target Package(s)
+      description: Which package(s) would this affect?
+      multiple: true
+      options:
+        - Python (holoconf)
+        - CLI (holoconf-cli)
+        - Rust Core (holoconf-core)
+        - All packages
+    validations:
+      required: true
+
+  - type: dropdown
+    id: type
+    attributes:
+      label: Feature Type
+      options:
+        - New resolver type
+        - New API method
+        - CLI command/flag
+        - Performance improvement
+        - Developer experience
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem Statement
+      description: What problem does this feature solve?
+      placeholder: |
+        Currently, there's no way to...
+
+        This causes issues when...
+    validations:
+      required: true
+
+  - type: textarea
+    id: user-stories
+    attributes:
+      label: User Stories
+      description: Who benefits and how? (optional but helps prioritization)
+      placeholder: |
+        - As a developer, I want ... so that ...
+        - As an ops engineer, I want ... so that ...
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed API / Behavior
+      description: How should it work? Show example code or CLI usage.
+      placeholder: |
+        # Python:
+        config = Config.load("config.yaml")
+        result = config.new_method()
+
+        # CLI:
+        holoconf new-command --flag value
+
+        # Expected behavior:
+        ...
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Other approaches you've thought about (optional)
+
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Contribution
+      options:
+        - label: I'm willing to submit a PR for this feature

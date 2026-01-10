@@ -1,0 +1,100 @@
+name: Bug Report
+description: Report a bug in holoconf
+title: "[Bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! Please fill out the sections below.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-submission Checks
+      options:
+        - label: I searched existing issues and didn't find a duplicate
+          required: true
+        - label: I'm using the latest version
+          required: false
+
+  - type: dropdown
+    id: package
+    attributes:
+      label: Affected Package
+      description: Which package has the bug?
+      options:
+        - Python (holoconf)
+        - CLI (holoconf-cli)
+        - Rust Core (holoconf-core)
+        - Multiple / Unknown
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: What happened? What did you expect?
+      placeholder: |
+        **What happened:**
+
+        **Expected behavior:**
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal Reproduction
+      description: Code or commands to reproduce the issue
+      render: shell
+      placeholder: |
+        # For Python:
+        from holoconf import Config
+        config = Config.load("config.yaml")
+
+        # For CLI:
+        holoconf get config.yaml database.host
+
+        # For Rust:
+        let config = Config::from_yaml_file("config.yaml")?;
+    validations:
+      required: true
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Configuration File (if applicable)
+      description: The YAML/JSON config that triggers the bug
+      render: yaml
+
+  - type: textarea
+    id: version
+    attributes:
+      label: Version Information
+      description: Please run the appropriate command(s)
+      render: shell
+      placeholder: |
+        # Python:
+        python -c "import holoconf; print(holoconf.__version__)"
+        python --version
+
+        # CLI:
+        holoconf --version
+
+        # Rust (from Cargo.toml or cargo tree):
+        cargo tree -p holoconf-core
+        rustc --version
+
+        # OS:
+        uname -a  # or: systeminfo (Windows)
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Error Output / Logs
+      description: Full error message or stack trace
+      render: shell
