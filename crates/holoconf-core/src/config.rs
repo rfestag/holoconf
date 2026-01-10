@@ -25,6 +25,61 @@ pub struct ConfigOptions {
     pub file_roots: Vec<PathBuf>,
 }
 
+/// Specifies a file to load, either required or optional
+///
+/// Use this with `Config::load_merged_with_specs()` to load config files
+/// where some files may or may not exist.
+///
+/// # Examples
+///
+/// ```ignore
+/// use holoconf_core::{Config, FileSpec};
+///
+/// let config = Config::load_merged_with_specs(&[
+///     FileSpec::required("base.yaml"),
+///     FileSpec::required("environment.yaml"),
+///     FileSpec::optional("local.yaml"),  // Won't error if missing
+/// ])?;
+/// ```
+#[derive(Debug, Clone)]
+pub enum FileSpec {
+    /// A required file - error if not found
+    Required(PathBuf),
+    /// An optional file - silently skip if not found
+    Optional(PathBuf),
+}
+
+impl FileSpec {
+    /// Create a required file spec
+    pub fn required(path: impl Into<PathBuf>) -> Self {
+        FileSpec::Required(path.into())
+    }
+
+    /// Create an optional file spec
+    pub fn optional(path: impl Into<PathBuf>) -> Self {
+        FileSpec::Optional(path.into())
+    }
+
+    /// Get the path for this file spec
+    pub fn path(&self) -> &Path {
+        match self {
+            FileSpec::Required(p) => p,
+            FileSpec::Optional(p) => p,
+        }
+    }
+
+    /// Check if this file spec is optional
+    pub fn is_optional(&self) -> bool {
+        matches!(self, FileSpec::Optional(_))
+    }
+}
+
+impl<P: Into<PathBuf>> From<P> for FileSpec {
+    fn from(path: P) -> Self {
+        FileSpec::Required(path.into())
+    }
+}
+
 /// The main configuration container
 ///
 /// Config provides lazy resolution of interpolation expressions
@@ -138,8 +193,41 @@ impl Config {
     /// - Null values remove keys
     ///
     /// Source tracking records which file each value came from.
+    ///
+    /// All files are required - use `load_merged_with_specs()` if you need
+    /// optional files that may or may not exist.
     pub fn load_merged<P: AsRef<Path>>(paths: &[P]) -> Result<Self> {
-        if paths.is_empty() {
+        let specs: Vec<FileSpec> = paths
+            .iter()
+            .map(|p| FileSpec::Required(p.as_ref().to_path_buf()))
+            .collect();
+        Self::load_merged_with_specs(&specs)
+    }
+
+    /// Load and merge multiple YAML files with support for optional files
+    ///
+    /// Files are merged in order, with later files overriding earlier ones.
+    /// Optional files that don't exist are silently skipped.
+    ///
+    /// Per ADR-004:
+    /// - Mappings are deep-merged
+    /// - Scalars use last-writer-wins
+    /// - Arrays are replaced (not concatenated)
+    /// - Null values remove keys
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use holoconf_core::{Config, FileSpec};
+    ///
+    /// let config = Config::load_merged_with_specs(&[
+    ///     FileSpec::required("base.yaml"),
+    ///     FileSpec::required("environment.yaml"),
+    ///     FileSpec::optional("local.yaml"),  // Won't error if missing
+    /// ])?;
+    /// ```
+    pub fn load_merged_with_specs(specs: &[FileSpec]) -> Result<Self> {
+        if specs.is_empty() {
             return Ok(Self::new(Value::Mapping(indexmap::IndexMap::new())));
         }
 
@@ -147,10 +235,21 @@ impl Config {
         let mut last_base_path: Option<PathBuf> = None;
         let mut source_map: HashMap<String, String> = HashMap::new();
 
-        for path in paths {
-            let path = path.as_ref();
-            let content = std::fs::read_to_string(path)
-                .map_err(|_e| Error::file_not_found(path.display().to_string(), None))?;
+        for spec in specs {
+            let path = spec.path();
+
+            // Try to read the file
+            let content = match std::fs::read_to_string(path) {
+                Ok(c) => c,
+                Err(_e) => {
+                    // If optional, skip missing files
+                    if spec.is_optional() {
+                        continue;
+                    }
+                    // If required, return error
+                    return Err(Error::file_not_found(path.display().to_string(), None));
+                }
+            };
 
             let value: Value =
                 serde_yaml::from_str(&content).map_err(|e| Error::parse(e.to_string()))?;
@@ -677,7 +776,11 @@ impl Config {
                 let mut resolved_seq = Vec::new();
                 for (i, item) in seq.iter().enumerate() {
                     let item_path = format!("{}[{}]", path, i);
-                    resolved_seq.push(self.resolve_value_to_value(item, &item_path, resolution_stack)?);
+                    resolved_seq.push(self.resolve_value_to_value(
+                        item,
+                        &item_path,
+                        resolution_stack,
+                    )?);
                 }
                 Ok(Value::Sequence(resolved_seq))
             }
@@ -727,9 +830,11 @@ impl Config {
                 let mut resolved_seq = Vec::new();
                 for (i, item) in seq.iter().enumerate() {
                     let item_path = format!("{}[{}]", path, i);
-                    resolved_seq.push(
-                        self.resolve_value_to_value_redacted(item, &item_path, resolution_stack)?,
-                    );
+                    resolved_seq.push(self.resolve_value_to_value_redacted(
+                        item,
+                        &item_path,
+                        resolution_stack,
+                    )?);
                 }
                 Ok(Value::Sequence(resolved_seq))
             }
@@ -1245,8 +1350,14 @@ api:
         // Check dump_sources returns all
         let sources = config.dump_sources();
         assert_eq!(sources.len(), 4);
-        assert_eq!(sources.get("database.host").map(|s| s.as_str()), Some("override.yaml"));
-        assert_eq!(sources.get("database.port").map(|s| s.as_str()), Some("base.yaml"));
+        assert_eq!(
+            sources.get("database.host").map(|s| s.as_str()),
+            Some("override.yaml")
+        );
+        assert_eq!(
+            sources.get("database.port").map(|s| s.as_str()),
+            Some("base.yaml")
+        );
 
         // Cleanup
         std::fs::remove_dir_all(&temp_dir).ok();
@@ -1354,5 +1465,234 @@ servers:
 
         // Cleanup
         std::fs::remove_dir_all(&temp_dir).ok();
+    }
+
+    // Optional file tests
+
+    #[test]
+    fn test_optional_file_missing() {
+        let temp_dir = std::env::temp_dir().join("holoconf_test_optional_missing");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let base_path = temp_dir.join("base.yaml");
+        let optional_path = temp_dir.join("optional.yaml"); // Does not exist
+
+        std::fs::write(
+            &base_path,
+            r#"
+database:
+  host: localhost
+  port: 5432
+"#,
+        )
+        .unwrap();
+
+        // Using load_merged_with_specs with optional file
+        let config = Config::load_merged_with_specs(&[
+            FileSpec::required(&base_path),
+            FileSpec::optional(&optional_path),
+        ])
+        .unwrap();
+
+        // Base values should be present
+        assert_eq!(
+            config.get("database.host").unwrap().as_str(),
+            Some("localhost")
+        );
+        assert_eq!(config.get("database.port").unwrap().as_i64(), Some(5432));
+
+        // Cleanup
+        std::fs::remove_dir_all(&temp_dir).ok();
+    }
+
+    #[test]
+    fn test_optional_file_exists() {
+        let temp_dir = std::env::temp_dir().join("holoconf_test_optional_exists");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let base_path = temp_dir.join("base.yaml");
+        let optional_path = temp_dir.join("optional.yaml");
+
+        std::fs::write(
+            &base_path,
+            r#"
+database:
+  host: localhost
+  port: 5432
+"#,
+        )
+        .unwrap();
+
+        std::fs::write(
+            &optional_path,
+            r#"
+database:
+  host: prod-db
+"#,
+        )
+        .unwrap();
+
+        // Using load_merged_with_specs with optional file that exists
+        let config = Config::load_merged_with_specs(&[
+            FileSpec::required(&base_path),
+            FileSpec::optional(&optional_path),
+        ])
+        .unwrap();
+
+        // Optional file should override base
+        assert_eq!(
+            config.get("database.host").unwrap().as_str(),
+            Some("prod-db")
+        );
+        assert_eq!(config.get("database.port").unwrap().as_i64(), Some(5432));
+
+        // Check source tracking
+        assert_eq!(config.get_source("database.host"), Some("optional.yaml"));
+        assert_eq!(config.get_source("database.port"), Some("base.yaml"));
+
+        // Cleanup
+        std::fs::remove_dir_all(&temp_dir).ok();
+    }
+
+    #[test]
+    fn test_required_file_missing_errors() {
+        let temp_dir = std::env::temp_dir().join("holoconf_test_required_missing");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let base_path = temp_dir.join("base.yaml");
+        let missing_path = temp_dir.join("missing.yaml"); // Does not exist
+
+        std::fs::write(
+            &base_path,
+            r#"
+key: value
+"#,
+        )
+        .unwrap();
+
+        // Using load_merged_with_specs with required file that doesn't exist
+        let result = Config::load_merged_with_specs(&[
+            FileSpec::required(&base_path),
+            FileSpec::required(&missing_path),
+        ]);
+
+        match result {
+            Ok(_) => panic!("Expected error for missing required file"),
+            Err(err) => {
+                assert!(
+                    err.to_string().contains("File not found"),
+                    "Error should mention file not found: {}",
+                    err
+                );
+            }
+        }
+
+        // Cleanup
+        std::fs::remove_dir_all(&temp_dir).ok();
+    }
+
+    #[test]
+    fn test_all_optional_files_missing() {
+        let temp_dir = std::env::temp_dir().join("holoconf_test_all_optional_missing");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let optional1 = temp_dir.join("optional1.yaml");
+        let optional2 = temp_dir.join("optional2.yaml");
+
+        // Both files don't exist
+        let config = Config::load_merged_with_specs(&[
+            FileSpec::optional(&optional1),
+            FileSpec::optional(&optional2),
+        ])
+        .unwrap();
+
+        // Should return empty config
+        let value = config.to_value(false, false).unwrap();
+        assert!(value.as_mapping().unwrap().is_empty());
+
+        // Cleanup
+        std::fs::remove_dir_all(&temp_dir).ok();
+    }
+
+    #[test]
+    fn test_mixed_required_and_optional() {
+        let temp_dir = std::env::temp_dir().join("holoconf_test_mixed_req_opt");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let required1 = temp_dir.join("required1.yaml");
+        let optional1 = temp_dir.join("optional1.yaml"); // Missing
+        let required2 = temp_dir.join("required2.yaml");
+        let optional2 = temp_dir.join("optional2.yaml");
+
+        std::fs::write(
+            &required1,
+            r#"
+app:
+  name: myapp
+  debug: false
+"#,
+        )
+        .unwrap();
+
+        std::fs::write(
+            &required2,
+            r#"
+database:
+  host: localhost
+"#,
+        )
+        .unwrap();
+
+        std::fs::write(
+            &optional2,
+            r#"
+app:
+  debug: true
+database:
+  port: 5432
+"#,
+        )
+        .unwrap();
+
+        let config = Config::load_merged_with_specs(&[
+            FileSpec::required(&required1),
+            FileSpec::optional(&optional1), // Missing, should be skipped
+            FileSpec::required(&required2),
+            FileSpec::optional(&optional2), // Exists, should be merged
+        ])
+        .unwrap();
+
+        // Check merged values
+        assert_eq!(config.get("app.name").unwrap().as_str(), Some("myapp"));
+        assert_eq!(config.get("app.debug").unwrap().as_bool(), Some(true)); // From optional2
+        assert_eq!(
+            config.get("database.host").unwrap().as_str(),
+            Some("localhost")
+        );
+        assert_eq!(config.get("database.port").unwrap().as_i64(), Some(5432)); // From optional2
+
+        // Cleanup
+        std::fs::remove_dir_all(&temp_dir).ok();
+    }
+
+    #[test]
+    fn test_filespec_from_path() {
+        // Test From<&str> implementation
+        let spec: FileSpec = "test.yaml".into();
+        assert!(matches!(spec, FileSpec::Required(_)));
+        assert_eq!(spec.path().to_str(), Some("test.yaml"));
+        assert!(!spec.is_optional());
+
+        // Test From<PathBuf> implementation
+        let path = std::path::PathBuf::from("other.yaml");
+        let spec: FileSpec = path.into();
+        assert!(matches!(spec, FileSpec::Required(_)));
+
+        // Test explicit constructors
+        let required = FileSpec::required("req.yaml");
+        assert!(!required.is_optional());
+
+        let optional = FileSpec::optional("opt.yaml");
+        assert!(optional.is_optional());
     }
 }

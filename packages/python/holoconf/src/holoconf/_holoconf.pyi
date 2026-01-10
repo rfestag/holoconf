@@ -5,6 +5,63 @@ This module provides type hints for the Rust PyO3 bindings.
 
 from typing import Any
 
+class FileSpec:
+    """File specification for optional file support.
+
+    Use this to mark files as optional in load_merged_with_specs().
+    Optional files that don't exist are silently skipped during merging.
+
+    Example:
+        >>> config = Config.load_merged_with_specs([
+        ...     FileSpec.required("base.yaml"),
+        ...     FileSpec.optional("local.yaml"),  # Won't error if missing
+        ... ])
+    """
+
+    def __init__(self, path: str) -> None:
+        """Create a FileSpec for a required file.
+
+        Args:
+            path: Path to the config file
+        """
+        ...
+
+    @staticmethod
+    def optional(path: str) -> FileSpec:
+        """Create a FileSpec for an optional file.
+
+        Optional files that don't exist are silently skipped.
+
+        Args:
+            path: Path to the config file
+
+        Returns:
+            A FileSpec marking the file as optional
+        """
+        ...
+
+    @staticmethod
+    def required(path: str) -> FileSpec:
+        """Create a FileSpec for a required file.
+
+        Args:
+            path: Path to the config file
+
+        Returns:
+            A FileSpec marking the file as required
+        """
+        ...
+
+    @property
+    def is_optional(self) -> bool:
+        """Check if this file is optional."""
+        ...
+
+    @property
+    def path(self) -> str:
+        """Get the path."""
+        ...
+
 class Config:
     """Configuration object for loading and accessing configuration values.
 
@@ -73,6 +130,7 @@ class Config:
         """Load and merge multiple YAML files.
 
         Files are merged in order, with later files overriding earlier ones.
+        All files are required - use load_merged_with_specs() for optional files.
 
         Args:
             paths: List of paths to YAML files
@@ -83,6 +141,53 @@ class Config:
         Raises:
             ParseError: If any file cannot be parsed
             HoloconfError: If any file cannot be read
+        """
+        ...
+
+    @staticmethod
+    def load_merged_with_specs(specs: list[FileSpec]) -> Config:
+        """Load and merge multiple YAML files with optional file support.
+
+        Files are merged in order, with later files overriding earlier ones.
+        Optional files that don't exist are silently skipped.
+
+        Args:
+            specs: List of FileSpec objects (use FileSpec.optional() for optional files)
+
+        Returns:
+            A new Config object with merged configuration
+
+        Raises:
+            ParseError: If any file cannot be parsed
+            HoloconfError: If any required file cannot be read
+
+        Example:
+            >>> config = Config.load_merged_with_specs([
+            ...     FileSpec.required("base.yaml"),
+            ...     FileSpec.required("environment.yaml"),
+            ...     FileSpec.optional("local.yaml"),  # Won't error if missing
+            ... ])
+        """
+        ...
+
+    @staticmethod
+    def optional(path: str) -> FileSpec:
+        """Create a FileSpec for an optional file.
+
+        Convenience method equivalent to FileSpec.optional(path).
+        Use with load_merged_with_specs().
+
+        Args:
+            path: Path to the config file
+
+        Returns:
+            A FileSpec marking the file as optional
+
+        Example:
+            >>> config = Config.load_merged_with_specs([
+            ...     FileSpec("base.yaml"),           # Required
+            ...     Config.optional("local.yaml"),   # Optional
+            ... ])
         """
         ...
 

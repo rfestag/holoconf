@@ -26,7 +26,7 @@ pub mod value;
 
 mod config;
 
-pub use config::{Config, ConfigOptions};
+pub use config::{Config, ConfigOptions, FileSpec};
 pub use error::{Error, Result};
 pub use resolver::{ResolvedValue, Resolver, ResolverRegistry};
 pub use schema::Schema;

@@ -166,7 +166,13 @@ fn generate_markdown_doc(schema: &serde_json::Value) -> String {
     // Process top-level properties
     if let Some(properties) = schema.get("properties").and_then(|v| v.as_object()) {
         for (name, prop_schema) in properties {
-            generate_section(&mut output, name, prop_schema, root_required.contains(&name.as_str()), 2);
+            generate_section(
+                &mut output,
+                name,
+                prop_schema,
+                root_required.contains(&name.as_str()),
+                2,
+            );
         }
     }
 
@@ -243,7 +249,13 @@ fn generate_section(
 
                 if prop_is_object && prop_schema.get("properties").is_some() {
                     let nested_required = required.contains(&prop_name.as_str());
-                    generate_section(output, prop_name, prop_schema, nested_required, heading_level + 1);
+                    generate_section(
+                        output,
+                        prop_name,
+                        prop_schema,
+                        nested_required,
+                        heading_level + 1,
+                    );
                 }
             }
         }
@@ -273,11 +285,11 @@ fn get_type_string(schema: &serde_json::Value) -> String {
     if let Some(enum_vals) = schema.get("enum").and_then(|v| v.as_array()) {
         let vals: Vec<String> = enum_vals
             .iter()
-            .filter_map(|v| {
+            .map(|v| {
                 if v.is_string() {
-                    Some(format!("\"{}\"", v.as_str().unwrap()))
+                    format!("\"{}\"", v.as_str().unwrap())
                 } else {
-                    Some(v.to_string())
+                    v.to_string()
                 }
             })
             .collect();
@@ -285,10 +297,7 @@ fn get_type_string(schema: &serde_json::Value) -> String {
     }
 
     // Handle type
-    let base_type = schema
-        .get("type")
-        .and_then(|v| v.as_str())
-        .unwrap_or("any");
+    let base_type = schema.get("type").and_then(|v| v.as_str()).unwrap_or("any");
 
     // Add constraints info
     let mut constraints = Vec::new();
@@ -342,7 +351,7 @@ fn value_to_json(value: &Value) -> serde_json::Value {
         Value::String(s) => serde_json::Value::String(s.clone()),
         Value::Bytes(bytes) => {
             // Serialize bytes as base64 string
-            use base64::{Engine as _, engine::general_purpose::STANDARD};
+            use base64::{engine::general_purpose::STANDARD, Engine as _};
             serde_json::Value::String(STANDARD.encode(bytes))
         }
         Value::Sequence(seq) => serde_json::Value::Array(seq.iter().map(value_to_json).collect()),
@@ -427,7 +436,13 @@ fn generate_template_property(
         if let Some(properties) = schema.get("properties").and_then(|v| v.as_object()) {
             for (prop_name, prop_schema) in properties {
                 let prop_required = required.contains(&prop_name.as_str());
-                generate_template_property(output, prop_name, prop_schema, prop_required, indent_level + 1);
+                generate_template_property(
+                    output,
+                    prop_name,
+                    prop_schema,
+                    prop_required,
+                    indent_level + 1,
+                );
             }
         }
     } else {
@@ -440,7 +455,11 @@ fn generate_template_property(
         // Add inline comment if there's a description or default info
         if let Some(default) = schema.get("default") {
             if !comment_parts.is_empty() {
-                line.push_str(&format!("  # {} (default: {})", comment_parts.join(" - "), format_json_value(default)));
+                line.push_str(&format!(
+                    "  # {} (default: {})",
+                    comment_parts.join(" - "),
+                    format_json_value(default)
+                ));
             } else {
                 line.push_str(&format!("  # default: {}", format_json_value(default)));
             }
@@ -487,7 +506,12 @@ fn format_json_value(value: &serde_json::Value) -> String {
         serde_json::Value::Number(n) => n.to_string(),
         serde_json::Value::String(s) => {
             // Check if we need to quote the string
-            if s.is_empty() || s.contains(':') || s.contains('#') || s.starts_with(' ') || s.ends_with(' ') {
+            if s.is_empty()
+                || s.contains(':')
+                || s.contains('#')
+                || s.starts_with(' ')
+                || s.ends_with(' ')
+            {
                 format!("\"{}\"", s.replace('"', "\\\""))
             } else {
                 s.clone()

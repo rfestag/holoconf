@@ -4,7 +4,7 @@
 //! Values can be scalars (string, int, float, bool, null, bytes),
 //! sequences (arrays), or mappings (objects).
 
-use base64::{Engine as _, engine::general_purpose::STANDARD};
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use indexmap::IndexMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
@@ -475,7 +475,9 @@ fn remove_sources_with_prefix(
     }
     // Remove exact match and any children (prefix. or prefix[)
     sources.retain(|path, _| {
-        path != prefix && !path.starts_with(&format!("{}.", prefix)) && !path.starts_with(&format!("{}[", prefix))
+        path != prefix
+            && !path.starts_with(&format!("{}.", prefix))
+            && !path.starts_with(&format!("{}[", prefix))
     });
 }
 

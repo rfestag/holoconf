@@ -387,7 +387,7 @@ fn cmd_get(
                         holoconf_core::Value::Null => println!("null"),
                         holoconf_core::Value::Bytes(bytes) => {
                             // For bytes, output as base64
-                            use base64::{Engine as _, engine::general_purpose::STANDARD};
+                            use base64::{engine::general_purpose::STANDARD, Engine as _};
                             println!("{}", STANDARD.encode(bytes));
                         }
                         _ => {
@@ -489,7 +489,11 @@ fn cmd_schema_template(file: PathBuf, output: Option<PathBuf>) -> ExitCode {
             eprintln!("{}: {}", "Error writing file".red(), e);
             return ExitCode::from(2);
         }
-        eprintln!("{} Wrote template to {}", "✓".green(), output_path.display());
+        eprintln!(
+            "{} Wrote template to {}",
+            "✓".green(),
+            output_path.display()
+        );
     } else {
         print!("{}", template);
     }
@@ -530,4 +534,3 @@ fn cmd_schema_docs(file: PathBuf, format: &str) -> ExitCode {
         }
     }
 }
-

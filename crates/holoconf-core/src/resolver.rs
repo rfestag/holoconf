@@ -336,7 +336,10 @@ fn file_resolver(
 
     let file_path_str = &args[0];
     let parse_mode = kwargs.get("parse").map(|s| s.as_str()).unwrap_or("auto");
-    let encoding = kwargs.get("encoding").map(|s| s.as_str()).unwrap_or("utf-8");
+    let encoding = kwargs
+        .get("encoding")
+        .map(|s| s.as_str())
+        .unwrap_or("utf-8");
 
     // Resolve relative paths based on context base path
     let file_path = if Path::new(file_path_str).is_relative() {
@@ -360,7 +363,7 @@ fn file_resolver(
     let content = match encoding {
         "base64" => {
             // Read as binary and base64 encode
-            use base64::{Engine as _, engine::general_purpose::STANDARD};
+            use base64::{engine::general_purpose::STANDARD, Engine as _};
             let bytes = std::fs::read(&file_path)
                 .map_err(|_| Error::file_not_found(file_path_str, Some(ctx.config_path.clone())))?;
             STANDARD.encode(bytes)
@@ -1020,7 +1023,7 @@ mod tests {
         let content = result.value.as_str().unwrap();
 
         // Verify the base64 encoding is correct
-        use base64::{Engine as _, engine::general_purpose::STANDARD};
+        use base64::{engine::general_purpose::STANDARD, Engine as _};
         let expected = STANDARD.encode(b"Hello\x00\x01\x02World");
         assert_eq!(content, expected);
 
