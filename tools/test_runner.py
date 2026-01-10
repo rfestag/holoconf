@@ -110,9 +110,10 @@ class RustDriver(Driver):
 
     def __init__(self):
         try:
-            from holoconf import Config, Schema
+            from holoconf import Config, Schema, FileSpec
             self.Config = Config
             self.Schema = Schema
+            self.FileSpec = FileSpec
         except ImportError:
             raise ImportError(
                 "Could not import holoconf. "
@@ -158,6 +159,22 @@ class RustDriver(Driver):
     def load_merged(self, file_paths: List[str]) -> Any:
         return self.Config.load_merged(file_paths)
 
+    def load_merged_with_specs(self, specs: List[Dict[str, Any]]) -> Any:
+        """Load merged files with optional file support.
+
+        Each spec is a dict with 'path' and optional 'optional' keys.
+        """
+        file_specs = []
+        for spec in specs:
+            if isinstance(spec, str):
+                # Backwards compatible: plain string is required file
+                file_specs.append(self.FileSpec.required(spec))
+            elif spec.get("optional", False):
+                file_specs.append(self.FileSpec.optional(spec["path"]))
+            else:
+                file_specs.append(self.FileSpec.required(spec["path"]))
+        return self.Config.load_merged_with_specs(file_specs)
+
     def load_schema(self, yaml_content: str) -> Any:
         return self.Schema.from_yaml(yaml_content)
 
@@ -185,9 +202,10 @@ class PythonDriver(Driver):
 
     def __init__(self):
         try:
-            from holoconf import Config, Schema
+            from holoconf import Config, Schema, FileSpec
             self.Config = Config
             self.Schema = Schema
+            self.FileSpec = FileSpec
         except ImportError:
             raise ImportError(
                 "Could not import holoconf. "
@@ -210,6 +228,22 @@ class PythonDriver(Driver):
 
     def load_merged(self, file_paths: List[str]) -> Any:
         return self.Config.load_merged(file_paths)
+
+    def load_merged_with_specs(self, specs: List[Dict[str, Any]]) -> Any:
+        """Load merged files with optional file support.
+
+        Each spec is a dict with 'path' and optional 'optional' keys.
+        """
+        file_specs = []
+        for spec in specs:
+            if isinstance(spec, str):
+                # Backwards compatible: plain string is required file
+                file_specs.append(self.FileSpec.required(spec))
+            elif spec.get("optional", False):
+                file_specs.append(self.FileSpec.optional(spec["path"]))
+            else:
+                file_specs.append(self.FileSpec.required(spec["path"]))
+        return self.Config.load_merged_with_specs(file_specs)
 
     def load_config(self, yaml_content: str, base_path: Optional[str] = None) -> Any:
         return self.Config.loads(yaml_content, base_path=base_path)
@@ -449,6 +483,7 @@ def run_test(driver: Driver, test: TestCase, suite_name: str) -> TestResult:
     env = test.given.get("env", {})
     files = test.given.get("files", {})
     config_merge = test.given.get("config_merge", [])
+    config_merge_specs = test.given.get("config_merge_specs", [])
     temp_dir = None
     temp_files = {}  # Track created temp files for CLI substitution
 
@@ -500,12 +535,57 @@ def run_test(driver: Driver, test: TestCase, suite_name: str) -> TestResult:
 
         # For non-CLI tests, load config into memory
         config = None
-        if config_merge:
-            # Merge multiple files
-            file_paths = [str(Path(temp_dir) / f) for f in config_merge]
-            config = driver.load_merged(file_paths)
-        elif config_yaml:
-            config = driver.load_config(config_yaml, base_path=base_path)
+        load_error = None
+        try:
+            if config_merge_specs:
+                # Merge multiple files with optional support
+                # Each spec is either a string (required) or a dict with 'path' and 'optional'
+                specs = []
+                for spec in config_merge_specs:
+                    if isinstance(spec, str):
+                        specs.append({"path": str(Path(temp_dir) / spec), "optional": False})
+                    else:
+                        specs.append({
+                            "path": str(Path(temp_dir) / spec["path"]),
+                            "optional": spec.get("optional", False),
+                        })
+                config = driver.load_merged_with_specs(specs)
+            elif config_merge:
+                # Merge multiple files (backwards compatible)
+                file_paths = [str(Path(temp_dir) / f) for f in config_merge]
+                config = driver.load_merged(file_paths)
+            elif config_yaml:
+                config = driver.load_config(config_yaml, base_path=base_path)
+        except Exception as e:
+            load_error = e
+
+        # If loading failed and we expected an error, check it
+        if load_error is not None:
+            if "error" in test.then:
+                message_contains = test.then["error"].get("message_contains", "")
+                error_str = str(load_error)
+                if message_contains and message_contains not in error_str:
+                    return TestResult(
+                        test_name=test.name,
+                        suite_name=suite_name,
+                        passed=False,
+                        error="Error message mismatch",
+                        expected=f"contains '{message_contains}'",
+                        actual=error_str,
+                    )
+                return TestResult(
+                    test_name=test.name,
+                    suite_name=suite_name,
+                    passed=True,
+                )
+            else:
+                # Unexpected error during loading
+                return TestResult(
+                    test_name=test.name,
+                    suite_name=suite_name,
+                    passed=False,
+                    error=f"Unexpected error during config loading: {load_error}",
+                )
 
         # Execute action - check export first since it may also have access
         if "export" in test.when:

@@ -23,12 +23,13 @@ from holoconf._holoconf import (
     CircularReferenceError,
     # Classes
     Config,
+    FileSpec,
     # Exceptions
     HoloconfError,
     ParseError,
     PathNotFoundError,
-    ResolverError,
     ResolvedValue,
+    ResolverError,
     Schema,
     TypeCoercionError,
     ValidationError,
@@ -39,6 +40,7 @@ __all__ = [
     "CircularReferenceError",
     # Classes
     "Config",
+    "FileSpec",
     # Exceptions
     "HoloconfError",
     "ParseError",

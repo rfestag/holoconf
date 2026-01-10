@@ -232,7 +232,10 @@ impl Error {
             }),
             path: None,
             source_location: None,
-            help: Some(format!("Check the '{}' resolver implementation", resolver_name)),
+            help: Some(format!(
+                "Check the '{}' resolver implementation",
+                resolver_name
+            )),
             cause: None,
         }
     }

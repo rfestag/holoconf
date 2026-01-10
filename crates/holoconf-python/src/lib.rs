@@ -20,9 +20,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use holoconf_core::{
-    error::ErrorKind, Config as CoreConfig, ConfigOptions, Error as CoreError,
+    error::ErrorKind,
+    resolver::{ResolvedValue as CoreResolvedValue, Resolver, ResolverContext},
+    Config as CoreConfig, ConfigOptions, Error as CoreError, FileSpec as CoreFileSpec,
     Schema as CoreSchema, Value as CoreValue,
-    resolver::{Resolver, ResolvedValue as CoreResolvedValue, ResolverContext},
 };
 
 // Define exception hierarchy per ADR-008
@@ -112,6 +113,7 @@ fn value_to_py(py: Python<'_>, value: &CoreValue) -> PyResult<PyObject> {
 }
 
 /// Convert a Python object to a CoreValue
+#[allow(clippy::only_used_in_recursion)]
 fn py_to_value(py: Python<'_>, obj: &Bound<'_, PyAny>) -> PyResult<CoreValue> {
     if obj.is_none() {
         return Ok(CoreValue::Null);
@@ -212,9 +214,12 @@ impl Resolver for PyResolver {
             }
 
             // Call the Python function
-            let result = self.callable.call(py, py_args, Some(&py_kwargs)).map_err(|e| {
-                CoreError::resolver_custom(&self.name, format!("Resolver error: {}", e))
-            })?;
+            let result = self
+                .callable
+                .call(py, py_args, Some(&py_kwargs))
+                .map_err(|e| {
+                    CoreError::resolver_custom(&self.name, format!("Resolver error: {}", e))
+                })?;
 
             // Convert result to CoreResolvedValue
             let result_bound = result.bind(py);
@@ -223,7 +228,10 @@ impl Resolver for PyResolver {
             if let Ok(resolved_cell) = result_bound.downcast::<PyResolvedValue>() {
                 let resolved = resolved_cell.borrow();
                 let value = py_to_value(py, resolved.value.bind(py)).map_err(|e| {
-                    CoreError::resolver_custom(&self.name, format!("Failed to convert value: {}", e))
+                    CoreError::resolver_custom(
+                        &self.name,
+                        format!("Failed to convert value: {}", e),
+                    )
                 })?;
                 if resolved.sensitive {
                     Ok(CoreResolvedValue::sensitive(value))
@@ -233,7 +241,10 @@ impl Resolver for PyResolver {
             } else {
                 // Plain return value - convert directly
                 let value = py_to_value(py, result_bound).map_err(|e| {
-                    CoreError::resolver_custom(&self.name, format!("Failed to convert value: {}", e))
+                    CoreError::resolver_custom(
+                        &self.name,
+                        format!("Failed to convert value: {}", e),
+                    )
                 })?;
                 Ok(CoreResolvedValue::new(value))
             }
@@ -242,6 +253,93 @@ impl Resolver for PyResolver {
 
     fn name(&self) -> &str {
         &self.name
+    }
+}
+
+/// File specification for optional file support
+///
+/// Use this to mark files as optional in load_merged_with_specs().
+#[pyclass(name = "FileSpec")]
+#[derive(Clone)]
+struct PyFileSpec {
+    path: String,
+    optional: bool,
+}
+
+#[pymethods]
+impl PyFileSpec {
+    /// Create a FileSpec for a required file
+    ///
+    /// Args:
+    ///     path: Path to the config file
+    #[new]
+    fn new(path: String) -> Self {
+        Self {
+            path,
+            optional: false,
+        }
+    }
+
+    /// Create a FileSpec for an optional file
+    ///
+    /// Optional files that don't exist are silently skipped.
+    ///
+    /// Args:
+    ///     path: Path to the config file
+    ///
+    /// Returns:
+    ///     A FileSpec marking the file as optional
+    #[staticmethod]
+    fn optional(path: String) -> Self {
+        Self {
+            path,
+            optional: true,
+        }
+    }
+
+    /// Create a FileSpec for a required file
+    ///
+    /// Args:
+    ///     path: Path to the config file
+    ///
+    /// Returns:
+    ///     A FileSpec marking the file as required
+    #[staticmethod]
+    fn required(path: String) -> Self {
+        Self {
+            path,
+            optional: false,
+        }
+    }
+
+    /// Check if this file is optional
+    #[getter]
+    fn is_optional(&self) -> bool {
+        self.optional
+    }
+
+    /// Get the path
+    #[getter]
+    fn path(&self) -> &str {
+        &self.path
+    }
+
+    fn __repr__(&self) -> String {
+        if self.optional {
+            format!("FileSpec.optional(\"{}\")", self.path)
+        } else {
+            format!("FileSpec.required(\"{}\")", self.path)
+        }
+    }
+}
+
+impl PyFileSpec {
+    fn to_core(&self) -> CoreFileSpec {
+        if self.optional {
+            CoreFileSpec::optional(&self.path)
+        } else {
+            CoreFileSpec::required(&self.path)
+        }
     }
 }
 
@@ -301,6 +399,7 @@ impl PyConfig {
     /// Load and merge multiple YAML files
     ///
     /// Files are merged in order, with later files overriding earlier ones.
+    /// All files are required - use load_merged_with_specs() for optional files.
     ///
     /// Args:
     ///     paths: List of paths to YAML files
@@ -309,6 +408,48 @@ impl PyConfig {
         let path_refs: Vec<&str> = paths.iter().map(|s| s.as_str()).collect();
         let inner = CoreConfig::load_merged(&path_refs).map_err(to_py_err)?;
         Ok(Self { inner })
+    }
+
+    /// Load and merge multiple YAML files with optional file support
+    ///
+    /// Files are merged in order, with later files overriding earlier ones.
+    /// Optional files that don't exist are silently skipped.
+    ///
+    /// Args:
+    ///     specs: List of FileSpec objects (use FileSpec.optional() for optional files)
+    ///
+    /// Example:
+    ///     >>> config = Config.load_merged_with_specs([
+    ///     ...     FileSpec.required("base.yaml"),
+    ///     ...     FileSpec.required("environment.yaml"),
+    ///     ...     FileSpec.optional("local.yaml"),  # Won't error if missing
+    ///     ... ])
+    #[staticmethod]
+    fn load_merged_with_specs(specs: Vec<PyFileSpec>) -> PyResult<Self> {
+        let core_specs: Vec<CoreFileSpec> = specs.iter().map(|s| s.to_core()).collect();
+        let inner = CoreConfig::load_merged_with_specs(&core_specs).map_err(to_py_err)?;
+        Ok(Self { inner })
+    }
+
+    /// Create a FileSpec for an optional file
+    ///
+    /// Convenience method equivalent to FileSpec.optional(path).
+    /// Use with load_merged_with_specs().
+    ///
+    /// Args:
+    ///     path: Path to the config file
+    ///
+    /// Returns:
+    ///     A FileSpec marking the file as optional
+    ///
+    /// Example:
+    ///     >>> config = Config.load_merged_with_specs([
+    ///     ...     FileSpec("base.yaml"),           # Required
+    ///     ...     Config.optional("local.yaml"),   # Optional
+    ///     ... ])
+    #[staticmethod]
+    fn optional(path: String) -> PyFileSpec {
+        PyFileSpec::optional(path)
     }
 
     /// Merge another config into this one
@@ -689,6 +830,7 @@ fn holoconf(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyConfig>()?;
     m.add_class::<PySchema>()?;
     m.add_class::<PyResolvedValue>()?;
+    m.add_class::<PyFileSpec>()?;
 
     // Add exception hierarchy
     m.add("HoloconfError", m.py().get_type::<HoloconfError>())?;

@@ -1,0 +1,205 @@
+suite: optional_files
+description: Tests for optional file support in config merging
+
+tests:
+  - name: optional_file_missing_is_skipped
+    given:
+      files:
+        base.yaml: |
+          database:
+            host: localhost
+            port: 5432
+      config_merge_specs:
+        - path: base.yaml
+          optional: false
+        - path: local.yaml
+          optional: true  # Does not exist, should be skipped
+    when:
+      access: database.host
+    then:
+      value: localhost
+
+  - name: optional_file_exists_is_merged
+    given:
+      files:
+        base.yaml: |
+          database:
+            host: localhost
+            port: 5432
+        local.yaml: |
+          database:
+            host: prod-db
+      config_merge_specs:
+        - path: base.yaml
+          optional: false
+        - path: local.yaml
+          optional: true
+    when:
+      access: database.host
+    then:
+      value: prod-db
+
+  - name: required_file_missing_errors
+    given:
+      files:
+        base.yaml: |
+          key: value
+      config_merge_specs:
+        - path: base.yaml
+          optional: false
+        - path: missing.yaml
+          optional: false  # Required, should error
+    when:
+      access: key
+    then:
+      error:
+        message_contains: "File not found"
+
+  - name: all_optional_missing_returns_empty
+    given:
+      files: {}  # No files created
+      config_merge_specs:
+        - path: optional1.yaml
+          optional: true
+        - path: optional2.yaml
+          optional: true
+    when:
+      export: dict
+      resolve: true
+    then:
+      value: {}
+
+  - name: mixed_required_and_optional_files
+    given:
+      files:
+        required1.yaml: |
+          app:
+            name: myapp
+            debug: false
+        required2.yaml: |
+          database:
+            host: localhost
+        optional_exists.yaml: |
+          app:
+            debug: true
+          database:
+            port: 5432
+      config_merge_specs:
+        - path: required1.yaml
+          optional: false
+        - path: optional_missing.yaml
+          optional: true  # Does not exist, should be skipped
+        - path: required2.yaml
+          optional: false
+        - path: optional_exists.yaml
+          optional: true  # Exists, should be merged
+    when:
+      access: app.debug
+    then:
+      value: true
+
+  - name: optional_file_overrides_values
+    given:
+      files:
+        base.yaml: |
+          server:
+            host: "0.0.0.0"
+            port: 8080
+            timeout: 30
+        override.yaml: |
+          server:
+            port: 9000
+      config_merge_specs:
+        - path: base.yaml
+          optional: false
+        - path: override.yaml
+          optional: true
+    when:
+      access: server.port
+    then:
+      value: 9000
+
+  - name: optional_file_preserves_unoverwritten_values
+    given:
+      files:
+        base.yaml: |
+          server:
+            host: "0.0.0.0"
+            port: 8080
+            timeout: 30
+        override.yaml: |
+          server:
+            port: 9000
+      config_merge_specs:
+        - path: base.yaml
+          optional: false
+        - path: override.yaml
+          optional: true
+    when:
+      access: server.timeout
+    then:
+      value: 30
+
+  - name: string_specs_treated_as_required
+    given:
+      files:
+        base.yaml: |
+          key: value
+      config_merge_specs:
+        - base.yaml  # String, should be treated as required
+    when:
+      access: key
+    then:
+      value: value
+
+  - name: optional_file_deep_merge
+    given:
+      files:
+        base.yaml: |
+          database:
+            connection:
+              host: localhost
+              port: 5432
+              pool:
+                min: 5
+                max: 10
+        local.yaml: |
+          database:
+            connection:
+              pool:
+                max: 50
+      config_merge_specs:
+        - path: base.yaml
+          optional: false
+        - path: local.yaml
+          optional: true
+    when:
+      access: database.connection.pool.max
+    then:
+      value: 50
+
+  - name: optional_file_deep_merge_preserves_siblings
+    given:
+      files:
+        base.yaml: |
+          database:
+            connection:
+              host: localhost
+              port: 5432
+              pool:
+                min: 5
+                max: 10
+        local.yaml: |
+          database:
+            connection:
+              pool:
+                max: 50
+      config_merge_specs:
+        - path: base.yaml
+          optional: false
+        - path: local.yaml
+          optional: true
+    when:
+      access: database.connection.pool.min
+    then:
+      value: 5

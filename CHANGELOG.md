@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+#### Optional File Support
+- **Optional files in config merging** - Specify files that can be missing without causing errors
+  - `FileSpec.required(path)` - File must exist (error if missing)
+  - `FileSpec.optional(path)` - File is silently skipped if missing
+  - `Config.load_merged_with_specs([...])` - Load with mixed required/optional files
+  - `Config.optional(path)` - Convenience method to merge a single optional file
+- Common use case: local developer overrides that aren't committed to version control
+
 #### Source Tracking
 - **File-level source tracking** for merged configurations - track which file each value came from
   - `config.get_source("path.to.value")` - Returns the filename that provided this value
@@ -47,6 +55,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added acceptance tests for file resolver encoding (3 tests)
 - Added acceptance test for sensitivity inheritance via self-references
 - Re-enabled previously disabled circular reference acceptance tests (2 tests)
+- Added acceptance tests for optional file support (10 tests covering missing files, merge behavior, deep merge)
 
 ## [0.1.3] - 2026-01-09
 
