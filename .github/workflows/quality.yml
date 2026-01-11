@@ -138,3 +138,25 @@ jobs:
       # Could add more complexity tools here:
       # - cargo-geiger (unsafe code detection)
       # - cargo-outdated (dependency freshness)
+
+  # ==========================================================================
+  # Gate Job - all quality checks must pass
+  # ==========================================================================
+  quality-complete:
+    name: Quality Complete
+    runs-on: ubuntu-latest
+    needs: [rust-lint, rust-security, rust-unused, python-lint, python-security]
+    # Note: complexity is informational only, not required
+    if: always()
+    steps:
+      - name: Check all jobs passed
+        run: |
+          if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" ]]; then
+            echo "One or more quality checks failed"
+            exit 1
+          fi
+          if [[ "${{ contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
+            echo "One or more quality checks were cancelled"
+            exit 1
+          fi
+          echo "All quality checks passed"
