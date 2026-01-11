@@ -48,8 +48,8 @@ HoloConf provides a consistent, powerful configuration management experience acr
 
     # Environment variables are resolved automatically
     # database:
-    #   host: ${env:DB_HOST,localhost}
-    #   port: ${env:DB_PORT,5432}
+    #   host: ${env:DB_HOST,default=localhost}
+    #   port: ${env:DB_PORT,default=5432}
     ```
 
 === "Rust"

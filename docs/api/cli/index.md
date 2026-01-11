@@ -167,7 +167,7 @@ $ holoconf dump config.yaml
 app:
   name: my-application
 database:
-  host: ${env:DB_HOST,localhost}
+  host: ${env:DB_HOST,default=localhost}
 
 # Dump resolved as JSON
 $ holoconf dump config.yaml --resolve --format json
