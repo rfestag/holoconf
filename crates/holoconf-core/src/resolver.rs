@@ -240,6 +240,12 @@ impl ResolverRegistry {
     }
 
     /// Resolve an interpolation using the appropriate resolver
+    ///
+    /// This method implements framework-level handling of the `sensitive` kwarg per ADR-011.
+    /// The `sensitive` kwarg overrides the resolver's sensitivity hint.
+    ///
+    /// Note: `default` handling with lazy resolution is done at the Config level,
+    /// not here, to support nested interpolations in default values.
     pub fn resolve(
         &self,
         resolver_name: &str,
@@ -252,7 +258,27 @@ impl ResolverRegistry {
             .get(resolver_name)
             .ok_or_else(|| Error::unknown_resolver(resolver_name, Some(ctx.config_path.clone())))?;
 
-        resolver.resolve(args, kwargs, ctx)
+        // Extract framework-level `sensitive` kwarg per ADR-011
+        let sensitive_override = kwargs
+            .get("sensitive")
+            .map(|v| v.eq_ignore_ascii_case("true"));
+
+        // Pass remaining kwargs to the resolver (filter out framework keyword)
+        let resolver_kwargs: HashMap<String, String> = kwargs
+            .iter()
+            .filter(|(k, _)| *k != "sensitive")
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+
+        // Call the resolver
+        let mut resolved = resolver.resolve(args, &resolver_kwargs, ctx)?;
+
+        // Apply sensitivity override if specified
+        if let Some(is_sensitive) = sensitive_override {
+            resolved.sensitive = is_sensitive;
+        }
+
+        Ok(resolved)
     }
 }
 
@@ -260,12 +286,14 @@ impl ResolverRegistry {
 ///
 /// Usage:
 ///   ${env:VAR_NAME}                      - Get env var (error if not set)
-///   ${env:VAR_NAME,default}              - Get env var with default
-///   ${env:VAR_NAME,sensitive=true}       - Mark as sensitive for redaction
-///   ${env:VAR_NAME,default,sensitive=true} - Both default and sensitive
+///   ${env:VAR_NAME,default=value}        - Get env var with default (framework-handled)
+///   ${env:VAR_NAME,sensitive=true}       - Mark as sensitive for redaction (framework-handled)
+///
+/// Note: `default` and `sensitive` are framework-level kwargs handled by ResolverRegistry.
+/// This resolver just returns the env var value or an error if not found.
 fn env_resolver(
     args: &[String],
-    kwargs: &HashMap<String, String>,
+    _kwargs: &HashMap<String, String>,
     ctx: &ResolverContext,
 ) -> Result<ResolvedValue> {
     if args.is_empty() {
@@ -274,37 +302,18 @@ fn env_resolver(
     }
 
     let var_name = &args[0];
-    let default_value = args.get(1);
-
-    // Check if sensitive=true is set in kwargs
-    let is_sensitive = kwargs
-        .get("sensitive")
-        .map(|v| v.eq_ignore_ascii_case("true"))
-        .unwrap_or(false);
 
     match std::env::var(var_name) {
         Ok(value) => {
-            let resolved_value = Value::String(value);
-            if is_sensitive {
-                Ok(ResolvedValue::sensitive(resolved_value))
-            } else {
-                Ok(ResolvedValue::new(resolved_value))
-            }
+            // Return non-sensitive by default; sensitivity can be overridden via kwarg
+            Ok(ResolvedValue::new(Value::String(value)))
         }
         Err(_) => {
-            if let Some(default) = default_value {
-                let resolved_value = Value::String(default.clone());
-                if is_sensitive {
-                    Ok(ResolvedValue::sensitive(resolved_value))
-                } else {
-                    Ok(ResolvedValue::new(resolved_value))
-                }
-            } else {
-                Err(Error::env_not_found(
-                    var_name,
-                    Some(ctx.config_path.clone()),
-                ))
-            }
+            // Return EnvNotFound error - framework will handle default if provided
+            Err(Error::env_not_found(
+                var_name,
+                Some(ctx.config_path.clone()),
+            ))
         }
     }
 }
@@ -321,6 +330,10 @@ fn env_resolver(
 ///   ${file:path/to/file,encoding=ascii}     - ASCII encoding (strips non-ASCII)
 ///   ${file:path/to/file,encoding=base64}    - Base64 encode the file contents as string
 ///   ${file:path/to/file,encoding=binary}    - Return raw bytes as Value::Bytes
+///   ${file:path/to/file,default={}}         - Default if file not found (framework-handled)
+///   ${file:path/to/file,sensitive=true}     - Mark as sensitive (framework-handled)
+///
+/// Note: `default` and `sensitive` are framework-level kwargs handled by ResolverRegistry.
 fn file_resolver(
     args: &[String],
     kwargs: &HashMap<String, String>,
@@ -475,19 +488,19 @@ mod tests {
     }
 
     #[test]
-    fn test_env_resolver_with_default() {
+    fn test_env_resolver_missing_returns_error() {
         // Make sure the var doesn't exist
         std::env::remove_var("HOLOCONF_NONEXISTENT_VAR");
 
+        let registry = ResolverRegistry::with_builtins();
         let ctx = ResolverContext::new("test.path");
-        let args = vec![
-            "HOLOCONF_NONEXISTENT_VAR".to_string(),
-            "default_value".to_string(),
-        ];
+        let args = vec!["HOLOCONF_NONEXISTENT_VAR".to_string()];
         let kwargs = HashMap::new();
 
-        let result = env_resolver(&args, &kwargs, &ctx).unwrap();
-        assert_eq!(result.value.as_str(), Some("default_value"));
+        // Registry doesn't handle defaults - that's done at Config level for lazy resolution
+        // So this should return an error
+        let result = registry.resolve("env", &args, &kwargs, &ctx);
+        assert!(result.is_err());
     }
 
     #[test]
@@ -506,12 +519,14 @@ mod tests {
     fn test_env_resolver_sensitive_kwarg() {
         std::env::set_var("HOLOCONF_SENSITIVE_VAR", "secret_value");
 
+        let registry = ResolverRegistry::with_builtins();
         let ctx = ResolverContext::new("test.path");
         let args = vec!["HOLOCONF_SENSITIVE_VAR".to_string()];
         let mut kwargs = HashMap::new();
         kwargs.insert("sensitive".to_string(), "true".to_string());
 
-        let result = env_resolver(&args, &kwargs, &ctx).unwrap();
+        // Framework-level sensitive handling via registry
+        let result = registry.resolve("env", &args, &kwargs, &ctx).unwrap();
         assert_eq!(result.value.as_str(), Some("secret_value"));
         assert!(result.sensitive);
 
@@ -522,34 +537,22 @@ mod tests {
     fn test_env_resolver_sensitive_false() {
         std::env::set_var("HOLOCONF_NON_SENSITIVE", "public_value");
 
+        let registry = ResolverRegistry::with_builtins();
         let ctx = ResolverContext::new("test.path");
         let args = vec!["HOLOCONF_NON_SENSITIVE".to_string()];
         let mut kwargs = HashMap::new();
         kwargs.insert("sensitive".to_string(), "false".to_string());
 
-        let result = env_resolver(&args, &kwargs, &ctx).unwrap();
+        // Framework-level sensitive handling via registry
+        let result = registry.resolve("env", &args, &kwargs, &ctx).unwrap();
         assert_eq!(result.value.as_str(), Some("public_value"));
         assert!(!result.sensitive);
 
         std::env::remove_var("HOLOCONF_NON_SENSITIVE");
     }
 
-    #[test]
-    fn test_env_resolver_sensitive_with_default() {
-        std::env::remove_var("HOLOCONF_SENSITIVE_DEFAULT");
-
-        let ctx = ResolverContext::new("test.path");
-        let args = vec![
-            "HOLOCONF_SENSITIVE_DEFAULT".to_string(),
-            "default_secret".to_string(),
-        ];
-        let mut kwargs = HashMap::new();
-        kwargs.insert("sensitive".to_string(), "true".to_string());
-
-        let result = env_resolver(&args, &kwargs, &ctx).unwrap();
-        assert_eq!(result.value.as_str(), Some("default_secret"));
-        assert!(result.sensitive);
-    }
+    // Note: test_env_resolver_sensitive_with_default has moved to config.rs tests
+    // since default handling with lazy resolution is done at the Config level
 
     #[test]
     fn test_resolver_registry() {
@@ -1114,5 +1117,158 @@ mod tests {
 
         // Cleanup
         std::fs::remove_file(test_file).ok();
+    }
+
+    // Framework-level sensitive test (default handling moved to config tests)
+
+    #[test]
+    fn test_file_resolver_with_sensitive() {
+        use std::io::Write;
+
+        // Create a temporary file
+        let temp_dir = std::env::temp_dir();
+        let test_file = temp_dir.join("holoconf_sensitive_test.txt");
+        {
+            let mut file = std::fs::File::create(&test_file).unwrap();
+            writeln!(file, "secret content").unwrap();
+        }
+
+        let registry = ResolverRegistry::with_builtins();
+        let mut ctx = ResolverContext::new("test.path");
+        ctx.base_path = Some(temp_dir.clone());
+
+        let args = vec!["holoconf_sensitive_test.txt".to_string()];
+        let mut kwargs = HashMap::new();
+        kwargs.insert("sensitive".to_string(), "true".to_string());
+
+        // Framework-level sensitive handling via registry
+        let result = registry.resolve("file", &args, &kwargs, &ctx).unwrap();
+        assert!(result.value.as_str().unwrap().contains("secret content"));
+        assert!(result.sensitive);
+
+        // Cleanup
+        std::fs::remove_file(test_file).ok();
+    }
+
+    #[test]
+    fn test_framework_sensitive_kwarg_not_passed_to_resolver() {
+        // Ensure that 'sensitive' kwarg is NOT passed to the resolver
+        // (Note: 'default' is handled at Config level, not registry level)
+        let mut registry = ResolverRegistry::new();
+
+        // Register a test resolver that checks it doesn't receive sensitive kwarg
+        registry.register_fn("test_kwargs", |_args, kwargs, _ctx| {
+            // Sensitive kwarg should be filtered out
+            assert!(
+                !kwargs.contains_key("sensitive"),
+                "sensitive kwarg should not be passed to resolver"
+            );
+            // But custom kwargs should be passed through
+            if let Some(custom) = kwargs.get("custom") {
+                Ok(ResolvedValue::new(Value::String(format!(
+                    "custom={}",
+                    custom
+                ))))
+            } else {
+                Ok(ResolvedValue::new(Value::String("no custom".to_string())))
+            }
+        });
+
+        let ctx = ResolverContext::new("test.path");
+        let args = vec![];
+        let mut kwargs = HashMap::new();
+        kwargs.insert("sensitive".to_string(), "true".to_string());
+        kwargs.insert("custom".to_string(), "myvalue".to_string());
+
+        let result = registry
+            .resolve("test_kwargs", &args, &kwargs, &ctx)
+            .unwrap();
+        assert_eq!(result.value.as_str(), Some("custom=myvalue"));
+        // Sensitive override should still be applied by framework
+        assert!(result.sensitive);
+    }
+}
+
+// Integration tests for lazy default resolution (requires Config)
+#[cfg(test)]
+mod lazy_resolution_tests {
+    use super::*;
+    use crate::Config;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    #[test]
+    fn test_default_not_resolved_when_main_value_exists() {
+        // Track whether the "fail" resolver was called
+        let fail_called = Arc::new(AtomicBool::new(false));
+        let fail_called_clone = fail_called.clone();
+
+        // Create a config with a custom resolver that would fail if called
+        let yaml = r#"
+value: ${env:HOLOCONF_LAZY_TEST_VAR,default=${fail:should_not_be_called}}
+"#;
+        // Set the env var so the default should NOT be needed
+        std::env::set_var("HOLOCONF_LAZY_TEST_VAR", "main_value");
+
+        let mut config = Config::from_yaml(yaml).unwrap();
+
+        // Register a "fail" resolver that sets a flag and panics
+        config.register_resolver(Arc::new(FnResolver::new(
+            "fail",
+            move |_args, _kwargs, _ctx| {
+                fail_called_clone.store(true, Ordering::SeqCst);
+                panic!("fail resolver should not have been called - lazy resolution failed!");
+            },
+        )));
+
+        // Access the value - should get main value, not call fail resolver
+        let result = config.get("value").unwrap();
+        assert_eq!(result.as_str(), Some("main_value"));
+
+        // Verify the fail resolver was never called
+        assert!(
+            !fail_called.load(Ordering::SeqCst),
+            "The default resolver should not have been called when main value exists"
+        );
+
+        std::env::remove_var("HOLOCONF_LAZY_TEST_VAR");
+    }
+
+    #[test]
+    fn test_default_is_resolved_when_main_value_missing() {
+        // Track whether the default resolver was called
+        let default_called = Arc::new(AtomicBool::new(false));
+        let default_called_clone = default_called.clone();
+
+        // Create a config where env var doesn't exist
+        let yaml = r#"
+value: ${env:HOLOCONF_LAZY_MISSING_VAR,default=${custom_default:fallback}}
+"#;
+        std::env::remove_var("HOLOCONF_LAZY_MISSING_VAR");
+
+        let mut config = Config::from_yaml(yaml).unwrap();
+
+        // Register a custom default resolver
+        config.register_resolver(Arc::new(FnResolver::new(
+            "custom_default",
+            move |args: &[String], _kwargs, _ctx| {
+                default_called_clone.store(true, Ordering::SeqCst);
+                let arg = args.first().cloned().unwrap_or_default();
+                Ok(ResolvedValue::new(Value::String(format!(
+                    "default_was_{}",
+                    arg
+                ))))
+            },
+        )));
+
+        // Access the value - should call default resolver since main value missing
+        let result = config.get("value").unwrap();
+        assert_eq!(result.as_str(), Some("default_was_fallback"));
+
+        // Verify the default resolver WAS called
+        assert!(
+            default_called.load(Ordering::SeqCst),
+            "The default resolver should have been called when main value is missing"
+        );
     }
 }

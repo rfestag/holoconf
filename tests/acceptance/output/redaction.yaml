@@ -131,7 +131,7 @@ tests:
     description: Default values can also be marked sensitive
     given:
       config: |
-        token: ${env:HOLOCONF_NONEXISTENT_TOKEN,fallback_token,sensitive=true}
+        token: ${env:HOLOCONF_NONEXISTENT_TOKEN,default=fallback_token,sensitive=true}
     when:
       dump:
         format: yaml

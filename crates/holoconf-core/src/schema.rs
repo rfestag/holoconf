@@ -822,4 +822,737 @@ properties:
         let config = Value::Mapping(map);
         assert!(schema.validate(&config).is_err());
     }
+
+    #[test]
+    fn test_schema_from_json() {
+        let schema_json = r#"{
+            "type": "object",
+            "required": ["name"],
+            "properties": {
+                "name": { "type": "string" },
+                "port": { "type": "integer" }
+            }
+        }"#;
+        let schema = Schema::from_json(schema_json).unwrap();
+        assert!(schema.as_value().is_object());
+
+        // Validate with it
+        let mut map = indexmap::IndexMap::new();
+        map.insert("name".into(), Value::String("test".into()));
+        let config = Value::Mapping(map);
+        assert!(schema.validate(&config).is_ok());
+    }
+
+    #[test]
+    fn test_schema_from_json_invalid() {
+        let invalid_json = "not valid json {{{";
+        let result = Schema::from_json(invalid_json);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Invalid JSON schema"));
+    }
+
+    #[test]
+    fn test_schema_from_yaml_invalid() {
+        let invalid_yaml = ":: invalid yaml :::";
+        let result = Schema::from_yaml(invalid_yaml);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Invalid YAML schema"));
+    }
+
+    #[test]
+    fn test_schema_from_file_yaml() {
+        let dir = std::env::temp_dir();
+        let path = dir.join("test_schema.yaml");
+
+        let schema_content = r#"
+type: object
+properties:
+  name:
+    type: string
+"#;
+        std::fs::write(&path, schema_content).unwrap();
+
+        let schema = Schema::from_file(&path).unwrap();
+        assert!(schema.as_value().is_object());
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn test_schema_from_file_json() {
+        let dir = std::env::temp_dir();
+        let path = dir.join("test_schema.json");
+
+        let schema_content = r#"{"type": "object", "properties": {"name": {"type": "string"}}}"#;
+        std::fs::write(&path, schema_content).unwrap();
+
+        let schema = Schema::from_file(&path).unwrap();
+        assert!(schema.as_value().is_object());
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn test_schema_from_file_yml_extension() {
+        let dir = std::env::temp_dir();
+        let path = dir.join("test_schema.yml");
+
+        let schema_content = r#"
+type: object
+properties:
+  name:
+    type: string
+"#;
+        std::fs::write(&path, schema_content).unwrap();
+
+        let schema = Schema::from_file(&path).unwrap();
+        assert!(schema.as_value().is_object());
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn test_schema_from_file_no_extension() {
+        let dir = std::env::temp_dir();
+        let path = dir.join("test_schema_no_ext");
+
+        // Default to YAML parsing
+        let schema_content = r#"
+type: object
+properties:
+  name:
+    type: string
+"#;
+        std::fs::write(&path, schema_content).unwrap();
+
+        let schema = Schema::from_file(&path).unwrap();
+        assert!(schema.as_value().is_object());
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn test_schema_from_file_not_found() {
+        let result = Schema::from_file("/nonexistent/path/to/schema.yaml");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("File not found"));
+    }
+
+    #[test]
+    fn test_schema_to_yaml() {
+        let schema = Schema::from_yaml(
+            r#"
+type: object
+properties:
+  name:
+    type: string
+"#,
+        )
+        .unwrap();
+
+        let yaml = schema.to_yaml().unwrap();
+        assert!(yaml.contains("type"));
+        assert!(yaml.contains("object"));
+        assert!(yaml.contains("properties"));
+    }
+
+    #[test]
+    fn test_schema_to_json() {
+        let schema = Schema::from_yaml(
+            r#"
+type: object
+properties:
+  name:
+    type: string
+"#,
+        )
+        .unwrap();
+
+        let json = schema.to_json().unwrap();
+        assert!(json.contains("\"type\""));
+        assert!(json.contains("\"object\""));
+        assert!(json.contains("\"properties\""));
+    }
+
+    #[test]
+    fn test_schema_to_markdown_basic() {
+        let schema = Schema::from_yaml(
+            r#"
+title: Test Configuration
+description: A test configuration schema
+type: object
+required:
+  - name
+properties:
+  name:
+    type: string
+    description: The application name
+  port:
+    type: integer
+    description: The server port
+    default: 8080
+    minimum: 1
+    maximum: 65535
+"#,
+        )
+        .unwrap();
+
+        let markdown = schema.to_markdown();
+        assert!(markdown.contains("# Test Configuration"));
+        assert!(markdown.contains("A test configuration schema"));
+        assert!(markdown.contains("name"));
+        assert!(markdown.contains("port"));
+        assert!(markdown.contains("(required)"));
+    }
+
+    #[test]
+    fn test_schema_to_markdown_nested() {
+        let schema = Schema::from_yaml(
+            r#"
+title: Nested Config
+type: object
+properties:
+  database:
+    type: object
+    description: Database settings
+    required:
+      - host
+    properties:
+      host:
+        type: string
+        description: Database host
+      port:
+        type: integer
+        default: 5432
+"#,
+        )
+        .unwrap();
+
+        let markdown = schema.to_markdown();
+        assert!(markdown.contains("database"));
+        assert!(markdown.contains("host"));
+        assert!(markdown.contains("5432"));
+    }
+
+    #[test]
+    fn test_schema_to_markdown_enum() {
+        let schema = Schema::from_yaml(
+            r#"
+type: object
+properties:
+  log_level:
+    type: string
+    enum: [debug, info, warn, error]
+"#,
+        )
+        .unwrap();
+
+        let markdown = schema.to_markdown();
+        assert!(markdown.contains("enum:"));
+    }
+
+    #[test]
+    fn test_schema_to_markdown_constraints() {
+        let schema = Schema::from_yaml(
+            r#"
+type: object
+properties:
+  name:
+    type: string
+    minLength: 1
+    maxLength: 100
+    pattern: "^[a-z]+$"
+"#,
+        )
+        .unwrap();
+
+        let markdown = schema.to_markdown();
+        assert!(markdown.contains("minLength"));
+        assert!(markdown.contains("maxLength"));
+        assert!(markdown.contains("pattern"));
+    }
+
+    #[test]
+    fn test_schema_to_template_basic() {
+        let schema = Schema::from_yaml(
+            r#"
+title: Test Config
+type: object
+required:
+  - name
+properties:
+  name:
+    type: string
+    description: The application name
+  port:
+    type: integer
+    default: 8080
+"#,
+        )
+        .unwrap();
+
+        let template = schema.to_template();
+        assert!(template.contains("name:"));
+        assert!(template.contains("port:"));
+        assert!(template.contains("8080"));
+        assert!(template.contains("REQUIRED"));
+    }
+
+    #[test]
+    fn test_schema_to_template_nested() {
+        let schema = Schema::from_yaml(
+            r#"
+type: object
+properties:
+  database:
+    type: object
+    required:
+      - host
+    properties:
+      host:
+        type: string
+        description: Database host
+      port:
+        type: integer
+        default: 5432
+"#,
+        )
+        .unwrap();
+
+        let template = schema.to_template();
+        assert!(template.contains("database:"));
+        assert!(template.contains("host:"));
+        assert!(template.contains("port:"));
+        assert!(template.contains("5432"));
+    }
+
+    #[test]
+    fn test_schema_to_template_types() {
+        let schema = Schema::from_yaml(
+            r#"
+type: object
+properties:
+  string_field:
+    type: string
+  int_field:
+    type: integer
+  number_field:
+    type: number
+  bool_field:
+    type: boolean
+  array_field:
+    type: array
+  null_field:
+    type: "null"
+"#,
+        )
+        .unwrap();
+
+        let template = schema.to_template();
+        assert!(template.contains("string_field: \"\""));
+        assert!(template.contains("int_field: 0"));
+        assert!(template.contains("number_field: 0.0"));
+        assert!(template.contains("bool_field: false"));
+        assert!(template.contains("array_field: []"));
+        assert!(template.contains("null_field: null"));
+    }
+
+    #[test]
+    fn test_schema_to_template_enum() {
+        let schema = Schema::from_yaml(
+            r#"
+type: object
+properties:
+  log_level:
+    type: string
+    enum: [debug, info, warn, error]
+"#,
+        )
+        .unwrap();
+
+        let template = schema.to_template();
+        // Should use first enum value as default
+        assert!(template.contains("log_level: debug") || template.contains("log_level: \"debug\""));
+    }
+
+    #[test]
+    fn test_validation_error_display() {
+        let err = ValidationError {
+            path: "/database/port".to_string(),
+            message: "expected integer".to_string(),
+        };
+        let display = format!("{}", err);
+        assert_eq!(display, "/database/port: expected integer");
+    }
+
+    #[test]
+    fn test_validation_error_display_empty_path() {
+        let err = ValidationError {
+            path: "".to_string(),
+            message: "missing required field".to_string(),
+        };
+        let display = format!("{}", err);
+        assert_eq!(display, "missing required field");
+    }
+
+    #[test]
+    fn test_value_to_json_null() {
+        let v = Value::Null;
+        let json = value_to_json(&v);
+        assert!(json.is_null());
+    }
+
+    #[test]
+    fn test_value_to_json_bool() {
+        let v = Value::Bool(true);
+        let json = value_to_json(&v);
+        assert_eq!(json, serde_json::Value::Bool(true));
+    }
+
+    #[test]
+    fn test_value_to_json_integer() {
+        let v = Value::Integer(42);
+        let json = value_to_json(&v);
+        assert_eq!(json, serde_json::json!(42));
+    }
+
+    #[test]
+    fn test_value_to_json_float() {
+        let v = Value::Float(2.71);
+        let json = value_to_json(&v);
+        assert!(json.is_number());
+    }
+
+    #[test]
+    fn test_value_to_json_float_nan() {
+        // NaN cannot be represented in JSON, should return null
+        let v = Value::Float(f64::NAN);
+        let json = value_to_json(&v);
+        assert!(json.is_null());
+    }
+
+    #[test]
+    fn test_value_to_json_string() {
+        let v = Value::String("hello".into());
+        let json = value_to_json(&v);
+        assert_eq!(json, serde_json::json!("hello"));
+    }
+
+    #[test]
+    fn test_value_to_json_bytes() {
+        let v = Value::Bytes(vec![72, 101, 108, 108, 111]); // "Hello"
+        let json = value_to_json(&v);
+        // Should be base64 encoded
+        assert!(json.is_string());
+        assert_eq!(json.as_str().unwrap(), "SGVsbG8=");
+    }
+
+    #[test]
+    fn test_value_to_json_sequence() {
+        let v = Value::Sequence(vec![Value::Integer(1), Value::Integer(2)]);
+        let json = value_to_json(&v);
+        assert!(json.is_array());
+        assert_eq!(json, serde_json::json!([1, 2]));
+    }
+
+    #[test]
+    fn test_value_to_json_mapping() {
+        let mut map = indexmap::IndexMap::new();
+        map.insert("key".to_string(), Value::String("value".into()));
+        let v = Value::Mapping(map);
+        let json = value_to_json(&v);
+        assert!(json.is_object());
+        assert_eq!(json["key"], "value");
+    }
+
+    #[test]
+    fn test_format_json_value_null() {
+        let v = serde_json::Value::Null;
+        assert_eq!(format_json_value(&v), "null");
+    }
+
+    #[test]
+    fn test_format_json_value_bool() {
+        assert_eq!(format_json_value(&serde_json::json!(true)), "true");
+        assert_eq!(format_json_value(&serde_json::json!(false)), "false");
+    }
+
+    #[test]
+    fn test_format_json_value_number() {
+        assert_eq!(format_json_value(&serde_json::json!(42)), "42");
+        assert_eq!(format_json_value(&serde_json::json!(2.71)), "2.71");
+    }
+
+    #[test]
+    fn test_format_json_value_string_simple() {
+        assert_eq!(format_json_value(&serde_json::json!("hello")), "hello");
+    }
+
+    #[test]
+    fn test_format_json_value_string_needs_quoting() {
+        // Empty string needs quotes
+        assert_eq!(format_json_value(&serde_json::json!("")), "\"\"");
+        // Contains colon
+        assert_eq!(
+            format_json_value(&serde_json::json!("key:value")),
+            "\"key:value\""
+        );
+        // Contains hash
+        assert_eq!(
+            format_json_value(&serde_json::json!("has#comment")),
+            "\"has#comment\""
+        );
+        // Starts with space
+        assert_eq!(
+            format_json_value(&serde_json::json!(" leading")),
+            "\" leading\""
+        );
+        // Ends with space
+        assert_eq!(
+            format_json_value(&serde_json::json!("trailing ")),
+            "\"trailing \""
+        );
+    }
+
+    #[test]
+    fn test_format_json_value_string_with_quotes_needing_escape() {
+        // String that needs quoting AND contains quotes should escape them
+        // Empty string triggers quoting, so let's test that
+        let v = serde_json::Value::String("has:\"quotes\"".to_string());
+        let formatted = format_json_value(&v);
+        // The colon triggers quoting, and the quotes get escaped
+        assert!(formatted.contains("\\\""));
+        assert!(formatted.starts_with('"'));
+    }
+
+    #[test]
+    fn test_format_json_value_string_no_quoting_needed() {
+        // String without special chars doesn't get quoted
+        let v = serde_json::Value::String("has \"quotes\"".to_string());
+        let formatted = format_json_value(&v);
+        // No colon/hash/spaces so it's returned as-is without quoting
+        assert_eq!(formatted, "has \"quotes\"");
+    }
+
+    #[test]
+    fn test_format_json_value_array_empty() {
+        assert_eq!(format_json_value(&serde_json::json!([])), "[]");
+    }
+
+    #[test]
+    fn test_format_json_value_array_with_items() {
+        assert_eq!(
+            format_json_value(&serde_json::json!([1, 2, 3])),
+            "[1, 2, 3]"
+        );
+    }
+
+    #[test]
+    fn test_format_json_value_object() {
+        assert_eq!(format_json_value(&serde_json::json!({})), "{}");
+    }
+
+    #[test]
+    fn test_get_type_string_basic() {
+        let schema = serde_json::json!({"type": "string"});
+        assert_eq!(get_type_string(&schema), "string");
+    }
+
+    #[test]
+    fn test_get_type_string_with_constraints() {
+        let schema = serde_json::json!({
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+        });
+        let type_str = get_type_string(&schema);
+        assert!(type_str.contains("integer"));
+        assert!(type_str.contains("min: 1"));
+        assert!(type_str.contains("max: 100"));
+    }
+
+    #[test]
+    fn test_get_type_string_with_string_constraints() {
+        let schema = serde_json::json!({
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 50,
+            "pattern": "^[a-z]+$"
+        });
+        let type_str = get_type_string(&schema);
+        assert!(type_str.contains("string"));
+        assert!(type_str.contains("minLength: 1"));
+        assert!(type_str.contains("maxLength: 50"));
+        assert!(type_str.contains("pattern:"));
+    }
+
+    #[test]
+    fn test_get_type_string_enum() {
+        let schema = serde_json::json!({
+            "enum": ["a", "b", "c"]
+        });
+        let type_str = get_type_string(&schema);
+        assert!(type_str.starts_with("enum:"));
+        assert!(type_str.contains("\"a\""));
+        assert!(type_str.contains("\"b\""));
+    }
+
+    #[test]
+    fn test_get_type_string_enum_numeric() {
+        let schema = serde_json::json!({
+            "enum": [1, 2, 3]
+        });
+        let type_str = get_type_string(&schema);
+        assert!(type_str.contains("1"));
+        assert!(type_str.contains("2"));
+    }
+
+    #[test]
+    fn test_get_type_string_no_type() {
+        let schema = serde_json::json!({});
+        assert_eq!(get_type_string(&schema), "any");
+    }
+
+    #[test]
+    fn test_schema_default_string_with_default() {
+        let schema = serde_json::json!({"default": 42});
+        assert_eq!(schema_default_string(&schema), "42");
+    }
+
+    #[test]
+    fn test_schema_default_string_with_string_default() {
+        let schema = serde_json::json!({"default": "hello"});
+        assert_eq!(schema_default_string(&schema), "\"hello\"");
+    }
+
+    #[test]
+    fn test_schema_default_string_no_default() {
+        let schema = serde_json::json!({});
+        assert_eq!(schema_default_string(&schema), "-");
+    }
+
+    #[test]
+    fn test_get_template_value_with_default() {
+        let schema = serde_json::json!({"type": "string", "default": "myvalue"});
+        assert_eq!(get_template_value(&schema, "string"), "myvalue");
+    }
+
+    #[test]
+    fn test_get_template_value_with_enum() {
+        let schema = serde_json::json!({"type": "string", "enum": ["first", "second"]});
+        assert_eq!(get_template_value(&schema, "string"), "first");
+    }
+
+    #[test]
+    fn test_get_template_value_placeholders() {
+        assert_eq!(get_template_value(&serde_json::json!({}), "string"), "\"\"");
+        assert_eq!(get_template_value(&serde_json::json!({}), "integer"), "0");
+        assert_eq!(get_template_value(&serde_json::json!({}), "number"), "0.0");
+        assert_eq!(
+            get_template_value(&serde_json::json!({}), "boolean"),
+            "false"
+        );
+        assert_eq!(get_template_value(&serde_json::json!({}), "array"), "[]");
+        assert_eq!(get_template_value(&serde_json::json!({}), "null"), "null");
+        assert_eq!(
+            get_template_value(&serde_json::json!({}), "unknown"),
+            "null"
+        );
+    }
+
+    #[test]
+    fn test_schema_to_markdown_no_title() {
+        // Schema without title should use default
+        let schema = Schema::from_yaml(
+            r#"
+type: object
+properties:
+  name:
+    type: string
+"#,
+        )
+        .unwrap();
+
+        let markdown = schema.to_markdown();
+        assert!(markdown.contains("# Configuration Reference"));
+    }
+
+    #[test]
+    fn test_schema_to_markdown_non_object_property() {
+        // Top-level property that is not an object
+        let schema = Schema::from_yaml(
+            r#"
+type: object
+required:
+  - port
+properties:
+  port:
+    type: integer
+    description: Server port
+"#,
+        )
+        .unwrap();
+
+        let markdown = schema.to_markdown();
+        assert!(markdown.contains("port"));
+        assert!(markdown.contains("(required)"));
+    }
+
+    #[test]
+    fn test_schema_to_template_no_title() {
+        let schema = Schema::from_yaml(
+            r#"
+type: object
+properties:
+  name:
+    type: string
+"#,
+        )
+        .unwrap();
+
+        let template = schema.to_template();
+        assert!(template.contains("Configuration template generated from schema"));
+    }
+
+    #[test]
+    fn test_schema_to_template_with_description() {
+        let schema = Schema::from_yaml(
+            r#"
+type: object
+properties:
+  name:
+    type: string
+    description: The name field
+"#,
+        )
+        .unwrap();
+
+        let template = schema.to_template();
+        assert!(template.contains("The name field"));
+    }
+
+    #[test]
+    fn test_schema_to_template_with_default_and_description() {
+        let schema = Schema::from_yaml(
+            r#"
+type: object
+properties:
+  port:
+    type: integer
+    description: Server port
+    default: 8080
+"#,
+        )
+        .unwrap();
+
+        let template = schema.to_template();
+        assert!(template.contains("8080"));
+        assert!(template.contains("default:"));
+    }
 }

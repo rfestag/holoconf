@@ -258,7 +258,7 @@ coverage-full:
 	@echo "✓ Combined Rust coverage: $(COVERAGE_DIR)/rust-lcov.info"
 
 coverage-html: $(VENV_PYTHON)
-	@echo "→ Generating HTML coverage reports..."
+	@echo "→ Generating HTML coverage reports (unit tests only)..."
 	@mkdir -p docs/coverage/rust docs/coverage/python
 	cargo llvm-cov --all-features --workspace --html --output-dir docs/coverage/rust
 	cd packages/python/holoconf && $(CURDIR)/$(VENV_PYTEST) tests/ --cov=holoconf --cov-report=html:../../../docs/coverage/python || true
@@ -267,6 +267,33 @@ coverage-html: $(VENV_PYTHON)
 	@echo "  Python: docs/coverage/python/index.html"
 	@echo ""
 	@echo "Run 'make docs-serve' to view in documentation site"
+	@echo "Run 'make coverage-full-html' to include acceptance tests"
+
+# Combined coverage with HTML output: Rust unit tests + acceptance tests
+coverage-full-html: $(VENV_PYTHON)
+	@echo "→ Generating full HTML coverage (unit + acceptance tests)..."
+	@mkdir -p docs/coverage/rust docs/coverage/python
+	@bash -c '\
+		set -e; \
+		export PATH="$$HOME/.cargo/bin:$$PATH"; \
+		cargo llvm-cov clean --workspace; \
+		source <(cargo llvm-cov show-env --export-prefix); \
+		export CARGO_TARGET_DIR=$$CARGO_LLVM_COV_TARGET_DIR; \
+		export CARGO_INCREMENTAL=1; \
+		echo "→ Running Rust unit tests..."; \
+		cargo test --all-features --workspace; \
+		echo "→ Building instrumented Python bindings..."; \
+		cd packages/python/holoconf && $(CURDIR)/$(VENV_MATURIN) develop; \
+		cd $(CURDIR); \
+		echo "→ Running acceptance tests..."; \
+		$(CURDIR)/$(VENV_PYTHON) tools/test_runner.py --driver rust "tests/acceptance/**/*.yaml" -v; \
+		echo "→ Generating HTML coverage report..."; \
+		cargo llvm-cov report --html --output-dir docs/coverage/rust; \
+	'
+	cd packages/python/holoconf && $(CURDIR)/$(VENV_PYTEST) tests/ --cov=holoconf --cov-report=html:../../../docs/coverage/python || true
+	@echo "✓ Full HTML coverage reports generated in docs/coverage/"
+	@echo "  Rust:   docs/coverage/rust/html/index.html"
+	@echo "  Python: docs/coverage/python/index.html"
 
 # =============================================================================
 # Build

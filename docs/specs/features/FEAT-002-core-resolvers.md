@@ -25,30 +25,42 @@ Provide built-in resolvers for common value sources: environment variables, self
 
 Reads values from environment variables.
 
-**Syntax:**
-```yaml
-# Basic usage
-port: ${env:PORT}
-
-# With default value
-port: ${env:PORT,8080}
-
-# With nested default
-port: ${env:PORT,${env:DEFAULT_PORT,8080}}
-```
-
-**Behavior:**
-- Returns the environment variable value as a string
-- If variable is not set and no default provided, raises `ResolverError`
-- If variable is not set and default is provided, returns default
-- Sensitivity: Not sensitive by default (env vars are often non-secret)
-
 **Arguments:**
 
 | Position | Name | Required | Description |
 |----------|------|----------|-------------|
 | 1 | name | Yes | Environment variable name |
-| 2 | default | No | Default value if not set |
+
+**Keyword Arguments:**
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `default` | any | none | Default value if variable is not set |
+| `sensitive` | bool | `false` | Mark the resolved value as sensitive |
+
+**Behavior:**
+- Returns the environment variable value as a string
+- If variable is not set and no default provided, raises `ResolverError`
+- If variable is not set and default is provided, returns default
+- Not sensitive by default; use `sensitive=true` for secrets
+
+**Examples:**
+```yaml
+# Basic usage
+port: ${env:PORT}
+
+# With default value
+port: ${env:PORT,default=8080}
+
+# Mark as sensitive (for secrets)
+db_password: ${env:DB_PASSWORD,sensitive=true}
+
+# Combined default and sensitive
+api_key: ${env:API_KEY,default=dev-key,sensitive=true}
+
+# With nested default
+port: ${env:PORT,default=${env:DEFAULT_PORT,default=8080}}
+```
 
 ### 2. Self-Reference Resolver (implicit)
 
@@ -80,11 +92,19 @@ api:
 - `${..parent.key}` - Relative path going up one level
 - `${...grandparent.key}` - Relative path going up two levels
 
+**Keyword Arguments:**
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `default` | any | none | Default value if path doesn't exist |
+| `sensitive` | bool | inherited | Override sensitivity (inherits from referenced value by default) |
+
 **Behavior:**
 - Resolves to the value at the specified path
-- If path doesn't exist, raises `ResolverError`
+- If path doesn't exist and no default provided, raises `ResolverError`
+- If path doesn't exist and default is provided, returns default
 - Circular references are detected and raise `CircularReferenceError`
-- Sensitivity: Inherits sensitivity from the referenced value
+- Sensitivity is inherited from the referenced value by default; can be overridden
 
 **Array Access:**
 ```yaml
@@ -95,42 +115,84 @@ servers:
 primary_host: ${servers[0].host}
 ```
 
+**Examples:**
+```yaml
+# Basic reference
+timeout: ${defaults.timeout}
+
+# With default for optional config
+feature_timeout: ${features.timeout,default=30}
+
+# Sensitivity inherited from referenced value
+secrets:
+  api_key: ${env:API_KEY,sensitive=true}
+
+derived_key: ${secrets.api_key}  # Inherits sensitive=true
+
+# Override sensitivity (rare, use with caution)
+public_ref: ${secrets.api_key,sensitive=false}
+```
+
 ### 3. File Resolver (`file`)
 
 Reads content from local files.
-
-**Syntax:**
-```yaml
-# Local file (text content)
-readme: ${file:./README.md}
-
-# Local file (parsed as YAML/JSON and merged)
-extra_config: ${file:./extra.yaml}
-
-# With encoding
-binary_key: ${file:./key.pem,encoding=utf-8}
-```
 
 **Arguments:**
 
 | Position | Name | Required | Description |
 |----------|------|----------|-------------|
-| 1 | path | Yes | Local file path |
-| 2+ | options | No | Key=value options |
+| 1 | path | Yes | Local file path (relative to config file directory) |
 
-**Options:**
+**Keyword Arguments:**
 
-| Option | Values | Default | Description |
-|--------|--------|---------|-------------|
-| `encoding` | `utf-8`, `ascii`, `base64` | `utf-8` | Text encoding |
-| `parse` | `yaml`, `json`, `text`, `auto` | `auto` | How to parse content |
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `default` | any | none | Default value if file doesn't exist |
+| `parse` | string | `auto` | How to interpret content: `auto`, `yaml`, `json`, `text`, `binary` |
+| `encoding` | string | `utf-8` | Text encoding: `utf-8`, `ascii`, `latin-1` (ignored for `binary`) |
+| `sensitive` | bool | `false` | Mark the resolved value as sensitive |
+
+**Parse Modes:**
+
+| Mode | Return Type | Description |
+|------|-------------|-------------|
+| `auto` | varies | Detect by file extension (`.yaml`, `.yml`, `.json` → parsed; else → text) |
+| `yaml` | structured data | Parse as YAML, accessible via dot notation |
+| `json` | structured data | Parse as JSON, accessible via dot notation |
+| `text` | string | Return raw text content |
+| `binary` | bytes | Return raw bytes (`bytes` in Python, `Vec<u8>` in Rust) |
 
 **Behavior:**
 - Paths are relative to the config file's directory
+- If file doesn't exist and no default provided, raises `ResolverError`
+- If file doesn't exist and default is provided, returns default
 - When `parse=auto`, format is detected by file extension
 - Parsed content (YAML/JSON) returns a Config object for nested access
 - Text content returns a string
-- Sensitivity: Not sensitive by default
+- Binary content returns raw bytes (useful for certificates, keys, images)
+- Not sensitive by default; use `sensitive=true` for secrets
+
+**Examples:**
+```yaml
+# Auto-detect format by extension
+config: ${file:./extra.yaml}
+
+# With default if file doesn't exist
+config: ${file:./optional.yaml,default={}}
+
+# Explicit text mode
+readme: ${file:./README.md,parse=text}
+
+# Binary file (certificates, keys, etc.)
+certificate: ${file:./ca.pem,parse=binary}
+p12_cert: ${file:./client.p12,parse=binary,sensitive=true}
+
+# Different encoding for legacy files
+legacy_config: ${file:./old.txt,encoding=latin-1}
+
+# Mark as sensitive
+secret_key: ${file:./secret.key,sensitive=true}
+```
 
 **Security:**
 - Local file access is sandboxed to config directory by default
@@ -144,39 +206,66 @@ config = Config.load("config.yaml", file_roots=["/etc/myapp", "./config"])
 
 Fetches content from remote URLs.
 
-**Syntax:**
-```yaml
-# Fetch remote config
-remote_config: ${http:https://config.example.com/shared.yaml}
-
-# With options
-remote_config: ${http:https://config.example.com/shared.yaml,timeout=60}
-
-# With authentication header
-remote_config: ${http:https://config.example.com/shared.yaml,header=Authorization:Bearer ${env:API_TOKEN}}
-```
-
 **Arguments:**
 
 | Position | Name | Required | Description |
 |----------|------|----------|-------------|
 | 1 | url | Yes | HTTP or HTTPS URL |
-| 2+ | options | No | Key=value options |
 
-**Options:**
+**Keyword Arguments:**
 
-| Option | Values | Default | Description |
-|--------|--------|---------|-------------|
-| `timeout` | integer (seconds) | 30 | Request timeout |
-| `parse` | `yaml`, `json`, `text`, `auto` | `auto` | How to parse content |
-| `header` | `Name:Value` | - | HTTP header to include (repeatable) |
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `default` | any | none | Default value if request fails |
+| `parse` | string | `auto` | How to interpret content: `auto`, `yaml`, `json`, `text`, `binary` |
+| `encoding` | string | `utf-8` | Text encoding: `utf-8`, `ascii`, `latin-1` (ignored for `binary`) |
+| `timeout` | int | 30 | Request timeout in seconds |
+| `header` | string | - | HTTP header to include as `Name:Value` (repeatable) |
+| `sensitive` | bool | `false` | Mark the resolved value as sensitive |
+
+**Parse Modes:**
+
+| Mode | Return Type | Description |
+|------|-------------|-------------|
+| `auto` | varies | Detect by Content-Type header or URL extension |
+| `yaml` | structured data | Parse as YAML, accessible via dot notation |
+| `json` | structured data | Parse as JSON, accessible via dot notation |
+| `text` | string | Return raw text content |
+| `binary` | bytes | Return raw bytes (`bytes` in Python, `Vec<u8>` in Rust) |
 
 **Behavior:**
 - Supports `http://` and `https://` URLs
+- If request fails and no default provided, raises `ResolverError`
+- If request fails and default is provided, returns default
 - When `parse=auto`, format is detected by Content-Type header or URL extension
 - Parsed content (YAML/JSON) returns a Config object for nested access
 - Text content returns a string
-- Sensitivity: Not sensitive by default
+- Binary content returns raw bytes (useful for certificates, images)
+- Not sensitive by default; use `sensitive=true` for secrets
+
+**Examples:**
+```yaml
+# Fetch remote config (auto-detect format)
+remote_config: ${http:https://config.example.com/shared.yaml}
+
+# With default if request fails
+remote_config: ${http:https://config.example.com/shared.yaml,default={}}
+
+# With timeout
+remote_config: ${http:https://config.example.com/shared.yaml,timeout=60}
+
+# With authentication header
+remote_config: ${http:https://config.example.com/shared.yaml,header=Authorization:Bearer ${env:API_TOKEN}}
+
+# Explicit JSON parsing
+api_config: ${http:https://api.example.com/config,parse=json}
+
+# Binary content (certificate from URL)
+ca_cert: ${http:https://pki.internal/ca.pem,parse=binary}
+
+# Mark as sensitive
+secret_config: ${http:https://vault.internal/config,sensitive=true}
+```
 
 **Security:**
 - **Disabled by default** to prevent SSRF attacks
@@ -296,7 +385,7 @@ ResolverError: Environment variable not found
   Resolver: env
   Key: UNDEFINED_VAR
   Path: port
-  Help: Set the UNDEFINED_VAR environment variable or provide a default: ${env:UNDEFINED_VAR,default}
+  Help: Set the UNDEFINED_VAR environment variable or provide a default: ${env:UNDEFINED_VAR,default=value}
 ```
 
 ### Invalid Self-Reference Path
@@ -378,13 +467,13 @@ ResolverError: URL not in allowlist
 ```yaml
 # config.yaml
 database:
-  host: ${env:DB_HOST,localhost}
-  port: ${env:DB_PORT,5432}
+  host: ${env:DB_HOST,default=localhost}
+  port: ${env:DB_PORT,default=5432}
   username: ${env:DB_USER}
-  password: ${env:DB_PASSWORD}
+  password: ${env:DB_PASSWORD,sensitive=true}
 
 logging:
-  level: ${env:LOG_LEVEL,info}
+  level: ${env:LOG_LEVEL,default=info}
 ```
 
 ```python
@@ -427,7 +516,7 @@ app:
 database: ${file:./database.yaml}
 
 # Include environment-specific overrides
-overrides: ${file:./envs/${env:ENVIRONMENT,development}.yaml}
+overrides: ${file:./envs/${env:ENVIRONMENT,default=development}.yaml}
 ```
 
 ```yaml
@@ -453,15 +542,188 @@ local:
 config = Config.load("config.yaml", allow_http=True)
 ```
 
+## Transformation Resolvers
+
+These resolvers transform string values into structured data. They are useful for parsing JSON or YAML stored in environment variables, SSM parameters, or other string sources.
+
+### 5. JSON Resolver (`json`)
+
+Parses a JSON string into a structured value.
+
+**Syntax:**
+```yaml
+# Parse JSON from environment variable
+settings: ${json:${env:SETTINGS_JSON}}
+
+# Access nested values after parsing
+db_host: ${json:${env:DB_CONFIG}}.host
+
+# With sensitivity override
+secrets: ${json:${ssm:/app/secrets},sensitive=false}
+```
+
+**Arguments:**
+
+| Position | Name | Required | Description |
+|----------|------|----------|-------------|
+| 1 | value | Yes | JSON string to parse |
+
+**Keyword Arguments:**
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `sensitive` | bool | inherited | Override sensitivity (inherits from input by default) |
+
+**Behavior:**
+- Parses strict JSON (no trailing commas, no comments)
+- Supports all JSON root types: object, array, string, number, boolean, null
+- Returns structured data accessible via dot notation
+- Parse errors raise `ResolverError` with line/column information and truncated input preview (first 50 chars)
+- Sensitivity is inherited from the input value by default; can be overridden
+
+**Error Example:**
+```
+ResolverError: Invalid JSON at line 1, column 15: expected ':' but found '}'
+  Resolver: json
+  Input preview: {"invalid json}
+  Path: settings
+  Help: Check that the input is valid JSON
+```
+
+### 6. YAML Resolver (`yaml`)
+
+Parses a YAML string into a structured value.
+
+**Syntax:**
+```yaml
+# Parse YAML from environment variable
+config: ${yaml:${env:CONFIG_YAML}}
+
+# Parse YAML from file content
+settings: ${yaml:${file:./settings.txt}}
+
+# With sensitivity override
+secrets: ${yaml:${ssm:/app/secrets},sensitive=false}
+```
+
+**Arguments:**
+
+| Position | Name | Required | Description |
+|----------|------|----------|-------------|
+| 1 | value | Yes | YAML string to parse |
+
+**Keyword Arguments:**
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `sensitive` | bool | inherited | Override sensitivity (inherits from input by default) |
+
+**Behavior:**
+- Parses the first YAML document only (ignores `---` separated documents)
+- Preserves YAML's native type coercion (`yes` → boolean, `1.0` → float, etc.)
+- Returns structured data accessible via dot notation
+- Parse errors raise `ResolverError` with position information and truncated input preview
+- Sensitivity is inherited from the input value by default; can be overridden
+
+**Error Example:**
+```
+ResolverError: Invalid YAML at line 3, column 5: mapping values are not allowed here
+  Resolver: yaml
+  Input preview: "key: value\n  invalid: - item"
+  Path: config
+  Help: Check that the input is valid YAML
+```
+
+### 7. Split Resolver (`split`)
+
+Splits a string into an array of strings using a delimiter.
+
+**Syntax:**
+```yaml
+# Default delimiter (comma), with whitespace trimming
+hosts: ${split:${env:DB_HOSTS}}
+# Input: "host1, host2, host3" → ["host1", "host2", "host3"]
+
+# Custom delimiter
+path_parts: ${split:${env:PATH},delim=:}
+# Input: "/usr/bin:/usr/local/bin" → ["/usr/bin", "/usr/local/bin"]
+
+# Disable trimming
+raw_values: ${split:${env:VALUES},trim=false}
+# Input: "a, b, c" → ["a", " b", " c"]
+
+# Skip empty elements
+non_empty: ${split:${env:LIST},skip_empty=true}
+# Input: "a,,b" → ["a", "b"]
+
+# Limit number of splits
+key_value: ${split:${env:PAIR},delim==,limit=2}
+# Input: "key=value=with=equals" → ["key", "value=with=equals"]
+```
+
+**Arguments:**
+
+| Position | Name | Required | Description |
+|----------|------|----------|-------------|
+| 1 | value | Yes | String to split |
+
+**Keyword Arguments:**
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `delim` | string | `,` | Delimiter to split on |
+| `trim` | bool | `true` | Trim whitespace from each element |
+| `skip_empty` | bool | `false` | Remove empty strings from result |
+| `limit` | int | none | Maximum number of splits (results in at most `limit + 1` elements) |
+| `sensitive` | bool | inherited | Override sensitivity (inherits from input by default) |
+
+**Behavior:**
+- Splits string by delimiter (no escape sequence support)
+- Trims whitespace from each element by default
+- Empty input string returns empty array `[]`
+- Empty elements are preserved by default (use `skip_empty=true` to filter)
+- Always returns an array of strings (no type coercion)
+- Sensitivity is inherited from the input value by default; can be overridden
+
+**Examples:**
+
+```yaml
+# Environment: DB_HOSTS="primary.db.local, replica1.db.local, replica2.db.local"
+database:
+  hosts: ${split:${env:DB_HOSTS}}
+  # Result: ["primary.db.local", "replica1.db.local", "replica2.db.local"]
+
+  primary: ${split:${env:DB_HOSTS}}[0]
+  # Result: "primary.db.local"
+
+# Environment: FEATURES="dark_mode,,beta_ui,new_checkout"
+features:
+  all: ${split:${env:FEATURES}}
+  # Result: ["dark_mode", "", "beta_ui", "new_checkout"]
+
+  enabled: ${split:${env:FEATURES},skip_empty=true}
+  # Result: ["dark_mode", "beta_ui", "new_checkout"]
+
+# Environment: CONNECTION="user:password:host:5432:database"
+connection:
+  parts: ${split:${env:CONNECTION},delim=:,limit=4}
+  # Result: ["user", "password", "host", "5432", "database"]
+  # Note: limit=4 means 4 splits, resulting in 5 elements max
+```
+
 ## Implementation Notes
 
 ### Rust Core
 
 - `env` resolver: Use `std::env::var`
 - `self` resolver: Tree traversal with path parsing
-- `file` resolver: Use `std::fs::read_to_string`
-- `http` resolver: Use `reqwest` with async support
+- `file` resolver: Use `std::fs::read` for binary, `std::fs::read_to_string` for text
+- `http` resolver: Use `reqwest` with async support, `bytes()` for binary mode
+- `json` resolver: Use `serde_json::from_str`
+- `yaml` resolver: Use `serde_yaml::from_str` (first document only)
+- `split` resolver: Use `str::split` with trim/filter options
 - Circular detection: Track resolution stack, error if path revisited
+- Binary values: Represent as `Vec<u8>` in Rust, `bytes` in Python
 
 ### Security Considerations
 
@@ -469,3 +731,5 @@ config = Config.load("config.yaml", allow_http=True)
 - Local file access sandboxed by default
 - URL allowlists for HTTP resolver in production
 - Log resolver calls for audit trail (opt-in)
+- Transformation resolvers inherit sensitivity from input to prevent accidental exposure
+- All resolvers support `sensitive` keyword for explicit marking
