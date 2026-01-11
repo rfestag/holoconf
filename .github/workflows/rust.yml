@@ -117,3 +117,24 @@ jobs:
         with:
           name: holoconf-${{ matrix.target }}
           path: target/${{ matrix.target }}/release/holoconf.exe
+
+  # ==========================================================================
+  # Gate Job - all Rust checks must pass
+  # ==========================================================================
+  rust-complete:
+    name: Rust Complete
+    runs-on: ubuntu-latest
+    needs: [test, coverage, build-cli]
+    if: always()
+    steps:
+      - name: Check all jobs passed
+        run: |
+          if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" ]]; then
+            echo "One or more Rust checks failed"
+            exit 1
+          fi
+          if [[ "${{ contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
+            echo "One or more Rust checks were cancelled"
+            exit 1
+          fi
+          echo "All Rust checks passed"
