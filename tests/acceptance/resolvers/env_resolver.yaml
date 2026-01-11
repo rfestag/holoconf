@@ -16,7 +16,7 @@ tests:
   - name: uses_default_when_missing
     given:
       config: |
-        port: ${env:HOLOCONF_UNDEFINED_VAR,3000}
+        port: ${env:HOLOCONF_UNDEFINED_VAR,default=3000}
     when:
       access: port
     then:
@@ -38,7 +38,7 @@ tests:
       env:
         HOLOCONF_FALLBACK: "fallback_value"
       config: |
-        value: ${env:HOLOCONF_UNDEFINED,${env:HOLOCONF_FALLBACK}}
+        value: ${env:HOLOCONF_UNDEFINED,default=${env:HOLOCONF_FALLBACK}}
     when:
       access: value
     then:
@@ -54,3 +54,42 @@ tests:
       access: bucket
     then:
       value: "myapp-prod-data"
+
+  - name: sensitive_flag_marks_value_for_redaction
+    given:
+      env:
+        HOLOCONF_SECRET: "super_secret_value"
+      config: |
+        api_key: ${env:HOLOCONF_SECRET,sensitive=true}
+    when:
+      dump:
+        format: yaml
+        redact: true
+    then:
+      output_contains: "[REDACTED]"
+      output_not_contains: "super_secret_value"
+
+  - name: sensitive_with_default
+    given:
+      config: |
+        password: ${env:HOLOCONF_UNDEFINED_SECRET,default=default_secret,sensitive=true}
+    when:
+      dump:
+        format: yaml
+        redact: true
+    then:
+      output_contains: "[REDACTED]"
+      output_not_contains: "default_secret"
+
+  - name: lazy_default_not_called_when_value_exists
+    description: Default resolver should NOT be invoked when main value exists
+    given:
+      env:
+        HOLOCONF_MAIN_VAR: "main_value"
+        HOLOCONF_DEFAULT_VAR: "should_not_be_used"
+      config: |
+        value: ${env:HOLOCONF_MAIN_VAR,default=${env:HOLOCONF_DEFAULT_VAR}}
+    when:
+      access: value
+    then:
+      value: "main_value"

@@ -1,5 +1,13 @@
 # FEAT-006: Command Line Interface
 
+## Status
+
+Draft
+
+## Changelog
+
+- 2026-01-11: Removed standalone `holoconf sources` command; use `holoconf dump --sources` instead
+
 ## Overview
 
 Provide a `holoconf` CLI for validating configs, resolving values, debugging, and generating documentation outside of application code.
@@ -116,6 +124,7 @@ holoconf dump base.yaml production.yaml --resolve
 | `--no-redact` | Don't redact sensitive values (requires `--resolve`) |
 | `--format, -f` | Output format: `yaml` (default), `json` |
 | `--output, -o` | Write to file instead of stdout |
+| `--sources` | Show source file for each value instead of values |
 
 **Output:**
 ```yaml
@@ -128,6 +137,21 @@ database:
 api:
   endpoint: https://api.example.com
   timeout: 30
+
+$ holoconf dump base.yaml production.yaml --sources
+database.host         base.yaml
+database.port         base.yaml
+database.pool.min     base.yaml
+database.pool.max     production.yaml (overrides base.yaml)
+api.endpoint          production.yaml
+api.timeout           production.yaml
+
+$ holoconf dump base.yaml production.yaml --sources --format json
+{
+  "database.host": {"source": "base.yaml"},
+  "database.port": {"source": "base.yaml"},
+  "database.pool.max": {"source": "production.yaml", "overrides": "base.yaml"}
+}
 ```
 
 ### `holoconf get`
@@ -159,33 +183,6 @@ holoconf get config.yaml database --format json
 | `--resolve, -r` | Resolve interpolations |
 | `--format, -f` | Output format: `text` (default), `json`, `yaml` |
 | `--default, -d` | Default value if key not found |
-
-### `holoconf sources`
-
-Show where each config value comes from (for debugging merges).
-
-```bash
-holoconf sources base.yaml production.yaml local.yaml
-```
-
-**Output:**
-```
-$ holoconf sources base.yaml production.yaml local.yaml
-database.host         base.yaml:3
-database.port         base.yaml:4
-database.pool.min     base.yaml:6
-database.pool.max     production.yaml:4    (overrides base.yaml:7)
-api.endpoint          production.yaml:8
-api.timeout           local.yaml:2         (overrides production.yaml:9)
-logging.level         local.yaml:5         (overrides base.yaml:12)
-```
-
-**Options:**
-
-| Option | Description |
-|--------|-------------|
-| `--path, -p` | Filter to specific path prefix |
-| `--format, -f` | Output format: `text` (default), `json` |
 
 ### `holoconf schema`
 
@@ -334,7 +331,7 @@ repos:
 
 ```bash
 # See which file each value comes from
-holoconf sources base.yaml env/production.yaml local.yaml
+holoconf dump base.yaml env/production.yaml local.yaml --sources
 
 # See the final merged result
 holoconf dump base.yaml env/production.yaml local.yaml

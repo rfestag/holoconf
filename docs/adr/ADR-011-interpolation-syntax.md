@@ -62,23 +62,30 @@ path: ${ssm:${env:SSM_PREFIX}/password}
 port: ${env:PORT:8080}           # Use 8080 if PORT not set
 host: ${env:HOST:localhost}      # Use localhost if HOST not set
 ```
-- **Rejected:** Not OmegaConf-compatible, conflicts with resolver:key syntax
+- **Rejected:** Conflicts with resolver:key syntax
 
 **Option B: Pipe syntax**
 ```yaml
 port: ${env:PORT | 8080}
 host: ${env:HOST | localhost}
 ```
-- **Rejected:** Not OmegaConf-compatible
+- **Rejected:** Non-standard syntax
 
-**Option C: Comma syntax (OmegaConf-style)**
+**Option C: Positional comma syntax (OmegaConf-style)**
 ```yaml
 port: ${env:PORT,8080}           # Use 8080 if PORT not set
 host: ${env:HOST,localhost}      # Use localhost if HOST not set
 ```
-- **Chosen:** Matches OmegaConf's `oc.env` and `oc.select` resolvers
+- **Rejected:** Ambiguous when default contains commas, requires each resolver to implement default handling
 
-**Option D: Not supported (fail if missing)**
+**Option D: Keyword argument syntax**
+```yaml
+port: ${env:PORT,default=8080}           # Use 8080 if PORT not set
+host: ${env:HOST,default=localhost}      # Use localhost if HOST not set
+```
+- **Chosen:** Explicit, unambiguous, handled by framework (not individual resolvers)
+
+**Option E: Not supported (fail if missing)**
 ```yaml
 port: ${env:PORT}  # Error if PORT not set
 ```
@@ -111,16 +118,16 @@ url: ${concat:https://,${host},:,${port},/api}
 
 ## Decision
 
-**OmegaConf-Compatible Interpolation Syntax**
+**OmegaConf-Inspired Interpolation Syntax with Framework-Level Keywords**
 
-Align with OmegaConf syntax for maximum compatibility with existing configs:
+Align with OmegaConf syntax where practical, with improvements for clarity and consistency:
 
 - Escaping: `\${...}` (backslash) to output literal `${...}`
 - Nested interpolations: Supported, resolve inside-out
-- Default values: Resolver-specific via comma syntax (e.g., `${env:VAR,default}`)
 - Self-references: `${path.to.value}` (absolute) and `${..relative}` (relative)
-- Resolver syntax: `${resolver:arg1,arg2,...}` with comma-separated arguments
-- Limits: 10 nesting levels, 100 interpolations per value, 10,000 characters (safety limits, not in OmegaConf)
+- Resolver syntax: `${resolver:arg,key=value,...}` with positional args and keyword arguments
+- Framework keywords: `default` and `sensitive` are handled by the resolver framework, not individual resolvers
+- Limits: 10 nesting levels, 100 interpolations per value, 10,000 characters (safety limits)
 
 ## Design
 
@@ -160,17 +167,19 @@ message: "Cost is \${price} dollars"
 #### Default Values
 
 ```yaml
-# Comma syntax for defaults (OmegaConf-compatible)
-# Defaults are resolver arguments, handled by each resolver
-port: ${env:PORT,8080}
-host: ${env:HOST,localhost}
-log_level: ${env:LOG_LEVEL,info}
+# Keyword syntax for defaults (framework-handled)
+port: ${env:PORT,default=8080}
+host: ${env:HOST,default=localhost}
+log_level: ${env:LOG_LEVEL,default=info}
 
 # Default can be another interpolation
-password: ${env:DB_PASSWORD,${ssm:/default/db/password}}
+password: ${env:DB_PASSWORD,default=${ssm:/default/db/password}}
 
-# For self-references, use oc.select-style resolver (or holoconf equivalent)
-timeout: ${select:settings.timeout,30}
+# Self-references also support default
+timeout: ${settings.timeout,default=30}
+
+# Cascading defaults with nested interpolations
+port: ${env:PORT,default=${env:DEFAULT_PORT,default=8080}}
 ```
 
 #### String Concatenation
@@ -197,35 +206,145 @@ password: ${ssm:/${env:ENV}/db/password}
 api_key: ${ssm:/${env:REGION}/${env:ACCOUNT}/api-key}
 ```
 
-### Grammar (OmegaConf-Compatible)
+### Framework-Level Keyword Arguments
+
+The resolver framework handles two special keyword arguments that apply to all resolvers uniformly. Individual resolvers do not implement these—they are extracted and processed by the framework before and after calling the resolver.
+
+#### `default` Keyword
+
+Provides a fallback value when the resolver cannot find the requested resource (e.g., missing env var, file not found, SSM parameter doesn't exist).
+
+```yaml
+# Framework extracts default=, calls resolver, uses default if resolver returns NotFound
+port: ${env:PORT,default=8080}
+config: ${file:./optional.yaml,default={}}
+timeout: ${ssm:/app/timeout,default=30}
+```
+
+**Behavior:**
+1. Framework parses the interpolation and extracts `default=` if present
+2. Framework calls the resolver with remaining arguments
+3. If resolver returns `NotFound` error and default is set, framework returns default value
+4. If resolver returns other errors (e.g., permission denied, network error), error propagates (default not used)
+5. If resolver succeeds, default is ignored
+
+#### `sensitive` Keyword
+
+Marks the resolved value as sensitive for redaction during serialization (see ADR-009).
+
+```yaml
+# Mark value as sensitive (affects serialization only)
+api_key: ${env:API_KEY,sensitive=true}
+password: ${file:./secret.key,sensitive=true}
+
+# Override resolver's default sensitivity
+non_secret_param: ${ssm:/app/public-config,sensitive=false}
+```
+
+**Behavior:**
+1. Framework parses the interpolation and extracts `sensitive=` if present
+2. Framework calls the resolver, which may return a sensitivity hint (e.g., SSM SecureString → sensitive)
+3. If user specified `sensitive=`, that value overrides the resolver's hint
+4. If user did not specify, resolver's hint is used (or `false` if resolver provides no hint)
+5. Sensitivity only affects serialization (`to_yaml(redact=True)`), not value access
+
+#### Sensitivity Inheritance
+
+For self-references, sensitivity is inherited from the referenced value by default:
+
+```yaml
+secrets:
+  api_key: ${env:API_KEY,sensitive=true}
+
+# Inherits sensitive=true from the referenced value
+derived: ${secrets.api_key}
+
+# Can override if needed (rare)
+public_copy: ${secrets.api_key,sensitive=false}
+```
+
+#### Framework Resolution Flow
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Interpolation: ${resolver:arg,default=X,sensitive=Y,opt=Z} │
+└─────────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│  1. Parse and extract framework keywords                    │
+│     - default = X                                           │
+│     - sensitive = Y                                         │
+│     - remaining kwargs = {opt: Z}                           │
+└─────────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│  2. Call resolver.resolve(arg, opt=Z)                       │
+│     - Resolver only sees its own arguments                  │
+│     - Returns ResolvedValue(value, sensitive_hint)          │
+│       OR NotFound error                                     │
+└─────────────────────────────────────────────────────────────┘
+                            │
+              ┌─────────────┴─────────────┐
+              ▼                           ▼
+┌──────────────────────┐    ┌──────────────────────────────┐
+│  NotFound + default  │    │  Success or other error      │
+│  → Use default value │    │  → Use resolver's value/error│
+└──────────────────────┘    └──────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│  3. Apply sensitivity override                              │
+│     - If user specified sensitive=Y, use Y                  │
+│     - Else use resolver's hint (or false)                   │
+└─────────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│  4. Return final ResolvedValue(value, is_sensitive)         │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Grammar
 
 ```
 interpolation  = "${" expression "}"
 expression     = resolver_ref | self_ref
 resolver_ref   = resolver_name ":" args
-self_ref       = relative_path | absolute_path
+self_ref       = path ("," kwargs)?
+path           = relative_path | absolute_path
 relative_path  = "."+ path_segment ("." path_segment)*
 absolute_path  = path_segment ("." path_segment)*
 path_segment   = identifier | "[" index "]"
-args           = arg ("," arg)*             # Comma-separated arguments
-arg            = quoted_string | unquoted_value | interpolation
+args           = positional_arg* ("," kwarg)*
+positional_arg = value
+kwarg          = identifier "=" value
+value          = quoted_string | unquoted_value | interpolation
 quoted_string  = "'" [^']* "'" | '"' [^"]* '"'
-unquoted_value = [^,}]+                     # Until comma or closing brace
+unquoted_value = [^,=}]+                    # Until comma, equals, or closing brace
 escape         = "\${"                      # Produces literal "${"
+kwargs         = kwarg ("," kwarg)*         # For self-references with options
 ```
+
+**Reserved Keywords (handled by framework):**
+- `default` - Fallback value if resolver returns NotFound
+- `sensitive` - Override sensitivity for redaction
 
 ### Edge Cases
 
 | Input | Output | Notes |
 |-------|--------|-------|
 | `${env:PORT}` | `"8080"` | Basic resolver |
-| `${env:PORT,3000}` | `"8080"` or `"3000"` | With default (comma syntax) |
+| `${env:PORT,default=3000}` | `"8080"` or `"3000"` | With default keyword |
+| `${env:API_KEY,sensitive=true}` | Value, marked sensitive | Sensitivity override |
 | `\${env:PORT}` | `"${env:PORT}"` | Escaped (backslash) |
 | `"http://${host}"` | `"http://localhost"` | String interpolation |
 | `${ssm:/${env:E}/k}` | Resolved value | Nested interpolation |
 | `${a.b.c}` | Value at path | Self-reference |
 | `${.sibling}` | Value at sibling | Relative reference |
-| `${env:X,${env:Y,default}}` | Cascading defaults | Nested defaults |
+| `${a.b,default=30}` | Value or `30` | Self-reference with default |
+| `${env:X,default=${env:Y,default=z}}` | Cascading defaults | Nested defaults |
 
 ### Resolution Order
 
@@ -255,26 +374,36 @@ Exceeding limits raises `InterpolationError`.
 
 ## Rationale
 
-- **OmegaConf compatibility** enables migration of existing configs without changes
+- **OmegaConf-inspired syntax** provides familiarity for users of similar tools
 - **Backslash escaping** matches OmegaConf and is familiar from other languages
-- **Comma syntax for defaults** keeps defaults as resolver arguments, matching OmegaConf's `oc.env` and `oc.select`
-- **Nested interpolations** enable dynamic key construction, a powerful OmegaConf feature
+- **Keyword syntax for `default`** is explicit and avoids ambiguity with comma-containing values
+- **Framework-level keywords** ensure consistent behavior across all resolvers without code duplication
+- **Nested interpolations** enable dynamic key construction, a powerful feature
 - **Safety limits** prevent runaway parsing without breaking normal use cases
+- **Sensitivity as framework concern** keeps resolver implementations simple (they just return values with hints)
 
 ## Trade-offs Accepted
 
-- **Comma syntax for defaults** means resolvers must handle defaults individually, in exchange for **OmegaConf compatibility**
+- **Keyword syntax differs from OmegaConf's positional defaults** in exchange for **clarity and framework-level handling**
 - **Backslash escaping in YAML** can be tricky (YAML also uses backslash), in exchange for **OmegaConf compatibility**
-- **No universal default syntax** in exchange for **resolver flexibility** (each resolver decides how to handle its arguments)
+- **Resolvers cannot override framework keywords** in exchange for **consistent, predictable behavior**
 
 ## Migration
 
-**From OmegaConf:** Most configs should work without changes. Key differences:
-- holoconf uses `${env:VAR}` while OmegaConf uses `${oc.env:VAR}` - we'll provide `env` as an alias
+**From OmegaConf:** Most configs require minor changes for defaults:
+- holoconf uses `${env:VAR,default=value}` while OmegaConf uses `${oc.env:VAR,value}` (positional)
+- holoconf uses `${env:VAR}` while OmegaConf uses `${oc.env:VAR}` - we provide `env` directly
 - holoconf uses `${ssm:...}` for AWS SSM - new resolver, not in OmegaConf
+
+**Migration script:** A simple regex can convert OmegaConf positional defaults to keyword syntax:
+```
+${env:(\w+),([^}]+)} → ${env:$1,default=$2}
+```
 
 ## Consequences
 
-- **Positive:** Existing OmegaConf configs work with minimal changes, familiar syntax for OmegaConf users
-- **Negative:** Must maintain OmegaConf grammar compatibility as OmegaConf evolves
+- **Positive:** Consistent `default` and `sensitive` behavior across all resolvers without code duplication
+- **Positive:** Clear, explicit syntax that avoids ambiguity
+- **Positive:** Resolvers are simpler (don't need to implement default/sensitive handling)
+- **Negative:** Not 100% compatible with OmegaConf positional default syntax
 - **Neutral:** Safety limits may need tuning based on real-world usage

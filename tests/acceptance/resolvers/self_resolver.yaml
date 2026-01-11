@@ -61,3 +61,44 @@ tests:
       access: final.region
     then:
       value: "us-east-1"
+
+  - name: relative_reference_parent
+    description: Going up levels with double dots
+    given:
+      config: |
+        database:
+          host: localhost
+          connection:
+            url: "postgres://${..host}:5432"
+    when:
+      access: database.connection.url
+    then:
+      value: "postgres://localhost:5432"
+
+  - name: self_reference_preserves_type
+    description: Self-references should preserve the type of the referenced value
+    given:
+      config: |
+        defaults:
+          count: 42
+          enabled: true
+        app:
+          count: ${defaults.count}
+          enabled: ${defaults.enabled}
+    when:
+      access: app.count
+    then:
+      value: 42
+
+  - name: self_reference_in_string
+    description: Self-references in string concatenation
+    given:
+      config: |
+        parts:
+          host: localhost
+          port: 5432
+        connection: "postgres://${parts.host}:${parts.port}/db"
+    when:
+      access: connection
+    then:
+      value: "postgres://localhost:5432/db"

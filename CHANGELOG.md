@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+#### Resolver Syntax (Breaking Change)
+- **Keyword-only syntax for default and sensitive options** - Resolver options now use keyword argument syntax exclusively
+  - Old syntax: `${env:VAR,fallback_value}` (positional default)
+  - New syntax: `${env:VAR,default=fallback_value}` (keyword default)
+  - Sensitive flag: `${env:SECRET,sensitive=true}`
+  - Both combined: `${env:VAR,default=fallback,sensitive=true}`
+- **Framework-level default/sensitive handling** - All resolvers now consistently support `default=` and `sensitive=` options
+  - Lazy evaluation: default values only resolved when primary resolver fails
+  - Works with any resolver: `${file:./config.yaml,default={}}`, `${http:...,default=fallback}`
+  - Sensitive marking propagates correctly through resolution chain
+
 ### Added
 
 #### Optional File Support

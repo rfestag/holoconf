@@ -277,24 +277,51 @@ impl<'a> InterpolationParser<'a> {
                 self.skip_whitespace();
             }
 
-            // Parse argument
-            let arg = self.parse_argument()?;
-
-            // Check if this is a kwarg (look for = before the value)
-            // For simplicity, we check if the arg is a literal and contains =
-            if let InterpolationArg::Literal(s) = &arg {
-                if let Some(eq_pos) = s.find('=') {
-                    let key = s[..eq_pos].to_string();
-                    let value = s[eq_pos + 1..].to_string();
-                    kwargs.insert(key, InterpolationArg::Literal(value));
-                    continue;
-                }
+            // Try to parse as kwarg first (key=value)
+            // Look ahead for = before any comma or interpolation start
+            if let Some((key, value_arg)) = self.try_parse_kwarg()? {
+                kwargs.insert(key, value_arg);
+            } else {
+                // Parse as positional argument
+                let arg = self.parse_argument()?;
+                args.push(arg);
             }
-
-            args.push(arg);
         }
 
         Ok(Interpolation::Resolver { name, args, kwargs })
+    }
+
+    /// Try to parse a kwarg (key=value pattern)
+    /// Returns Some((key, value)) if successful, None if this isn't a kwarg
+    fn try_parse_kwarg(&mut self) -> Result<Option<(String, InterpolationArg)>> {
+        // Save position for backtracking
+        let start_pos = self.pos;
+
+        // Try to collect an identifier followed by =
+        let mut key = String::new();
+        while !self.is_eof() {
+            match self.current() {
+                Some(c) if c.is_alphanumeric() || c == '_' => {
+                    key.push(c);
+                    self.advance();
+                }
+                Some('=') if !key.is_empty() => {
+                    // Found key=, now parse the value
+                    self.advance(); // skip =
+                    let value = self.parse_argument()?;
+                    return Ok(Some((key, value)));
+                }
+                _ => {
+                    // Not a kwarg pattern, backtrack
+                    self.pos = start_pos;
+                    return Ok(None);
+                }
+            }
+        }
+
+        // Reached EOF without finding =, backtrack
+        self.pos = start_pos;
+        Ok(None)
     }
 
     /// Parse a single argument (may be literal or nested interpolation)

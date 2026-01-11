@@ -55,6 +55,10 @@ pub enum ErrorKind {
 /// Specific resolver error categories
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResolverErrorKind {
+    /// Resource not found (triggers default handling if default is provided)
+    /// This is used when the resolver cannot find the requested resource
+    /// (e.g., env var not set, file not found, SSM parameter missing)
+    NotFound { resource: String },
     /// Environment variable not found
     EnvNotFound { var_name: String },
     /// File not found
@@ -112,6 +116,18 @@ impl Error {
         }
     }
 
+    /// Create a not found error (triggers default handling at framework level)
+    pub fn not_found(resource: impl Into<String>, config_path: Option<String>) -> Self {
+        let res = resource.into();
+        Self {
+            kind: ErrorKind::Resolver(ResolverErrorKind::NotFound { resource: res }),
+            path: config_path,
+            source_location: None,
+            help: None,
+            cause: None,
+        }
+    }
+
     /// Create an env var not found error
     pub fn env_not_found(var_name: impl Into<String>, config_path: Option<String>) -> Self {
         let var = var_name.into();
@@ -122,7 +138,7 @@ impl Error {
             path: config_path,
             source_location: None,
             help: Some(format!(
-                "Set the {} environment variable or provide a default: ${{env:{},default}}",
+                "Set the {} environment variable or provide a default: ${{env:{},default=value}}",
                 var, var
             )),
             cause: None,
@@ -258,6 +274,9 @@ impl fmt::Display for Error {
         match &self.kind {
             ErrorKind::Parse => write!(f, "Parse error")?,
             ErrorKind::Resolver(r) => match r {
+                ResolverErrorKind::NotFound { resource } => {
+                    write!(f, "Resource not found: {}", resource)?
+                }
                 ResolverErrorKind::EnvNotFound { var_name } => {
                     write!(f, "Environment variable not found: {}", var_name)?
                 }
@@ -331,7 +350,7 @@ mod tests {
         assert!(display.contains("Environment variable not found: MY_VAR"));
         assert!(display.contains("Path: database.password"));
         assert!(display.contains("Help:"));
-        assert!(display.contains("${env:MY_VAR,default}"));
+        assert!(display.contains("${env:MY_VAR,default=value}"));
     }
 
     #[test]
@@ -352,5 +371,148 @@ mod tests {
 
         assert_eq!(err.kind, ErrorKind::PathNotFound);
         assert_eq!(err.path, Some("database.host".into()));
+    }
+
+    #[test]
+    fn test_not_found_error() {
+        let err = Error::not_found("my-resource", Some("config.key".into()));
+        let display = format!("{}", err);
+
+        assert!(display.contains("Resource not found: my-resource"));
+        assert!(display.contains("Path: config.key"));
+        assert!(matches!(
+            err.kind,
+            ErrorKind::Resolver(ResolverErrorKind::NotFound { .. })
+        ));
+    }
+
+    #[test]
+    fn test_ref_not_found_error() {
+        let err = Error::ref_not_found("database.missing", Some("app.db".into()));
+        let display = format!("{}", err);
+
+        assert!(display.contains("Referenced path not found: database.missing"));
+        assert!(display.contains("Path: app.db"));
+        assert!(display.contains("Help:"));
+    }
+
+    #[test]
+    fn test_file_not_found_error() {
+        let err = Error::file_not_found("/path/to/missing.yaml", Some("config.file".into()));
+        let display = format!("{}", err);
+
+        assert!(display.contains("File not found: /path/to/missing.yaml"));
+        assert!(display.contains("Path: config.file"));
+    }
+
+    #[test]
+    fn test_unknown_resolver_error() {
+        let err = Error::unknown_resolver("unknown", Some("config.value".into()));
+        let display = format!("{}", err);
+
+        assert!(display.contains("Unknown resolver: unknown"));
+        assert!(display.contains("Help:"));
+        assert!(display.contains("Register the 'unknown' resolver"));
+    }
+
+    #[test]
+    fn test_resolver_custom_error() {
+        let err = Error::resolver_custom("myresolver", "Something went wrong");
+        let display = format!("{}", err);
+
+        assert!(display.contains("Resolver 'myresolver' error: Something went wrong"));
+        assert!(display.contains("Help:"));
+    }
+
+    #[test]
+    fn test_internal_error() {
+        let err = Error::internal("Unexpected state");
+        let display = format!("{}", err);
+
+        assert!(display.contains("Internal error"));
+        // The message goes into the cause field
+        assert!(display.contains("Unexpected state"));
+    }
+
+    #[test]
+    fn test_with_source_location() {
+        let err = Error::parse("syntax error").with_source_location(SourceLocation {
+            file: "config.yaml".into(),
+            line: Some(42),
+            column: None,
+        });
+        let display = format!("{}", err);
+
+        assert!(display.contains("config.yaml:42"));
+    }
+
+    #[test]
+    fn test_with_help() {
+        let err = Error::parse("bad input").with_help("Try fixing the syntax");
+        let display = format!("{}", err);
+
+        assert!(display.contains("Help: Try fixing the syntax"));
+    }
+
+    #[test]
+    fn test_type_coercion_error() {
+        let err = Error::type_coercion("server.port", "integer", "string");
+        let display = format!("{}", err);
+
+        assert!(display.contains("Type coercion failed"));
+        assert!(display.contains("Path: server.port"));
+        assert!(display.contains("Got: string"));
+    }
+
+    #[test]
+    fn test_validation_error() {
+        let err = Error::validation("users[0].name", "must be at least 3 characters");
+        let display = format!("{}", err);
+
+        assert!(display.contains("Validation error"));
+        assert!(display.contains("Path: users[0].name"));
+        assert!(display.contains("must be at least 3 characters"));
+    }
+
+    #[test]
+    fn test_validation_error_root_path() {
+        // Root path should not show path field
+        let err = Error::validation("<root>", "missing required field");
+        assert!(err.path.is_none());
+
+        let err2 = Error::validation("", "missing required field");
+        assert!(err2.path.is_none());
+    }
+
+    #[test]
+    fn test_http_error_display() {
+        let err = Error {
+            kind: ErrorKind::Resolver(ResolverErrorKind::HttpError {
+                url: "https://example.com/config".into(),
+                status: Some(404),
+            }),
+            path: Some("remote.config".into()),
+            source_location: None,
+            help: None,
+            cause: None,
+        };
+        let display = format!("{}", err);
+
+        assert!(display.contains("HTTP request failed: https://example.com/config"));
+        assert!(display.contains("status 404"));
+    }
+
+    #[test]
+    fn test_http_disabled_error() {
+        let err = Error {
+            kind: ErrorKind::Resolver(ResolverErrorKind::HttpDisabled),
+            path: Some("remote.config".into()),
+            source_location: None,
+            help: None,
+            cause: None,
+        };
+        let display = format!("{}", err);
+
+        assert!(display.contains("HTTP resolver is disabled"));
     }
 }

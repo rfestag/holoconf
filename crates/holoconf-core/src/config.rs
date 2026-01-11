@@ -584,14 +584,58 @@ impl Config {
                     .map(|arg| self.resolve_arg(arg, path, resolution_stack))
                     .collect::<Result<Vec<_>>>()?;
 
+                // Extract and defer `default` kwarg for lazy resolution
+                // Resolve all other kwargs eagerly
+                let default_arg = kwargs.get("default");
                 let resolved_kwargs: HashMap<String, String> = kwargs
                     .iter()
+                    .filter(|(k, _)| *k != "default") // Don't resolve default yet
                     .map(|(k, v)| Ok((k.clone(), self.resolve_arg(v, path, resolution_stack)?)))
                     .collect::<Result<HashMap<_, _>>>()?;
 
-                // Call the resolver
-                self.resolvers
-                    .resolve(name, &resolved_args, &resolved_kwargs, &ctx)
+                // Call the resolver (without `default` in kwargs)
+                let result = self
+                    .resolvers
+                    .resolve(name, &resolved_args, &resolved_kwargs, &ctx);
+
+                // Handle NotFound errors with lazy default resolution
+                match result {
+                    Ok(value) => Ok(value),
+                    Err(e) => {
+                        // Check if this is a "not found" type error that should use default
+                        let should_use_default = matches!(
+                            &e.kind,
+                            crate::error::ErrorKind::Resolver(
+                                crate::error::ResolverErrorKind::NotFound { .. }
+                            ) | crate::error::ErrorKind::Resolver(
+                                crate::error::ResolverErrorKind::EnvNotFound { .. }
+                            ) | crate::error::ErrorKind::Resolver(
+                                crate::error::ResolverErrorKind::FileNotFound { .. }
+                            )
+                        );
+
+                        if should_use_default {
+                            if let Some(default_arg) = default_arg {
+                                // Lazily resolve the default value now
+                                let default_str =
+                                    self.resolve_arg(default_arg, path, resolution_stack)?;
+
+                                // Apply sensitivity override if present
+                                let is_sensitive = resolved_kwargs
+                                    .get("sensitive")
+                                    .map(|v| v.eq_ignore_ascii_case("true"))
+                                    .unwrap_or(false);
+
+                                return if is_sensitive {
+                                    Ok(ResolvedValue::sensitive(Value::String(default_str)))
+                                } else {
+                                    Ok(ResolvedValue::new(Value::String(default_str)))
+                                };
+                            }
+                        }
+                        Err(e)
+                    }
+                }
             }
 
             Interpolation::SelfRef {
@@ -914,7 +958,7 @@ server:
 
         let yaml = r#"
 server:
-  host: ${env:HOLOCONF_MISSING_VAR,default-host}
+  host: ${env:HOLOCONF_MISSING_VAR,default=default-host}
 "#;
         let config = Config::from_yaml(yaml).unwrap();
 
@@ -1145,7 +1189,7 @@ primary: ${servers[0].host}
         std::env::set_var("HOLOCONF_DEFAULT_HOST", "fallback-host");
 
         let yaml = r#"
-host: ${env:UNDEFINED_HOST,${env:HOLOCONF_DEFAULT_HOST}}
+host: ${env:UNDEFINED_HOST,default=${env:HOLOCONF_DEFAULT_HOST}}
 "#;
         let config = Config::from_yaml(yaml).unwrap();
 
@@ -1694,5 +1738,283 @@ database:
 
         let optional = FileSpec::optional("opt.yaml");
         assert!(optional.is_optional());
+    }
+
+    #[test]
+    fn test_from_json() {
+        let json = r#"{"database": {"host": "localhost", "port": 5432}}"#;
+        let config = Config::from_json(json).unwrap();
+
+        assert_eq!(
+            config.get("database.host").unwrap().as_str(),
+            Some("localhost")
+        );
+        assert_eq!(config.get("database.port").unwrap().as_i64(), Some(5432));
+    }
+
+    #[test]
+    fn test_from_json_invalid() {
+        let json = r#"{"unclosed": "#;
+        let result = Config::from_json(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_get_raw() {
+        let yaml = r#"
+key: ${env:SOME_VAR,default=fallback}
+literal: plain_value
+"#;
+        let config = Config::from_yaml(yaml).unwrap();
+
+        // get_raw returns the unresolved value
+        let raw = config.get_raw("key").unwrap();
+        assert!(raw.as_str().unwrap().contains("${env:"));
+
+        // literal values are unchanged
+        let literal = config.get_raw("literal").unwrap();
+        assert_eq!(literal.as_str(), Some("plain_value"));
+    }
+
+    #[test]
+    fn test_get_string() {
+        std::env::set_var("HOLOCONF_TEST_STRING", "hello_world");
+
+        let yaml = r#"
+plain: "plain_string"
+env_var: ${env:HOLOCONF_TEST_STRING}
+number: 42
+"#;
+        let config = Config::from_yaml(yaml).unwrap();
+
+        assert_eq!(config.get_string("plain").unwrap(), "plain_string");
+        assert_eq!(config.get_string("env_var").unwrap(), "hello_world");
+
+        // Numbers get coerced to string
+        assert_eq!(config.get_string("number").unwrap(), "42");
+
+        std::env::remove_var("HOLOCONF_TEST_STRING");
+    }
+
+    #[test]
+    fn test_get_f64() {
+        let yaml = r#"
+float: 1.23
+int: 42
+string_num: "4.56"
+string_bad: "not_a_number"
+"#;
+        let config = Config::from_yaml(yaml).unwrap();
+
+        assert!((config.get_f64("float").unwrap() - 1.23).abs() < 0.001);
+        assert!((config.get_f64("int").unwrap() - 42.0).abs() < 0.001);
+        // Strings that look like numbers ARE coerced
+        assert!((config.get_f64("string_num").unwrap() - 4.56).abs() < 0.001);
+        // Strings that don't parse as numbers should error
+        assert!(config.get_f64("string_bad").is_err());
+    }
+
+    #[test]
+    fn test_config_merge() {
+        let yaml1 = r#"
+database:
+  host: localhost
+  port: 5432
+app:
+  name: myapp
+"#;
+        let yaml2 = r#"
+database:
+  port: 3306
+  user: admin
+app:
+  debug: true
+"#;
+        let mut config1 = Config::from_yaml(yaml1).unwrap();
+        let config2 = Config::from_yaml(yaml2).unwrap();
+
+        config1.merge(config2);
+
+        // Merged values
+        assert_eq!(
+            config1.get("database.host").unwrap().as_str(),
+            Some("localhost")
+        );
+        assert_eq!(config1.get("database.port").unwrap().as_i64(), Some(3306)); // Overwritten
+        assert_eq!(
+            config1.get("database.user").unwrap().as_str(),
+            Some("admin")
+        ); // Added
+        assert_eq!(config1.get("app.name").unwrap().as_str(), Some("myapp"));
+        assert_eq!(config1.get("app.debug").unwrap().as_bool(), Some(true)); // Added
+    }
+
+    #[test]
+    fn test_config_clone() {
+        let yaml = r#"
+key: value
+nested:
+  a: 1
+  b: 2
+"#;
+        let config = Config::from_yaml(yaml).unwrap();
+        let cloned = config.clone();
+
+        assert_eq!(cloned.get("key").unwrap().as_str(), Some("value"));
+        assert_eq!(cloned.get("nested.a").unwrap().as_i64(), Some(1));
+    }
+
+    #[test]
+    fn test_with_options() {
+        use indexmap::IndexMap;
+        let mut map = IndexMap::new();
+        map.insert("key".to_string(), crate::Value::String("value".to_string()));
+        let value = crate::Value::Mapping(map);
+        let options = ConfigOptions {
+            base_path: None,
+            allow_http: true,
+            http_allowlist: vec![],
+            file_roots: vec!["/custom/path".into()],
+        };
+        let config = Config::with_options(value, options);
+
+        assert_eq!(config.get("key").unwrap().as_str(), Some("value"));
+    }
+
+    #[test]
+    fn test_from_yaml_with_options() {
+        let yaml = "key: value";
+        let options = ConfigOptions {
+            base_path: None,
+            allow_http: true,
+            http_allowlist: vec![],
+            file_roots: vec![],
+        };
+        let config = Config::from_yaml_with_options(yaml, options).unwrap();
+
+        assert_eq!(config.get("key").unwrap().as_str(), Some("value"));
+    }
+
+    #[test]
+    fn test_resolve_all() {
+        std::env::set_var("HOLOCONF_RESOLVE_ALL_TEST", "resolved");
+
+        let yaml = r#"
+a: ${env:HOLOCONF_RESOLVE_ALL_TEST}
+b: static_value
+c:
+  nested: ${env:HOLOCONF_RESOLVE_ALL_TEST}
+"#;
+        let config = Config::from_yaml(yaml).unwrap();
+
+        // resolve_all should resolve all values without errors
+        config.resolve_all().unwrap();
+
+        // All values should be cached now
+        assert_eq!(config.get("a").unwrap().as_str(), Some("resolved"));
+        assert_eq!(config.get("b").unwrap().as_str(), Some("static_value"));
+        assert_eq!(config.get("c.nested").unwrap().as_str(), Some("resolved"));
+
+        std::env::remove_var("HOLOCONF_RESOLVE_ALL_TEST");
+    }
+
+    #[test]
+    fn test_resolve_all_with_errors() {
+        let yaml = r#"
+valid: static
+invalid: ${env:HOLOCONF_NONEXISTENT_RESOLVE_VAR}
+"#;
+        std::env::remove_var("HOLOCONF_NONEXISTENT_RESOLVE_VAR");
+
+        let config = Config::from_yaml(yaml).unwrap();
+        let result = config.resolve_all();
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("not found"));
+    }
+
+    #[test]
+    fn test_self_reference_basic() {
+        // Test basic self-references (without default kwargs - kwargs not yet implemented for self-ref)
+        let yaml = r#"
+settings:
+  timeout: 30
+app:
+  timeout: ${settings.timeout}
+"#;
+        let config = Config::from_yaml(yaml).unwrap();
+
+        assert_eq!(config.get("app.timeout").unwrap().as_i64(), Some(30));
+    }
+
+    #[test]
+    fn test_self_reference_missing_errors() {
+        let yaml = r#"
+app:
+  timeout: ${settings.missing_timeout}
+"#;
+        let config = Config::from_yaml(yaml).unwrap();
+
+        // Should error when path doesn't exist (no default support for self-refs yet)
+        let result = config.get("app.timeout");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("not found"));
+    }
+
+    #[test]
+    fn test_self_reference_sensitivity_inheritance() {
+        std::env::set_var("HOLOCONF_INHERITED_SECRET", "secret_value");
+
+        let yaml = r#"
+secrets:
+  api_key: ${env:HOLOCONF_INHERITED_SECRET,sensitive=true}
+derived: ${secrets.api_key}
+"#;
+        let config = Config::from_yaml(yaml).unwrap();
+
+        // Access the values to ensure resolution works
+        assert_eq!(
+            config.get("secrets.api_key").unwrap().as_str(),
+            Some("secret_value")
+        );
+        assert_eq!(
+            config.get("derived").unwrap().as_str(),
+            Some("secret_value")
+        );
+
+        // Check that serialization redacts sensitive values
+        let yaml_output = config.to_yaml(true, true).unwrap();
+        assert!(yaml_output.contains("[REDACTED]"));
+        assert!(!yaml_output.contains("secret_value"));
+
+        std::env::remove_var("HOLOCONF_INHERITED_SECRET");
+    }
+
+    #[test]
+    fn test_non_notfound_error_does_not_use_default() {
+        // Register a resolver that returns a non-NotFound error
+        use crate::resolver::FnResolver;
+        use std::sync::Arc;
+
+        let yaml = r#"
+value: ${failing:arg,default=should_not_be_used}
+"#;
+        let mut config = Config::from_yaml(yaml).unwrap();
+
+        // Register a resolver that fails with a custom error (not NotFound)
+        config.register_resolver(Arc::new(FnResolver::new(
+            "failing",
+            |_args, _kwargs, ctx| {
+                Err(
+                    crate::error::Error::resolver_custom("failing", "Network timeout")
+                        .with_path(ctx.config_path.clone()),
+                )
+            },
+        )));
+
+        // The default should NOT be used because the error is not a NotFound type
+        let result = config.get("value");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Network timeout"));
     }
 }
