@@ -84,7 +84,7 @@ from holoconf import Config
 
 config = Config.from_string("""
 database:
-  host: ${env:DB_HOST,localhost}
+  host: ${env:DB_HOST,default=localhost}
 """)
 
 # Inspect values
