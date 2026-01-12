@@ -46,12 +46,12 @@ app:
   debug: false
 
 database:
-  host: ${env:DB_HOST,localhost}
-  port: ${env:DB_PORT,5432}
-  name: ${env:DB_NAME,myapp}
+  host: ${env:DB_HOST,default=localhost}
+  port: ${env:DB_PORT,default=5432}
+  name: ${env:DB_NAME,default=myapp}
 
 logging:
-  level: ${env:LOG_LEVEL,info}
+  level: ${env:LOG_LEVEL,default=info}
   format: json
 ```
 
@@ -59,7 +59,7 @@ This configuration demonstrates several HoloConf features:
 
 - **Nested structure** - Values organized hierarchically
 - **Environment variables** - `${env:VAR_NAME}` resolves to environment variable values
-- **Default values** - `${env:VAR_NAME,default}` provides fallbacks when variables aren't set
+- **Default values** - `${env:VAR_NAME,default=value}` provides fallbacks when variables aren't set
 
 ## Loading Configuration
 
@@ -117,7 +117,7 @@ This configuration demonstrates several HoloConf features:
       debug: false
     database:
       host: localhost
-      port: 5432
+      port: "5432"
       name: myapp
     logging:
       level: info
@@ -141,7 +141,7 @@ HoloConf supports deep nesting and provides convenient access patterns:
     # Get a subsection as a dict
     db_config = config.get("database")
     print(db_config)
-    # {'host': 'localhost', 'port': 5432, 'name': 'myapp'}
+    # {'host': 'localhost', 'port': '5432', 'name': 'myapp'}
 
     # Check if a path exists
     if config.get("app.debug"):

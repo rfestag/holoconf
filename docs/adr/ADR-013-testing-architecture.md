@@ -115,7 +115,7 @@ tests:
   - name: uses_default_when_missing
     given:
       config: |
-        port: ${env:UNDEFINED_VAR,3000}
+        port: ${env:UNDEFINED_VAR,default=3000}
     when:
       access: port
     then:
