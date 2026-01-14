@@ -3,7 +3,54 @@
 This module provides type hints for the Rust PyO3 bindings.
 """
 
-from typing import Any
+from typing import Any, Callable
+
+def register_resolver(
+    name: str, func: Callable[..., Any], force: bool = False
+) -> None:
+    """Register a resolver in the global registry.
+
+    This makes the resolver available to all Config instances created after registration.
+    Use this for extension packages that provide additional resolvers.
+
+    Args:
+        name: The resolver name (used as ${name:...} in config)
+        func: A callable that takes (*args, **kwargs) and returns a value
+        force: If True, overwrite any existing resolver with the same name.
+               If False (default), raise an error if the name is already registered.
+
+    Example:
+        >>> import holoconf
+        >>>
+        >>> def ssm_resolver(path, region=None, profile=None):
+        ...     # Implementation here
+        ...     return value
+        >>>
+        >>> holoconf.register_resolver("ssm", ssm_resolver)
+        >>> # Now any Config can use ${ssm:/my/param}
+    """
+    ...
+
+class ResolvedValue:
+    """A resolved value with optional sensitivity metadata.
+
+    Use this to return sensitive values from custom resolvers that
+    should be redacted when using config.to_yaml(redact=True).
+
+    Example:
+        >>> def secret_resolver(key):
+        ...     value = fetch_secret(key)
+        ...     return ResolvedValue(value, sensitive=True)
+    """
+
+    def __init__(self, value: Any, sensitive: bool = False) -> None:
+        """Create a resolved value.
+
+        Args:
+            value: The resolved value
+            sensitive: Whether the value should be redacted in output (default False)
+        """
+        ...
 
 class FileSpec:
     """File specification for optional file support.

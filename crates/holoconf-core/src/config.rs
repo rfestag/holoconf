@@ -9,7 +9,7 @@ use std::sync::{Arc, RwLock};
 
 use crate::error::{Error, Result};
 use crate::interpolation::{self, Interpolation, InterpolationArg};
-use crate::resolver::{ResolvedValue, ResolverContext, ResolverRegistry};
+use crate::resolver::{global_registry, ResolvedValue, ResolverContext, ResolverRegistry};
 use crate::value::Value;
 
 /// Configuration options for loading configs
@@ -97,25 +97,37 @@ pub struct Config {
     options: ConfigOptions,
 }
 
+/// Clone the global registry for use in a Config instance
+fn clone_global_registry() -> Arc<ResolverRegistry> {
+    let global = global_registry()
+        .read()
+        .expect("Global registry lock poisoned");
+    Arc::new(global.clone())
+}
+
 impl Config {
     /// Create a new Config from a Value
+    ///
+    /// The config will use resolvers from the global registry.
     pub fn new(value: Value) -> Self {
         Self {
             raw: Arc::new(value),
             cache: Arc::new(RwLock::new(HashMap::new())),
             source_map: Arc::new(HashMap::new()),
-            resolvers: Arc::new(ResolverRegistry::with_builtins()),
+            resolvers: clone_global_registry(),
             options: ConfigOptions::default(),
         }
     }
 
     /// Create a Config with custom options
+    ///
+    /// The config will use resolvers from the global registry.
     pub fn with_options(value: Value, options: ConfigOptions) -> Self {
         Self {
             raw: Arc::new(value),
             cache: Arc::new(RwLock::new(HashMap::new())),
             source_map: Arc::new(HashMap::new()),
-            resolvers: Arc::new(ResolverRegistry::with_builtins()),
+            resolvers: clone_global_registry(),
             options,
         }
     }
@@ -130,7 +142,7 @@ impl Config {
             raw: Arc::new(value),
             cache: Arc::new(RwLock::new(HashMap::new())),
             source_map: Arc::new(source_map),
-            resolvers: Arc::new(ResolverRegistry::with_builtins()),
+            resolvers: clone_global_registry(),
             options,
         }
     }

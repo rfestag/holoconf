@@ -105,15 +105,75 @@ class Driver:
         raise NotImplementedError
 
 
+class MockResolver:
+    """A mock resolver that returns values from a dictionary.
+
+    Mock data format:
+        - Simple value: "key": "value"
+        - Value with type: "key": {"value": "val", "type": "SecureString"}
+        - Value with region: "key": {"value": "val", "region": "us-west-2"}
+    """
+
+    def __init__(self, name: str, mock_data: Dict[str, Any]):
+        self.name = name
+        self.mock_data = mock_data
+
+    def __call__(self, path: str, **kwargs) -> Any:
+        """Resolve a path from mock data."""
+        from holoconf import ResolvedValue
+
+        # SSM-specific validation: paths must start with /
+        if self.name == "ssm" and not path.startswith("/"):
+            raise ValueError(f"SSM parameter path must start with /: {path}")
+
+        # Check if this path exists in mock data
+        if path not in self.mock_data:
+            raise KeyError(f"{self.name} parameter not found: {path}")
+
+        entry = self.mock_data[path]
+
+        # Handle simple string values
+        if isinstance(entry, str):
+            return entry
+
+        # Handle dict entries with value/type/region/profile
+        if isinstance(entry, dict):
+            value = entry.get("value")
+            entry_type = entry.get("type", "String")
+            entry_region = entry.get("region")
+            entry_profile = entry.get("profile")
+
+            # Check region/profile match if specified in kwargs
+            if entry_region and kwargs.get("region") != entry_region:
+                raise KeyError(f"{self.name} parameter not found: {path} (region mismatch)")
+            if entry_profile and kwargs.get("profile") != entry_profile:
+                raise KeyError(f"{self.name} parameter not found: {path} (profile mismatch)")
+
+            # Handle StringList type
+            if entry_type == "StringList":
+                return value.split(",")
+
+            # Handle SecureString type - return sensitive value
+            if entry_type == "SecureString":
+                return ResolvedValue(value, sensitive=True)
+
+            # Plain string
+            return value
+
+        return entry
+
+
 class RustDriver(Driver):
     """Driver for testing the Rust core directly via Python bindings."""
 
     def __init__(self):
         try:
-            from holoconf import Config, Schema, FileSpec
+            from holoconf import Config, Schema, FileSpec, register_resolver, ResolvedValue
             self.Config = Config
             self.Schema = Schema
             self.FileSpec = FileSpec
+            self.register_resolver = register_resolver
+            self.ResolvedValue = ResolvedValue
         except ImportError:
             raise ImportError(
                 "Could not import holoconf. "
@@ -196,21 +256,37 @@ class RustDriver(Driver):
     def export_dict(self, config: Any, resolve: bool, redact: bool = False) -> Any:
         return config.to_dict(resolve=resolve, redact=redact)
 
+    def setup_mocks(self, mocks: Dict[str, Any]) -> None:
+        """Set up mock resolvers from test definition."""
+        for resolver_name, mock_data in mocks.items():
+            mock_resolver = MockResolver(resolver_name, mock_data)
+            # Use force=True to override any existing resolver (including real ones)
+            self.register_resolver(resolver_name, mock_resolver, force=True)
+
 
 class PythonDriver(Driver):
     """Driver for testing the Python bindings."""
 
     def __init__(self):
         try:
-            from holoconf import Config, Schema, FileSpec
+            from holoconf import Config, Schema, FileSpec, register_resolver, ResolvedValue
             self.Config = Config
             self.Schema = Schema
             self.FileSpec = FileSpec
+            self.register_resolver = register_resolver
+            self.ResolvedValue = ResolvedValue
         except ImportError:
             raise ImportError(
                 "Could not import holoconf. "
                 "Build with: cd packages/python/holoconf && maturin develop"
             )
+
+    def setup_mocks(self, mocks: Dict[str, Any]) -> None:
+        """Set up mock resolvers from test definition."""
+        for resolver_name, mock_data in mocks.items():
+            mock_resolver = MockResolver(resolver_name, mock_data)
+            # Use force=True to override any existing resolver (including real ones)
+            self.register_resolver(resolver_name, mock_resolver, force=True)
 
     def run_cli(self, command: str, env: Dict[str, str]) -> Tuple[int, str, str]:
         """Run CLI command via Python module and return (exit_code, stdout, stderr)."""
@@ -482,6 +558,7 @@ def run_test(driver: Driver, test: TestCase, suite_name: str) -> TestResult:
     """Run a single test case."""
     env = test.given.get("env", {})
     files = test.given.get("files", {})
+    mocks = test.given.get("mocks", {})
     config_merge = test.given.get("config_merge", [])
     config_merge_specs = test.given.get("config_merge_specs", [])
     temp_dir = None
@@ -490,6 +567,10 @@ def run_test(driver: Driver, test: TestCase, suite_name: str) -> TestResult:
     try:
         # Set up environment
         driver.setup_env(env)
+
+        # Set up mock resolvers before any config loading
+        if mocks and hasattr(driver, 'setup_mocks'):
+            driver.setup_mocks(mocks)
 
         # Create temp directory
         temp_dir = tempfile.mkdtemp(prefix="holoconf_test_")

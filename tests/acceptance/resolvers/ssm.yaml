@@ -1,0 +1,142 @@
+suite: ssm_resolver
+description: SSM Parameter Store resolver behavior
+
+tests:
+  - name: resolves_ssm_parameter
+    given:
+      mocks:
+        ssm:
+          /app/db-host: "test-db.local"
+      config: |
+        host: ${ssm:/app/db-host}
+    when:
+      access: host
+    then:
+      value: "test-db.local"
+
+  - name: uses_default_when_missing
+    given:
+      mocks:
+        ssm: {}
+      config: |
+        host: ${ssm:/app/db-host,default=localhost}
+    when:
+      access: host
+    then:
+      value: "localhost"
+
+  - name: errors_when_missing_no_default
+    given:
+      mocks:
+        ssm: {}
+      config: |
+        host: ${ssm:/app/db-host}
+    when:
+      access: host
+    then:
+      error:
+        type: ResolverError
+        message_contains: "not found"
+
+  - name: securestring_is_sensitive_by_default
+    given:
+      mocks:
+        ssm:
+          /app/password:
+            value: "secret123"
+            type: SecureString
+      config: |
+        password: ${ssm:/app/password}
+    when:
+      dump:
+        format: yaml
+        redact: true
+    then:
+      output_contains: "[REDACTED]"
+      output_not_contains: "secret123"
+
+  - name: string_is_not_sensitive_by_default
+    given:
+      mocks:
+        ssm:
+          /app/host: "db.example.com"
+      config: |
+        host: ${ssm:/app/host}
+    when:
+      dump:
+        format: yaml
+        redact: true
+    then:
+      output_contains: "db.example.com"
+
+  - name: explicit_sensitive_override
+    given:
+      mocks:
+        ssm:
+          /app/internal-config: "internal-value"
+      config: |
+        config: ${ssm:/app/internal-config,sensitive=true}
+    when:
+      dump:
+        format: yaml
+        redact: true
+    then:
+      output_contains: "[REDACTED]"
+
+  - name: stringlist_returns_array
+    given:
+      mocks:
+        ssm:
+          /app/hosts:
+            value: "host1,host2,host3"
+            type: StringList
+      config: |
+        hosts: ${ssm:/app/hosts}
+    when:
+      access: hosts
+    then:
+      value:
+        - "host1"
+        - "host2"
+        - "host3"
+
+  - name: region_kwarg
+    given:
+      mocks:
+        ssm:
+          /app/config:
+            value: "west-value"
+            region: us-west-2
+      config: |
+        config: ${ssm:/app/config,region=us-west-2}
+    when:
+      access: config
+    then:
+      value: "west-value"
+
+  - name: profile_kwarg
+    given:
+      mocks:
+        ssm:
+          /app/config:
+            value: "prod-value"
+            profile: production
+      config: |
+        config: ${ssm:/app/config,profile=production}
+    when:
+      access: config
+    then:
+      value: "prod-value"
+
+  - name: path_must_start_with_slash
+    given:
+      mocks:
+        ssm: {}
+      config: |
+        value: ${ssm:invalid-path}
+    when:
+      access: value
+    then:
+      error:
+        type: ResolverError
+        message_contains: "must start with /"
