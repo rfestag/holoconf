@@ -1,0 +1,109 @@
+suite: cfn_resolver
+description: CloudFormation outputs resolver behavior
+
+tests:
+  - name: resolves_cfn_output
+    given:
+      mocks:
+        cfn:
+          my-stack/DatabaseEndpoint: "db.example.com"
+      config: |
+        endpoint: ${cfn:my-stack/DatabaseEndpoint}
+    when:
+      access: endpoint
+    then:
+      value: "db.example.com"
+
+  - name: uses_default_when_output_missing
+    given:
+      mocks:
+        cfn: {}
+      config: |
+        bucket: ${cfn:my-stack/BucketName,default=my-default-bucket}
+    when:
+      access: bucket
+    then:
+      value: "my-default-bucket"
+
+  - name: errors_when_output_missing_no_default
+    given:
+      mocks:
+        cfn: {}
+      config: |
+        endpoint: ${cfn:my-stack/DatabaseEndpoint}
+    when:
+      access: endpoint
+    then:
+      error:
+        type: ResolverError
+        message_contains: "not found"
+
+  - name: not_sensitive_by_default
+    given:
+      mocks:
+        cfn:
+          my-stack/VpcId: "vpc-12345"
+      config: |
+        vpc: ${cfn:my-stack/VpcId}
+    when:
+      dump:
+        format: yaml
+        redact: true
+    then:
+      output_contains: "vpc-12345"
+
+  - name: explicit_sensitive_override
+    given:
+      mocks:
+        cfn:
+          my-stack/SecretArn: "arn:aws:secretsmanager:..."
+      config: |
+        secret_arn: ${cfn:my-stack/SecretArn,sensitive=true}
+    when:
+      dump:
+        format: yaml
+        redact: true
+    then:
+      output_contains: "[REDACTED]"
+
+  - name: region_kwarg
+    given:
+      mocks:
+        cfn:
+          my-stack/BucketName:
+            value: "west-bucket"
+            region: us-west-2
+      config: |
+        bucket: ${cfn:my-stack/BucketName,region=us-west-2}
+    when:
+      access: bucket
+    then:
+      value: "west-bucket"
+
+  - name: profile_kwarg
+    given:
+      mocks:
+        cfn:
+          shared-infra/VpcId:
+            value: "vpc-shared"
+            profile: network-account
+      config: |
+        vpc: ${cfn:shared-infra/VpcId,profile=network-account}
+    when:
+      access: vpc
+    then:
+      value: "vpc-shared"
+
+  - name: stack_and_output_format
+    description: Argument must be stack-name/OutputKey format
+    given:
+      mocks:
+        cfn: {}
+      config: |
+        value: ${cfn:invalid-format}
+    when:
+      access: value
+    then:
+      error:
+        type: ResolverError
+        message_contains: "stack-name/OutputKey"

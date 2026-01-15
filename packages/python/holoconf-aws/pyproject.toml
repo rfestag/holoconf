@@ -5,11 +5,11 @@ build-backend = "maturin"
 [project]
 name = "holoconf-aws"
 version = "0.1.3"
-description = "AWS resolvers for holoconf (SSM Parameter Store)"
+description = "AWS resolvers for holoconf (SSM, CloudFormation, S3)"
 readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "MIT OR Apache-2.0"}
-keywords = ["config", "configuration", "aws", "ssm", "resolver"]
+keywords = ["config", "configuration", "aws", "ssm", "cloudformation", "s3", "resolver"]
 authors = [
     {name = "Ryan", email = "ryan@example.com"}
 ]
@@ -47,6 +47,8 @@ dev = [
 
 [project.entry-points."holoconf.resolvers"]
 ssm = "holoconf_aws:register_ssm"
+cfn = "holoconf_aws:register_cfn"
+s3 = "holoconf_aws:register_s3"
 
 [tool.maturin]
 # Path to the Rust crate

@@ -5,22 +5,29 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
-description = "AWS resolvers for holoconf (SSM Parameter Store)"
+description = "AWS resolvers for holoconf (SSM, CloudFormation, S3)"
 readme = "README.md"
 documentation = "https://rfestag.github.io/holoconf/"
-keywords = ["config", "configuration", "aws", "ssm", "resolver"]
+keywords = ["config", "configuration", "aws", "ssm", "cloudformation", "s3", "resolver"]
 categories = ["config", "development-tools"]
 
 [features]
-default = ["ssm"]
+default = ["ssm", "cfn", "s3"]
 ssm = ["aws-sdk-ssm", "aws-config"]
+cfn = ["aws-sdk-cloudformation", "aws-config"]
+s3 = ["aws-sdk-s3", "aws-config", "serde_yaml", "serde_json"]
 
 [dependencies]
 holoconf-core = { path = "../holoconf-core" }
 # AWS SDK dependencies
 aws-sdk-ssm = { version = "1", optional = true }
+aws-sdk-cloudformation = { version = "1", optional = true }
+aws-sdk-s3 = { version = "1", optional = true }
 aws-config = { version = "1", optional = true }
 tokio = { version = "1", features = ["rt-multi-thread"] }
+# For S3 content parsing
+serde_yaml = { version = "0.9", optional = true }
+serde_json = { version = "1", optional = true }
 
 [dev-dependencies]
 pretty_assertions.workspace = true
