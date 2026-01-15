@@ -5,9 +5,7 @@ This module provides type hints for the Rust PyO3 bindings.
 
 from typing import Any, Callable
 
-def register_resolver(
-    name: str, func: Callable[..., Any], force: bool = False
-) -> None:
+def register_resolver(name: str, func: Callable[..., Any], force: bool = False) -> None:
     """Register a resolver in the global registry.
 
     This makes the resolver available to all Config instances created after registration.
