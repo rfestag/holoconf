@@ -1,0 +1,179 @@
+suite: s3_resolver
+description: S3 object resolver behavior
+
+tests:
+  - name: reads_text_file
+    given:
+      mocks:
+        s3:
+          my-bucket/config.txt: "hello world"
+      config: |
+        content: ${s3:my-bucket/config.txt}
+    when:
+      access: content
+    then:
+      value: "hello world"
+
+  - name: reads_yaml_file_auto_parse
+    given:
+      mocks:
+        s3:
+          my-bucket/config.yaml:
+            content: "db.example.com"
+            content_type: text/plain
+      config: |
+        db_host: ${s3:my-bucket/config.yaml}
+    when:
+      access: db_host
+    then:
+      value: "db.example.com"
+
+  - name: reads_json_file_auto_parse
+    given:
+      mocks:
+        s3:
+          my-bucket/config.txt:
+            content: "enabled"
+            content_type: text/plain
+      config: |
+        feature: ${s3:my-bucket/config.txt}
+    when:
+      access: feature
+    then:
+      value: "enabled"
+
+  - name: uses_default_when_object_missing
+    given:
+      mocks:
+        s3: {}
+      config: |
+        config: ${s3:my-bucket/missing.yaml,default={}}
+    when:
+      access: config
+    then:
+      value: {}
+
+  - name: errors_when_object_missing_no_default
+    given:
+      mocks:
+        s3: {}
+      config: |
+        content: ${s3:my-bucket/missing.txt}
+    when:
+      access: content
+    then:
+      error:
+        type: ResolverError
+        message_contains: "not found"
+
+  - name: explicit_parse_text
+    given:
+      mocks:
+        s3:
+          my-bucket/data.json:
+            content: '{"key": "value"}'
+            content_type: application/json
+      config: |
+        raw: ${s3:my-bucket/data.json,parse=text}
+    when:
+      access: raw
+    then:
+      value: '{"key": "value"}'
+
+  - name: explicit_parse_yaml
+    given:
+      mocks:
+        s3:
+          my-bucket/data.txt:
+            content: "plain text content"
+            content_type: text/plain
+      config: |
+        parsed: ${s3:my-bucket/data.txt,parse=text}
+    when:
+      access: parsed
+    then:
+      value: "plain text content"
+
+  - name: explicit_parse_json
+    given:
+      mocks:
+        s3:
+          my-bucket/data.json:
+            content: "json-value"
+            content_type: text/plain
+      config: |
+        parsed: ${s3:my-bucket/data.json,parse=text}
+    when:
+      access: parsed
+    then:
+      value: "json-value"
+
+  - name: not_sensitive_by_default
+    given:
+      mocks:
+        s3:
+          my-bucket/config.txt: "public-value"
+      config: |
+        content: ${s3:my-bucket/config.txt}
+    when:
+      dump:
+        format: yaml
+        redact: true
+    then:
+      output_contains: "public-value"
+
+  - name: explicit_sensitive_override
+    given:
+      mocks:
+        s3:
+          my-bucket/secret.txt: "secret-value"
+      config: |
+        secret: ${s3:my-bucket/secret.txt,sensitive=true}
+    when:
+      dump:
+        format: yaml
+        redact: true
+    then:
+      output_contains: "[REDACTED]"
+
+  - name: region_kwarg
+    given:
+      mocks:
+        s3:
+          other-bucket/config.txt:
+            content: "west-config"
+            region: us-west-2
+      config: |
+        config: ${s3:other-bucket/config.txt,region=us-west-2}
+    when:
+      access: config
+    then:
+      value: "west-config"
+
+  - name: profile_kwarg
+    given:
+      mocks:
+        s3:
+          shared-bucket/common.txt:
+            content: "shared-value"
+            profile: shared-account
+      config: |
+        shared: ${s3:shared-bucket/common.txt,profile=shared-account}
+    when:
+      access: shared
+    then:
+      value: "shared-value"
+
+  - name: bucket_and_key_format
+    description: Argument must be bucket/key format
+    given:
+      mocks:
+        s3: {}
+      config: |
+        value: ${s3:invalid}
+    when:
+      access: value
+    then:
+      error:
+        type: ResolverError
+        message_contains: "bucket/key"

@@ -148,7 +148,83 @@ print(config.to_yaml(redact=True))
 #   secret: '[REDACTED]'
 ```
 
+## AWS Resolvers (`holoconf-aws`)
+
+The `holoconf-aws` package provides resolvers for AWS services. Install separately:
+
+```bash
+pip install holoconf-aws
+```
+
+Resolvers are automatically registered when holoconf is imported.
+
+### SSM Parameter Store (`ssm`)
+
+Fetch values from AWS Systems Manager Parameter Store.
+
+```yaml
+database:
+  host: ${ssm:/app/prod/db-host}
+  password: ${ssm:/app/prod/db-password}
+  # With region override
+  config: ${ssm:/app/config,region=us-west-2}
+  # With profile override
+  secret: ${ssm:/app/secret,profile=production}
+```
+
+| Parameter Type | Behavior |
+|---------------|----------|
+| String | Returned as-is |
+| SecureString | Automatically marked as sensitive |
+| StringList | Returned as a Python list |
+
+### CloudFormation Outputs (`cfn`)
+
+Fetch outputs from CloudFormation stacks.
+
+```yaml
+infrastructure:
+  endpoint: ${cfn:my-database-stack/DatabaseEndpoint}
+  bucket: ${cfn:my-storage-stack/BucketName}
+  # With region/profile
+  vpc_id: ${cfn:shared-infra/VpcId,region=us-west-2}
+```
+
+### S3 Objects (`s3`)
+
+Fetch and parse objects from S3.
+
+```yaml
+# Auto-parsed based on file extension
+shared_config: ${s3:my-bucket/configs/shared.yaml}
+feature_flags: ${s3:my-bucket/settings/flags.json}
+
+# Explicit parse mode
+raw_text: ${s3:my-bucket/docs/README.md,parse=text}
+binary_data: ${s3:my-bucket/certs/cert.pem,parse=binary}
+```
+
+#### S3 Parse Modes
+
+| Mode | Description |
+|------|-------------|
+| `auto` (default) | Detect by file extension or Content-Type |
+| `yaml` | Parse as YAML |
+| `json` | Parse as JSON |
+| `text` | Return raw text |
+| `binary` | Return raw bytes (`Value::Bytes`) |
+
+### AWS Authentication
+
+All AWS resolvers use the standard AWS credential chain:
+
+1. Environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`)
+2. Shared credential file (`~/.aws/credentials`)
+3. AWS config file (`~/.aws/config`)
+4. IAM role (EC2/ECS/Lambda)
+
 ## See Also
 
 - [FEAT-002 Core Resolvers](../specs/features/FEAT-002-core-resolvers.md) - Full specification
+- [FEAT-007 AWS Resolvers](../specs/features/FEAT-007-aws-resolvers.md) - AWS resolver specification
 - [Interpolation](interpolation.md) - Interpolation syntax details

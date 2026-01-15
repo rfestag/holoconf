@@ -30,12 +30,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `holoconf.discover_plugins()` - Load all plugins via entry points
   - Entry point group: `holoconf.resolvers`
 - **KeyError for default handling** - Custom resolvers raise `KeyError` to trigger framework default
-- **holoconf-aws package** - AWS SSM Parameter Store resolver
-  - Rust crate: `holoconf-aws` with SSM resolver
-  - Python package: `holoconf-aws` (pure Python with boto3)
-  - Automatic SecureString sensitivity detection
-  - StringList to array conversion
-  - Region/profile per-parameter overrides
+- **holoconf-aws package** - AWS resolvers for SSM, CloudFormation, and S3
+  - Rust crate: `holoconf-aws` with SSM, CFN, and S3 resolvers
+  - Python package: `holoconf-aws` with auto-discovery via entry points
+  - **SSM Parameter Store resolver (`ssm`)**: Fetch parameters from AWS Systems Manager
+    - Automatic SecureString sensitivity detection
+    - StringList to array conversion
+    - Region/profile per-parameter overrides
+  - **CloudFormation resolver (`cfn`)**: Fetch stack outputs
+    - Syntax: `${cfn:stack-name/OutputKey}`
+    - Region/profile overrides
+  - **S3 resolver (`s3`)**: Fetch and parse S3 objects
+    - Syntax: `${s3:bucket/key}`
+    - Parse modes: `auto`, `yaml`, `json`, `text`, `binary`
+    - Auto-detection from file extension and Content-Type
+    - Region/profile overrides
 
 #### Optional File Support
 - **Optional files in config merging** - Specify files that can be missing without causing errors

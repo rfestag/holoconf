@@ -112,6 +112,10 @@ class MockResolver:
         - Simple value: "key": "value"
         - Value with type: "key": {"value": "val", "type": "SecureString"}
         - Value with region: "key": {"value": "val", "region": "us-west-2"}
+
+    For S3:
+        - Simple value: "bucket/key": "content"
+        - With content_type: "bucket/key": {"content": "...", "content_type": "application/json"}
     """
 
     def __init__(self, name: str, mock_data: Dict[str, Any]):
@@ -120,11 +124,21 @@ class MockResolver:
 
     def __call__(self, path: str, **kwargs) -> Any:
         """Resolve a path from mock data."""
+        import yaml as yaml_parser
+        import json as json_parser
         from holoconf import ResolvedValue
 
         # SSM-specific validation: paths must start with /
         if self.name == "ssm" and not path.startswith("/"):
             raise ValueError(f"SSM parameter path must start with /: {path}")
+
+        # CFN-specific validation: must be stack/output format
+        if self.name == "cfn" and "/" not in path:
+            raise ValueError(f"CloudFormation argument must be in stack-name/OutputKey format: {path}")
+
+        # S3-specific validation: must be bucket/key format
+        if self.name == "s3" and "/" not in path:
+            raise ValueError(f"S3 argument must be in bucket/key format: {path}")
 
         # Check if this path exists in mock data
         if path not in self.mock_data:
@@ -136,10 +150,8 @@ class MockResolver:
         if isinstance(entry, str):
             return entry
 
-        # Handle dict entries with value/type/region/profile
+        # Handle dict entries with value/type/region/profile/content/content_type
         if isinstance(entry, dict):
-            value = entry.get("value")
-            entry_type = entry.get("type", "String")
             entry_region = entry.get("region")
             entry_profile = entry.get("profile")
 
@@ -148,6 +160,38 @@ class MockResolver:
                 raise KeyError(f"{self.name} parameter not found: {path} (region mismatch)")
             if entry_profile and kwargs.get("profile") != entry_profile:
                 raise KeyError(f"{self.name} parameter not found: {path} (profile mismatch)")
+
+            # S3-specific handling
+            if self.name == "s3":
+                content = entry.get("content", "")
+                content_type = entry.get("content_type", "")
+                parse_mode = kwargs.get("parse", "auto")
+
+                # Determine how to parse based on mode, extension, or content type
+                if parse_mode == "text":
+                    return content
+                elif parse_mode == "yaml":
+                    return yaml_parser.safe_load(content)
+                elif parse_mode == "json":
+                    return json_parser.loads(content)
+                elif parse_mode == "auto":
+                    # Auto-detect from extension
+                    if path.endswith(".yaml") or path.endswith(".yml"):
+                        return yaml_parser.safe_load(content)
+                    elif path.endswith(".json"):
+                        return json_parser.loads(content)
+                    # Auto-detect from content type
+                    elif "yaml" in content_type.lower():
+                        return yaml_parser.safe_load(content)
+                    elif "json" in content_type.lower():
+                        return json_parser.loads(content)
+                    # Default to text
+                    return content
+                return content
+
+            # SSM-specific handling
+            value = entry.get("value")
+            entry_type = entry.get("type", "String")
 
             # Handle StringList type
             if entry_type == "StringList":
