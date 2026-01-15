@@ -20,16 +20,16 @@ Exception Hierarchy:
     └── TypeCoercionError - Type conversion failures
 
 Plugin Discovery:
-    Resolver plugins can be discovered automatically via the "holoconf.resolvers"
-    entry point group. Plugins should define entry points that point to a
-    registration function that takes no arguments:
+    Resolver plugins are automatically discovered and registered when holoconf
+    is imported. Plugins use the "holoconf.resolvers" entry point group:
 
         [project.entry-points."holoconf.resolvers"]
         ssm = "holoconf_aws:register_ssm"
 
-    Call discover_plugins() to load all available resolver plugins.
+    The discover_plugins() function can be called manually to re-discover plugins.
 """
 
+import logging
 import sys
 
 from holoconf._holoconf import (
@@ -50,6 +50,8 @@ from holoconf._holoconf import (
     register_resolver,
 )
 
+_logger = logging.getLogger(__name__)
+
 
 def discover_plugins() -> list[str]:
     """Discover and load resolver plugins via entry points.
@@ -57,6 +59,9 @@ def discover_plugins() -> list[str]:
     This function discovers all installed packages that provide resolver plugins
     via the "holoconf.resolvers" entry point group, and calls their registration
     functions.
+
+    This is called automatically when holoconf is imported. You can call it
+    manually to re-discover plugins if new ones are installed at runtime.
 
     Returns:
         A list of successfully loaded plugin names.
@@ -91,13 +96,19 @@ def discover_plugins() -> list[str]:
             register_func = ep.load()
             register_func()
             loaded.append(ep.name)
-        except Exception:  # noqa: S110
-            # Silently ignore failed plugins
-            # Users can import them directly to see errors
-            pass
+        except Exception as e:
+            _logger.warning(
+                "Failed to load holoconf plugin '%s' from '%s': %s",
+                ep.name,
+                ep.value,
+                e,
+            )
 
     return loaded
 
+
+# Auto-discover plugins on import
+discover_plugins()
 
 __version__ = "0.1.0"
 __all__ = [

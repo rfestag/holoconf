@@ -13,13 +13,17 @@ database:
 
 ### Setup
 
-Import this package to automatically register AWS resolvers:
+AWS resolvers are automatically registered when holoconf is imported, via
+entry point discovery. Just install holoconf-aws and the `ssm` resolver
+becomes available:
 
 ```python
-import holoconf_aws  # Registers SSM resolver automatically
+import holoconf  # Auto-discovers and registers holoconf-aws
+
+config = holoconf.Config.loads("secret: ${ssm:/app/password}")
 ```
 
-Or register manually:
+You can also register manually if needed:
 
 ```python
 from holoconf_aws import register_ssm
@@ -30,6 +34,3 @@ register_ssm()
 from holoconf_aws._holoconf_aws import register_all, register_ssm
 
 __all__ = ["register_all", "register_ssm"]
-
-# Auto-register on import for convenience
-register_ssm()
