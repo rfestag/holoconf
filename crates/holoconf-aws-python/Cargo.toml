@@ -1,0 +1,17 @@
+[package]
+name = "holoconf-aws-python"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Python bindings for holoconf AWS resolvers"
+
+[lib]
+name = "_holoconf_aws"
+crate-type = ["cdylib"]
+
+[dependencies]
+holoconf-core.workspace = true
+holoconf-aws = { path = "../holoconf-aws" }
+pyo3 = { version = "0.24", features = ["extension-module"] }

@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools>=61.0"]
-build-backend = "setuptools.build_meta"
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
 
 [project]
 name = "holoconf-aws"
@@ -23,11 +23,12 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Rust",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
     "holoconf>=0.1.3",
-    "boto3>=1.26",
 ]
 
 [project.urls]
@@ -38,17 +39,22 @@ Changelog = "https://github.com/rfestag/holoconf/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 dev = [
+    "maturin>=1.0,<2.0",
     "pytest>=7.0",
     "pytest-cov>=4.0",
-    "moto[ssm]>=4.0",  # For mocking AWS services
     "ruff>=0.8",
 ]
 
 [project.entry-points."holoconf.resolvers"]
 ssm = "holoconf_aws:register_ssm"
 
-[tool.setuptools.packages.find]
-where = ["src"]
+[tool.maturin]
+# Path to the Rust crate
+manifest-path = "../../../crates/holoconf-aws-python/Cargo.toml"
+# Python module name
+module-name = "holoconf_aws._holoconf_aws"
+# Build for the current Python only
+python-source = "src"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

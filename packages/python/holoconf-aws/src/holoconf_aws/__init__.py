@@ -27,9 +27,9 @@ register_ssm()
 ```
 """
 
-from holoconf_aws.ssm import SsmResolver, register_ssm
+from holoconf_aws._holoconf_aws import register_all, register_ssm
 
-__all__ = ["SsmResolver", "register_ssm"]
+__all__ = ["register_all", "register_ssm"]
 
 # Auto-register on import for convenience
 register_ssm()
