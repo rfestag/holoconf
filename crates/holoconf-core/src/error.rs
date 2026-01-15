@@ -75,6 +75,8 @@ pub enum ResolverErrorKind {
     UnknownResolver { name: String },
     /// Resolver returned an error
     Custom { resolver: String, message: String },
+    /// Resolver already registered
+    AlreadyRegistered { name: String },
 }
 
 impl Error {
@@ -182,6 +184,21 @@ impl Error {
             path: config_path,
             source_location: None,
             help: Some(format!("Register the '{}' resolver or check for typos", n)),
+            cause: None,
+        }
+    }
+
+    /// Create a resolver already registered error
+    pub fn resolver_already_registered(name: impl Into<String>) -> Self {
+        let n = name.into();
+        Self {
+            kind: ErrorKind::Resolver(ResolverErrorKind::AlreadyRegistered { name: n.clone() }),
+            path: None,
+            source_location: None,
+            help: Some(format!(
+                "Use register_with_force(..., force=true) to override the '{}' resolver",
+                n
+            )),
             cause: None,
         }
     }
@@ -299,6 +316,9 @@ impl fmt::Display for Error {
                 }
                 ResolverErrorKind::Custom { resolver, message } => {
                     write!(f, "Resolver '{}' error: {}", resolver, message)?
+                }
+                ResolverErrorKind::AlreadyRegistered { name } => {
+                    write!(f, "Resolver '{}' is already registered", name)?
                 }
             },
             ErrorKind::Validation => write!(f, "Validation error")?,

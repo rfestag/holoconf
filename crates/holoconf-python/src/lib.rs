@@ -218,7 +218,18 @@ impl Resolver for PyResolver {
                 .callable
                 .call(py, py_args, Some(&py_kwargs))
                 .map_err(|e| {
-                    CoreError::resolver_custom(&self.name, format!("Resolver error: {}", e))
+                    // Check if this is a KeyError (indicates "not found" condition)
+                    // This enables framework-level default handling
+                    if e.is_instance_of::<pyo3::exceptions::PyKeyError>(py) {
+                        // Extract the resource name from the first arg if available
+                        let resource = args
+                            .first()
+                            .cloned()
+                            .unwrap_or_else(|| "unknown".to_string());
+                        CoreError::not_found(resource, None)
+                    } else {
+                        CoreError::resolver_custom(&self.name, format!("Resolver error: {}", e))
+                    }
                 })?;
 
             // Convert result to CoreResolvedValue
@@ -822,6 +833,33 @@ impl PySchema {
     }
 }
 
+/// Register a resolver in the global registry
+///
+/// This makes the resolver available to all Config instances created after registration.
+/// Use this for extension packages that provide additional resolvers.
+///
+/// Args:
+///     name: The resolver name (used as ${name:...} in config)
+///     func: A callable that takes (*args, **kwargs) and returns a value
+///     force: If True, overwrite any existing resolver with the same name.
+///            If False (default), raise an error if the name is already registered.
+///
+/// Example:
+///     >>> import holoconf
+///     >>>
+///     >>> def ssm_resolver(path, region=None, profile=None):
+///     ...     # Implementation here
+///     ...     return value
+///     >>>
+///     >>> holoconf.register_resolver("ssm", ssm_resolver)
+///     >>> # Now any Config can use ${ssm:/my/param}
+#[pyfunction]
+#[pyo3(signature = (name, func, force=false))]
+fn register_resolver(name: String, func: PyObject, force: bool) -> PyResult<()> {
+    let resolver = Arc::new(PyResolver::new(name, func));
+    holoconf_core::resolver::register_global(resolver, force).map_err(to_py_err)
+}
+
 /// The holoconf Python module
 #[pymodule]
 #[pyo3(name = "_holoconf")]
@@ -831,6 +869,9 @@ fn holoconf(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PySchema>()?;
     m.add_class::<PyResolvedValue>()?;
     m.add_class::<PyFileSpec>()?;
+
+    // Add module-level functions
+    m.add_function(wrap_pyfunction!(register_resolver, m)?)?;
 
     // Add exception hierarchy
     m.add("HoloconfError", m.py().get_type::<HoloconfError>())?;

@@ -1,0 +1,86 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "holoconf-aws"
+version = "0.1.3"
+description = "AWS resolvers for holoconf (SSM Parameter Store)"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT OR Apache-2.0"}
+keywords = ["config", "configuration", "aws", "ssm", "resolver"]
+authors = [
+    {name = "Ryan", email = "ryan@example.com"}
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Rust",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "holoconf>=0.1.3",
+]
+
+[project.urls]
+Homepage = "https://rfestag.github.io/holoconf/"
+Documentation = "https://rfestag.github.io/holoconf/"
+Repository = "https://github.com/rfestag/holoconf"
+Changelog = "https://github.com/rfestag/holoconf/blob/main/CHANGELOG.md"
+
+[project.optional-dependencies]
+dev = [
+    "maturin>=1.0,<2.0",
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "ruff>=0.8",
+]
+
+[project.entry-points."holoconf.resolvers"]
+ssm = "holoconf_aws:register_ssm"
+
+[tool.maturin]
+# Path to the Rust crate
+manifest-path = "../../../crates/holoconf-aws-python/Cargo.toml"
+# Python module name
+module-name = "holoconf_aws._holoconf_aws"
+# Build for the current Python only
+python-source = "src"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+
+[tool.ruff]
+target-version = "py39"
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # Pyflakes
+    "I",      # isort
+    "B",      # flake8-bugbear
+    "C4",     # flake8-comprehensions
+    "UP",     # pyupgrade
+    "S",      # flake8-bandit (security)
+    "SIM",    # flake8-simplify
+    "RUF",    # Ruff-specific rules
+]
+ignore = [
+    "S101",   # Allow assert in tests
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101"]  # Allow assert in tests

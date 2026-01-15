@@ -22,6 +22,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+#### Resolver Extension Packages
+- **Global resolver registry** - Register resolvers once, use everywhere
+  - `holoconf.register_resolver(name, func, force=False)` - Python API
+  - `register_global(resolver, force)` - Rust API
+- **Plugin discovery** - Automatic discovery of installed resolver plugins
+  - `holoconf.discover_plugins()` - Load all plugins via entry points
+  - Entry point group: `holoconf.resolvers`
+- **KeyError for default handling** - Custom resolvers raise `KeyError` to trigger framework default
+- **holoconf-aws package** - AWS SSM Parameter Store resolver
+  - Rust crate: `holoconf-aws` with SSM resolver
+  - Python package: `holoconf-aws` (pure Python with boto3)
+  - Automatic SecureString sensitivity detection
+  - StringList to array conversion
+  - Region/profile per-parameter overrides
+
 #### Optional File Support
 - **Optional files in config merging** - Specify files that can be missing without causing errors
   - `FileSpec.required(path)` - File must exist (error if missing)

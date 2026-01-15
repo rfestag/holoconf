@@ -4,6 +4,8 @@ members = [
     "crates/holoconf-core",
     "crates/holoconf-python",
     "crates/holoconf-cli",
+    "crates/holoconf-aws",
+    "crates/holoconf-aws-python",
 ]
 
 [workspace.package]
