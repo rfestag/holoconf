@@ -15,11 +15,9 @@ The `ssm` resolver fetches values from AWS Systems Manager Parameter Store.
 ### Quick Start
 
 ```python
-import holoconf_aws  # Auto-registers the SSM resolver
+import holoconf  # holoconf-aws is auto-discovered if installed
 
-from holoconf import Config
-
-config = Config.loads("""
+config = holoconf.Config.loads("""
 database:
     host: ${ssm:/app/prod/db-host}
     password: ${ssm:/app/prod/db-password}
@@ -61,7 +59,7 @@ settings:
 
 ### AWS Authentication
 
-The SSM resolver uses boto3's default credential chain:
+The SSM resolver uses the standard AWS credential chain (via the AWS SDK for Rust):
 
 1. Environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`)
 2. Shared credential file (`~/.aws/credentials`)
@@ -70,8 +68,7 @@ The SSM resolver uses boto3's default credential chain:
 
 ### Manual Registration
 
-The resolver is automatically registered when you import `holoconf_aws`.
-For manual control:
+The SSM resolver is automatically registered when you import `holoconf` (via entry point discovery). For manual control:
 
 ```python
 from holoconf_aws import register_ssm

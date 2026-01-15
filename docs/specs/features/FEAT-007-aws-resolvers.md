@@ -62,25 +62,36 @@ cargo add holoconf-core holoconf-aws
 
 ## Registration
 
-AWS resolvers must be explicitly registered before use:
+### Python (Auto-Discovery)
+
+AWS resolvers are automatically discovered and registered when holoconf is imported. No explicit import or registration is needed:
 
 ```python
-import holoconf
-import holoconf_aws
+import holoconf  # Auto-discovers holoconf-aws if installed
 
-# Register all AWS resolvers
-holoconf_aws.register()
-
-# Now AWS resolvers are available
-config = holoconf.Config.from_yaml("config.yaml")
+# SSM resolver is already available
+config = holoconf.Config.loads("password: ${ssm:/app/secret}")
 ```
+
+For manual registration (e.g., in tests):
+
+```python
+from holoconf_aws import register_ssm
+
+register_ssm()  # Register SSM resolver
+register_ssm(force=True)  # Force re-registration
+```
+
+### Rust
+
+Rust requires explicit registration:
 
 ```rust
 use holoconf_core::Config;
 use holoconf_aws;
 
 // Register AWS resolvers
-holoconf_aws::register();
+holoconf_aws::register_all();
 
 let config = Config::from_yaml_file("config.yaml")?;
 ```
@@ -329,6 +340,9 @@ The default client (no region/profile overrides) uses key `(None, None)` and res
 
 ## Configuration API
 
+> **Note:** The `configure()` and `reset()` APIs described below are planned for future releases.
+> Currently, AWS configuration is handled via standard AWS SDK environment variables and config files.
+
 For testing and advanced use cases, the global AWS configuration can be overridden:
 
 ```python
@@ -356,54 +370,55 @@ holoconf_aws.configure(
 holoconf_aws.reset()
 ```
 
-## Testing with Moto
+## Testing with Mock Resolvers
 
-Since holoconf-aws uses the Rust AWS SDK internally, Python's moto decorators (`@mock_ssm`) won't work. Instead, use moto's server mode:
+The acceptance test framework supports mock resolvers for testing AWS resolver behavior without actual AWS credentials. Tests define mock responses in their YAML spec:
 
-```python
-# conftest.py
-import pytest
-from moto.server import ThreadedMotoServer
-import boto3
-import holoconf
-import holoconf_aws
-
-@pytest.fixture(scope="session")
-def moto_server():
-    """Start moto server for the test session."""
-    server = ThreadedMotoServer(port=5555)
-    server.start()
-    yield "http://localhost:5555"
-    server.stop()
-
-@pytest.fixture
-def aws_config(moto_server):
-    """Configure holoconf-aws to use moto and set up test data."""
-    # Point holoconf-aws at moto
-    holoconf_aws.configure(endpoint_url=moto_server)
-
-    # Set up test data using boto3 (also pointed at moto)
-    ssm = boto3.client("ssm", endpoint_url=moto_server, region_name="us-east-1")
-    ssm.put_parameter(Name="/app/db-host", Value="test-db.local", Type="String")
-    ssm.put_parameter(Name="/app/db-password", Value="secret123", Type="SecureString")
-
-    yield
-
-    # Reset holoconf-aws (clears client cache)
-    holoconf_aws.reset()
-
-def test_ssm_resolver(aws_config):
-    """Test that SSM resolver fetches values from moto."""
-    holoconf_aws.register()
-
-    config = holoconf.Config.from_yaml_str("""
+```yaml
+name: resolves_ssm_parameter
+given:
+  mocks:
+    ssm:
+      /app/db-host:
+        value: "test-db.local"
+        type: String
+      /app/db-password:
+        value: "secret123"
+        type: SecureString
+  config: |
     database:
       host: ${ssm:/app/db-host}
       password: ${ssm:/app/db-password}
-    """)
+when:
+  access: database.host
+then:
+  value: "test-db.local"
+```
 
-    assert config.get("database.host") == "test-db.local"
-    assert config.get("database.password") == "secret123"
+For Python unit tests, you can register custom resolver functions:
+
+```python
+import holoconf
+
+def mock_ssm(path, **kwargs):
+    mock_data = {
+        "/app/db-host": "test-db.local",
+        "/app/db-password": holoconf.ResolvedValue("secret123", sensitive=True),
+    }
+    if path in mock_data:
+        return mock_data[path]
+    raise KeyError(f"Parameter not found: {path}")
+
+# Override the SSM resolver with mock
+holoconf.register_resolver("ssm", mock_ssm, force=True)
+
+config = holoconf.Config.loads("""
+database:
+  host: ${ssm:/app/db-host}
+  password: ${ssm:/app/db-password}
+""")
+
+assert config.get("database.host") == "test-db.local"
 ```
 
 ## Error Handling
@@ -467,11 +482,21 @@ tokio = { version = "1", features = ["rt-multi-thread"] }
 
 ### Python Bindings
 
-The Python package wraps the Rust crate via PyO3:
+The Python package wraps the Rust crate via PyO3. The package structure:
 
-```python
-# holoconf_aws/__init__.py
-from ._holoconf_aws import register, configure, reset
-
-__all__ = ["register", "configure", "reset"]
 ```
+packages/python/holoconf-aws/
+├── pyproject.toml              # maturin build, entry points
+├── src/holoconf_aws/
+│   ├── __init__.py             # Re-exports from Rust bindings
+│   └── _holoconf_aws.pyi       # Type stubs
+```
+
+The entry point in `pyproject.toml` enables auto-discovery:
+
+```toml
+[project.entry-points."holoconf.resolvers"]
+ssm = "holoconf_aws:register_ssm"
+```
+
+When `holoconf` is imported, it automatically discovers and calls `register_ssm()` via this entry point.

@@ -60,40 +60,60 @@ holoconf-aws/
 
 #### Python Extension Packages
 
-Python extension packages (e.g., `holoconf-aws`) should:
+Python extension packages (e.g., `holoconf-aws`) can be implemented in two ways:
 
-1. Depend on `holoconf` for the `register_resolver` function
-2. Implement resolver callables (functions or classes with `__call__`)
-3. Auto-register on import for convenience
-4. Define entry points for plugin discovery
+**Option A: PyO3 bindings to Rust (recommended)**
 
-Example structure:
+Use PyO3 to expose Rust resolvers to Python. This ensures consistent behavior across both languages and avoids code duplication.
+
+```
+holoconf-aws/
+├── pyproject.toml          # maturin build, entry points
+├── src/holoconf_aws/
+│   ├── __init__.py         # Re-exports from Rust bindings
+│   └── _holoconf_aws.pyi   # Type stubs
+```
+
+The Rust implementation lives in a separate PyO3 crate (e.g., `holoconf-aws-python`) that depends on the Rust resolver crate.
+
+**Option B: Pure Python**
+
+For simpler resolvers or when Rust isn't needed:
+
 ```
 holoconf-aws/
 ├── pyproject.toml
 ├── src/holoconf_aws/
-│   ├── __init__.py     # Auto-registration on import
-│   └── ssm.py          # SsmResolver class
+│   ├── __init__.py     # Registration functions
+│   └── resolver.py     # Resolver implementation
 ```
 
 ### Plugin Discovery
 
-Python packages can declare entry points in `pyproject.toml`:
+Python packages declare entry points in `pyproject.toml`:
 
 ```toml
 [project.entry-points."holoconf.resolvers"]
 ssm = "holoconf_aws:register_ssm"
 ```
 
-Users can discover and load all plugins with:
+**Plugins are automatically discovered and registered when holoconf is imported.** No explicit import or registration is needed:
 
 ```python
-import holoconf
+import holoconf  # Auto-discovers all installed plugins
 
-# Discover and load all installed resolver plugins
+# SSM resolver is already available (if holoconf-aws is installed)
+config = holoconf.Config.loads("secret: ${ssm:/app/password}")
+```
+
+The `discover_plugins()` function is called automatically at import time. It can also be called manually to re-discover plugins if new ones are installed at runtime:
+
+```python
 loaded = holoconf.discover_plugins()
 print(f"Loaded plugins: {loaded}")  # ['ssm']
 ```
+
+If a plugin fails to load, a warning is logged (but does not raise an exception).
 
 ### Error Handling for Custom Resolvers
 
@@ -132,4 +152,4 @@ Resolvers should NOT handle these kwargs themselves.
 
 - Tests can use `register_global(resolver, force=true)` to override
 - Clear documentation of error handling conventions
-- Python packages can use boto3 directly (simpler than Rust async)
+- PyO3 bindings allow Python to use the same Rust implementation
