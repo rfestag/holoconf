@@ -69,6 +69,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   local = Config.optional("local.yaml")  # Empty if missing
   config.merge(local)
   ```
+- **CLI `--ignore-missing` flag** - Skip missing files when loading multiple config files
+  - `holoconf dump --ignore-missing base.yaml local.yaml` - Works even if `local.yaml` doesn't exist
+  - At least one file must load successfully; fails if all files are missing
+  - Available on: `dump`, `get`, `validate`, `check` commands
 
 #### Source Tracking
 - **File-level source tracking** for merged configurations - track which file each value came from

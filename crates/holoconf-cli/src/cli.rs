@@ -43,6 +43,10 @@ enum Commands {
         /// Only output errors (quiet mode)
         #[arg(short, long)]
         quiet: bool,
+
+        /// Ignore missing files (skip them silently)
+        #[arg(long)]
+        ignore_missing: bool,
     },
 
     /// Export configuration in various formats
@@ -70,6 +74,10 @@ enum Commands {
         /// Show source files instead of values
         #[arg(long)]
         sources: bool,
+
+        /// Ignore missing files (skip them silently)
+        #[arg(long)]
+        ignore_missing: bool,
     },
 
     /// Get a specific value from the configuration
@@ -92,6 +100,10 @@ enum Commands {
         /// Default value if key not found
         #[arg(short, long)]
         default: Option<String>,
+
+        /// Ignore missing files (skip them silently)
+        #[arg(long)]
+        ignore_missing: bool,
     },
 
     /// Quick syntax check without full validation
@@ -99,6 +111,10 @@ enum Commands {
         /// Configuration file(s) to check
         #[arg(required = true)]
         files: Vec<PathBuf>,
+
+        /// Ignore missing files (skip them silently)
+        #[arg(long)]
+        ignore_missing: bool,
     },
 
     /// Schema-related utilities
@@ -152,7 +168,8 @@ pub fn run() -> ExitCode {
             resolve,
             format,
             quiet,
-        } => cmd_validate(files, schema, resolve, &format, quiet),
+            ignore_missing,
+        } => cmd_validate(files, schema, resolve, &format, quiet, ignore_missing),
 
         Commands::Dump {
             files,
@@ -161,7 +178,16 @@ pub fn run() -> ExitCode {
             format,
             output,
             sources,
-        } => cmd_dump(files, resolve, no_redact, &format, output, sources),
+            ignore_missing,
+        } => cmd_dump(
+            files,
+            resolve,
+            no_redact,
+            &format,
+            output,
+            sources,
+            ignore_missing,
+        ),
 
         Commands::Get {
             files,
@@ -169,9 +195,13 @@ pub fn run() -> ExitCode {
             resolve,
             format,
             default,
-        } => cmd_get(files, &path, resolve, &format, default),
+            ignore_missing,
+        } => cmd_get(files, &path, resolve, &format, default, ignore_missing),
 
-        Commands::Check { files } => cmd_check(files),
+        Commands::Check {
+            files,
+            ignore_missing,
+        } => cmd_check(files, ignore_missing),
 
         Commands::Schema { command } => match command {
             SchemaCommands::Validate { file } => cmd_schema_validate(file),
@@ -181,23 +211,35 @@ pub fn run() -> ExitCode {
     }
 }
 
-fn load_config(files: &[PathBuf]) -> Result<Config, String> {
+fn load_config(files: &[PathBuf], ignore_missing: bool) -> Result<Config, String> {
     if files.is_empty() {
         return Err("No configuration files specified".to_string());
     }
 
-    // Load first file
-    let mut config = Config::load(&files[0])
-        .map_err(|e| format!("Failed to load {}: {}", files[0].display(), e))?;
+    let mut config: Option<Config> = None;
 
-    // Merge subsequent files
-    for file in &files[1..] {
-        let next_config =
-            Config::load(file).map_err(|e| format!("Failed to load {}: {}", file.display(), e))?;
-        config.merge(next_config);
+    for file in files {
+        let result = if ignore_missing {
+            // Use optional() which returns empty config for missing files
+            Config::optional(file)
+        } else {
+            Config::load(file)
+        };
+
+        match result {
+            Ok(c) => match &mut config {
+                None => config = Some(c),
+                Some(base) => base.merge(c),
+            },
+            Err(e) => {
+                return Err(format!("Failed to load {}: {}", file.display(), e));
+            }
+        }
     }
 
-    Ok(config)
+    // With ignore_missing, Config::optional returns Ok for missing files,
+    // so we always have a config (possibly empty, which is valid).
+    config.ok_or_else(|| "No configuration files specified".to_string())
 }
 
 fn load_schema(path: &PathBuf) -> Result<Schema, String> {
@@ -210,6 +252,7 @@ fn cmd_validate(
     resolve: bool,
     format: &str,
     quiet: bool,
+    ignore_missing: bool,
 ) -> ExitCode {
     // Load schema
     let schema = match load_schema(&schema_path) {
@@ -221,7 +264,7 @@ fn cmd_validate(
     };
 
     // Load config
-    let config = match load_config(&files) {
+    let config = match load_config(&files, ignore_missing) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("{}", e.red());
@@ -264,6 +307,7 @@ fn cmd_validate(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn cmd_dump(
     files: Vec<PathBuf>,
     resolve: bool,
@@ -271,9 +315,10 @@ fn cmd_dump(
     format: &str,
     output: Option<PathBuf>,
     sources: bool,
+    ignore_missing: bool,
 ) -> ExitCode {
     // Load config
-    let config = match load_config(&files) {
+    let config = match load_config(&files, ignore_missing) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("{}", e.red());
@@ -353,9 +398,10 @@ fn cmd_get(
     resolve: bool,
     format: &str,
     default: Option<String>,
+    ignore_missing: bool,
 ) -> ExitCode {
     // Load config
-    let config = match load_config(&files) {
+    let config = match load_config(&files, ignore_missing) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("{}", e.red());
@@ -417,18 +463,24 @@ fn cmd_get(
     }
 }
 
-fn cmd_check(files: Vec<PathBuf>) -> ExitCode {
+fn cmd_check(files: Vec<PathBuf>, ignore_missing: bool) -> ExitCode {
     let mut all_valid = true;
+    let mut any_found = false;
 
-    for file in files {
-        let content = match std::fs::read_to_string(&file) {
+    for file in &files {
+        let content = match std::fs::read_to_string(file) {
             Ok(c) => c,
             Err(e) => {
+                if ignore_missing && e.kind() == std::io::ErrorKind::NotFound {
+                    // Skip missing files silently when --ignore-missing is set
+                    continue;
+                }
                 eprintln!("{} {}: {}", "✗".red(), file.display(), e);
                 all_valid = false;
                 continue;
             }
         };
+        any_found = true;
 
         // Determine format and try to parse
         let ext = file.extension().and_then(|e| e.to_str()).unwrap_or("");
@@ -456,6 +508,14 @@ fn cmd_check(files: Vec<PathBuf>) -> ExitCode {
                 all_valid = false;
             }
         }
+    }
+
+    if !any_found && ignore_missing {
+        eprintln!(
+            "{}",
+            "No configuration files could be loaded (all files missing)".red()
+        );
+        return ExitCode::from(2);
     }
 
     if all_valid {
