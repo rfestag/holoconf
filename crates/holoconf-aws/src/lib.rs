@@ -28,6 +28,8 @@
 //! config: ${s3:my-bucket/configs/app.yaml}
 //! ```
 
+mod client_cache;
+
 #[cfg(feature = "ssm")]
 mod ssm;
 

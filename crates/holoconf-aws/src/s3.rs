@@ -5,12 +5,13 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use aws_config::BehaviorVersion;
 use aws_sdk_s3::primitives::ByteStream;
 use holoconf_core::error::{Error, Result};
 use holoconf_core::resolver::{register_global, ResolvedValue, Resolver, ResolverContext};
 use holoconf_core::Value;
 use tokio::runtime::Runtime;
+
+use crate::client_cache;
 
 /// S3 object resolver.
 ///
@@ -58,19 +59,8 @@ impl S3Resolver {
         region: Option<&str>,
         profile: Option<&str>,
     ) -> Result<(Vec<u8>, Option<String>)> {
-        // Build AWS config
-        let mut config_loader = aws_config::defaults(BehaviorVersion::latest());
-
-        if let Some(region) = region {
-            config_loader = config_loader.region(aws_config::Region::new(region.to_string()));
-        }
-
-        if let Some(profile) = profile {
-            config_loader = config_loader.profile_name(profile);
-        }
-
-        let config = config_loader.load().await;
-        let client = aws_sdk_s3::Client::new(&config);
+        // Get cached client (creates one if needed)
+        let client: aws_sdk_s3::Client = client_cache::get_client(region, profile).await;
 
         // Get the object
         let response = client

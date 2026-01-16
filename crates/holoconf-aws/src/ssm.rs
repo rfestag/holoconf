@@ -5,12 +5,13 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use aws_config::BehaviorVersion;
 use aws_sdk_ssm::types::ParameterType;
 use holoconf_core::error::{Error, Result};
 use holoconf_core::resolver::{register_global, ResolvedValue, Resolver, ResolverContext};
 use holoconf_core::Value;
 use tokio::runtime::Runtime;
+
+use crate::client_cache;
 
 /// SSM Parameter Store resolver.
 ///
@@ -54,19 +55,8 @@ impl SsmResolver {
         region: Option<&str>,
         profile: Option<&str>,
     ) -> Result<(String, ParameterType)> {
-        // Build AWS config
-        let mut config_loader = aws_config::defaults(BehaviorVersion::latest());
-
-        if let Some(region) = region {
-            config_loader = config_loader.region(aws_config::Region::new(region.to_string()));
-        }
-
-        if let Some(profile) = profile {
-            config_loader = config_loader.profile_name(profile);
-        }
-
-        let config = config_loader.load().await;
-        let client = aws_sdk_ssm::Client::new(&config);
+        // Get cached client (creates one if needed)
+        let client: aws_sdk_ssm::Client = client_cache::get_client(region, profile).await;
 
         // Get parameter with decryption
         let response = client
