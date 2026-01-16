@@ -212,10 +212,9 @@ class RustDriver(Driver):
 
     def __init__(self):
         try:
-            from holoconf import Config, Schema, FileSpec, register_resolver, ResolvedValue
+            from holoconf import Config, Schema, register_resolver, ResolvedValue
             self.Config = Config
             self.Schema = Schema
-            self.FileSpec = FileSpec
             self.register_resolver = register_resolver
             self.ResolvedValue = ResolvedValue
         except ImportError:
@@ -261,23 +260,45 @@ class RustDriver(Driver):
         return self.Config.loads(yaml_content, base_path=base_path)
 
     def load_merged(self, file_paths: List[str]) -> Any:
-        return self.Config.load_merged(file_paths)
+        """Load and merge multiple required files."""
+        config = None
+        for path in file_paths:
+            if config is None:
+                config = self.Config.load(path)
+            else:
+                config.merge(self.Config.load(path))
+        return config
 
     def load_merged_with_specs(self, specs: List[Dict[str, Any]]) -> Any:
         """Load merged files with optional file support.
 
         Each spec is a dict with 'path' and optional 'optional' keys.
+        Uses Config.load() for required files and Config.optional() for optional files.
         """
-        file_specs = []
+        config = None
         for spec in specs:
             if isinstance(spec, str):
                 # Backwards compatible: plain string is required file
-                file_specs.append(self.FileSpec.required(spec))
-            elif spec.get("optional", False):
-                file_specs.append(self.FileSpec.optional(spec["path"]))
+                path = spec
+                is_optional = False
             else:
-                file_specs.append(self.FileSpec.required(spec["path"]))
-        return self.Config.load_merged_with_specs(file_specs)
+                path = spec["path"]
+                is_optional = spec.get("optional", False)
+
+            if is_optional:
+                file_config = self.Config.optional(path)
+            else:
+                file_config = self.Config.load(path)
+
+            if config is None:
+                config = file_config
+            else:
+                config.merge(file_config)
+
+        # Return empty config if no files were processed
+        if config is None:
+            config = self.Config.loads("{}")
+        return config
 
     def load_schema(self, yaml_content: str) -> Any:
         return self.Schema.from_yaml(yaml_content)
@@ -313,10 +334,9 @@ class PythonDriver(Driver):
 
     def __init__(self):
         try:
-            from holoconf import Config, Schema, FileSpec, register_resolver, ResolvedValue
+            from holoconf import Config, Schema, register_resolver, ResolvedValue
             self.Config = Config
             self.Schema = Schema
-            self.FileSpec = FileSpec
             self.register_resolver = register_resolver
             self.ResolvedValue = ResolvedValue
         except ImportError:
@@ -347,23 +367,45 @@ class PythonDriver(Driver):
         return result.returncode, result.stdout, result.stderr
 
     def load_merged(self, file_paths: List[str]) -> Any:
-        return self.Config.load_merged(file_paths)
+        """Load and merge multiple required files."""
+        config = None
+        for path in file_paths:
+            if config is None:
+                config = self.Config.load(path)
+            else:
+                config.merge(self.Config.load(path))
+        return config
 
     def load_merged_with_specs(self, specs: List[Dict[str, Any]]) -> Any:
         """Load merged files with optional file support.
 
         Each spec is a dict with 'path' and optional 'optional' keys.
+        Uses Config.load() for required files and Config.optional() for optional files.
         """
-        file_specs = []
+        config = None
         for spec in specs:
             if isinstance(spec, str):
                 # Backwards compatible: plain string is required file
-                file_specs.append(self.FileSpec.required(spec))
-            elif spec.get("optional", False):
-                file_specs.append(self.FileSpec.optional(spec["path"]))
+                path = spec
+                is_optional = False
             else:
-                file_specs.append(self.FileSpec.required(spec["path"]))
-        return self.Config.load_merged_with_specs(file_specs)
+                path = spec["path"]
+                is_optional = spec.get("optional", False)
+
+            if is_optional:
+                file_config = self.Config.optional(path)
+            else:
+                file_config = self.Config.load(path)
+
+            if config is None:
+                config = file_config
+            else:
+                config.merge(file_config)
+
+        # Return empty config if no files were processed
+        if config is None:
+            config = self.Config.loads("{}")
+        return config
 
     def load_config(self, yaml_content: str, base_path: Optional[str] = None) -> Any:
         return self.Config.loads(yaml_content, base_path=base_path)

@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+#### Simplified Config Loading API (Breaking Change)
+- **Removed `FileSpec` from public API** - `FileSpec` was a Rust-ism that leaked to Python; the concept is now internal
+  - Old: `FileSpec.required("path")`, `FileSpec.optional("path")`
+  - New: `Config.load("path")` for required, `Config.optional("path")` for optional
+- **Removed `load_merged()` and `load_merged_with_specs()`** - Use explicit load + merge pattern instead
+  - Old: `Config.load_merged(["base.yaml", "override.yaml"])`
+  - New: `config = Config.load("base.yaml"); config.merge(Config.load("override.yaml"))`
+- **Added `Config.optional(path)`** - Returns empty Config if file doesn't exist (no error)
+- **Added `Config.required(path)`** - Alias for `Config.load()` for symmetry with `optional()`
+- **Updated `Config.load(path)`** - Now returns a proper "file not found" error for missing files
+
 #### Resolver Syntax (Breaking Change)
 - **Keyword-only syntax for default and sensitive options** - Resolver options now use keyword argument syntax exclusively
   - Old syntax: `${env:VAR,fallback_value}` (positional default)
@@ -47,12 +58,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - Region/profile overrides
 
 #### Optional File Support
-- **Optional files in config merging** - Specify files that can be missing without causing errors
-  - `FileSpec.required(path)` - File must exist (error if missing)
-  - `FileSpec.optional(path)` - File is silently skipped if missing
-  - `Config.load_merged_with_specs([...])` - Load with mixed required/optional files
-  - `Config.optional(path)` - Convenience method to merge a single optional file
+- **Optional files in config loading** - Load files that can be missing without causing errors
+  - `Config.load(path)` / `Config.required(path)` - File must exist (error if missing)
+  - `Config.optional(path)` - Returns empty Config if file doesn't exist
+  - Use `config.merge(other)` to combine multiple configs
 - Common use case: local developer overrides that aren't committed to version control
+- Example pattern:
+  ```python
+  config = Config.load("base.yaml")
+  local = Config.optional("local.yaml")  # Empty if missing
+  config.merge(local)
+  ```
+- **CLI `--ignore-missing` flag** - Skip missing files when loading multiple config files
+  - `holoconf dump --ignore-missing base.yaml local.yaml` - Works even if `local.yaml` doesn't exist
+  - At least one file must load successfully; fails if all files are missing
+  - Available on: `dump`, `get`, `validate`, `check` commands
 
 #### Source Tracking
 - **File-level source tracking** for merged configurations - track which file each value came from
