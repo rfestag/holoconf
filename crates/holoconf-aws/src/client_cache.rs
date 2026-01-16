@@ -91,9 +91,7 @@ pub async fn get_client<C: AwsClient>(region: Option<&str>, profile: Option<&str
     {
         let mut cache = CLIENT_CACHE.write().unwrap();
         // Double-check after acquiring write lock (another thread may have inserted)
-        if !cache.contains_key(&key) {
-            cache.insert(key, Box::new(client.clone()));
-        }
+        cache.entry(key).or_insert_with(|| Box::new(client.clone()));
     }
 
     client
