@@ -1,0 +1,223 @@
+suite: schema_defaults
+description: Schema default value behavior
+
+tests:
+  - name: returns_schema_default_for_missing_path
+    given:
+      config: |
+        name: myapp
+      schema: |
+        type: object
+        properties:
+          name:
+            type: string
+          port:
+            type: integer
+            default: 8080
+    when:
+      access: port
+    then:
+      value: 8080
+
+  - name: config_value_overrides_schema_default
+    given:
+      config: |
+        port: 3000
+      schema: |
+        type: object
+        properties:
+          port:
+            type: integer
+            default: 8080
+    when:
+      access: port
+    then:
+      value: 3000
+
+  - name: nested_path_returns_schema_default
+    given:
+      config: |
+        database:
+          host: localhost
+      schema: |
+        type: object
+        properties:
+          database:
+            type: object
+            properties:
+              host:
+                type: string
+              port:
+                type: integer
+                default: 5432
+    when:
+      access: database.port
+    then:
+      value: 5432
+
+  - name: deeply_nested_path_returns_schema_default
+    given:
+      config: |
+        database:
+          connection:
+            host: localhost
+      schema: |
+        type: object
+        properties:
+          database:
+            type: object
+            properties:
+              connection:
+                type: object
+                properties:
+                  host:
+                    type: string
+                  timeout:
+                    type: integer
+                    default: 30
+    when:
+      access: database.connection.timeout
+    then:
+      value: 30
+
+  - name: error_when_missing_path_has_no_default
+    given:
+      config: |
+        name: myapp
+      schema: |
+        type: object
+        properties:
+          name:
+            type: string
+          required_field:
+            type: string
+    when:
+      access: required_field
+    then:
+      error:
+        type: PathNotFoundError
+
+  - name: string_default_value
+    given:
+      config: |
+        port: 8080
+      schema: |
+        type: object
+        properties:
+          port:
+            type: integer
+          host:
+            type: string
+            default: localhost
+    when:
+      access: host
+    then:
+      value: localhost
+
+  - name: boolean_default_value
+    given:
+      config: |
+        name: myapp
+      schema: |
+        type: object
+        properties:
+          name:
+            type: string
+          enabled:
+            type: boolean
+            default: true
+    when:
+      access: enabled
+    then:
+      value: true
+
+  - name: float_default_value
+    given:
+      config: |
+        name: myapp
+      schema: |
+        type: object
+        properties:
+          name:
+            type: string
+          timeout:
+            type: number
+            default: 30.5
+    when:
+      access: timeout
+    then:
+      value: 30.5
+
+  - name: null_value_uses_default_when_null_disallowed
+    given:
+      config: |
+        value: null
+      schema: |
+        type: object
+        properties:
+          value:
+            type: string
+            default: fallback
+    when:
+      access: value
+    then:
+      value: fallback
+
+  - name: null_value_preserved_when_null_allowed
+    given:
+      config: |
+        value: null
+      schema: |
+        type: object
+        properties:
+          value:
+            type:
+              - string
+              - "null"
+            default: fallback
+    when:
+      access: value
+    then:
+      value: null
+
+  - name: object_default_value
+    given:
+      config: |
+        name: myapp
+      schema: |
+        type: object
+        properties:
+          name:
+            type: string
+          logging:
+            type: object
+            default:
+              level: info
+              format: json
+    when:
+      access: logging
+    then:
+      value:
+        level: info
+        format: json
+
+  - name: array_default_value
+    given:
+      config: |
+        name: myapp
+      schema: |
+        type: object
+        properties:
+          name:
+            type: string
+          tags:
+            type: array
+            default:
+              - default
+              - tag
+    when:
+      access: tags
+    then:
+      value:
+        - default
+        - tag

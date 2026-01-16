@@ -55,6 +55,10 @@ enum Commands {
         #[arg(required = true)]
         files: Vec<PathBuf>,
 
+        /// Path to schema file (for applying default values)
+        #[arg(long)]
+        schema: Option<PathBuf>,
+
         /// Resolve interpolations
         #[arg(short, long)]
         resolve: bool,
@@ -88,6 +92,10 @@ enum Commands {
 
         /// Path to the value (e.g., database.host)
         path: String,
+
+        /// Path to schema file (for applying default values)
+        #[arg(long)]
+        schema: Option<PathBuf>,
 
         /// Resolve interpolations
         #[arg(short, long)]
@@ -173,6 +181,7 @@ pub fn run() -> ExitCode {
 
         Commands::Dump {
             files,
+            schema,
             resolve,
             no_redact,
             format,
@@ -181,6 +190,7 @@ pub fn run() -> ExitCode {
             ignore_missing,
         } => cmd_dump(
             files,
+            schema,
             resolve,
             no_redact,
             &format,
@@ -192,11 +202,20 @@ pub fn run() -> ExitCode {
         Commands::Get {
             files,
             path,
+            schema,
             resolve,
             format,
             default,
             ignore_missing,
-        } => cmd_get(files, &path, resolve, &format, default, ignore_missing),
+        } => cmd_get(
+            files,
+            &path,
+            schema,
+            resolve,
+            &format,
+            default,
+            ignore_missing,
+        ),
 
         Commands::Check {
             files,
@@ -272,44 +291,69 @@ fn cmd_validate(
         }
     };
 
-    // Validate
-    let result = if resolve {
-        config.validate(&schema)
+    // Validate - use validate_collect to get all errors
+    let errors = if resolve {
+        config.validate_collect(Some(&schema))
     } else {
-        config.validate_raw(&schema)
+        // For raw validation, we use validate_raw which returns Result
+        // Convert to same format as validate_collect
+        match config.validate_raw(Some(&schema)) {
+            Ok(_) => Vec::new(),
+            Err(e) => {
+                // validate_raw returns single error, wrap it
+                vec![holoconf_core::schema::ValidationError {
+                    path: String::new(),
+                    message: e.to_string(),
+                }]
+            }
+        }
     };
 
-    match result {
-        Ok(_) => {
-            if !quiet {
-                if format == "json" {
-                    println!("{{\"valid\": true}}");
+    if errors.is_empty() {
+        if !quiet {
+            if format == "json" {
+                println!("{{\"valid\": true}}");
+            } else {
+                let files_str: Vec<_> = files.iter().map(|f| f.display().to_string()).collect();
+                println!("{} {} is valid", "✓".green(), files_str.join(", "));
+            }
+        }
+        ExitCode::SUCCESS
+    } else {
+        if format == "json" {
+            let error_list: Vec<_> = errors
+                .iter()
+                .map(|e| {
+                    serde_json::json!({
+                        "path": e.path,
+                        "message": e.message
+                    })
+                })
+                .collect();
+            let json = serde_json::json!({
+                "valid": false,
+                "errors": error_list
+            });
+            println!("{}", serde_json::to_string_pretty(&json).unwrap());
+        } else {
+            eprintln!("{} Validation failed\n", "✗".red());
+            eprintln!("Errors:");
+            for err in &errors {
+                if err.path.is_empty() {
+                    eprintln!("  - {}", err.message);
                 } else {
-                    let files_str: Vec<_> = files.iter().map(|f| f.display().to_string()).collect();
-                    println!("{} {} is valid", "✓".green(), files_str.join(", "));
+                    eprintln!("  - {}: {}", err.path, err.message);
                 }
             }
-            ExitCode::SUCCESS
         }
-        Err(e) => {
-            if format == "json" {
-                let json = serde_json::json!({
-                    "valid": false,
-                    "error": e.to_string()
-                });
-                println!("{}", serde_json::to_string_pretty(&json).unwrap());
-            } else {
-                eprintln!("{} Validation failed\n", "✗".red());
-                eprintln!("{}", e);
-            }
-            ExitCode::from(1)
-        }
+        ExitCode::from(1)
     }
 }
 
 #[allow(clippy::too_many_arguments)]
 fn cmd_dump(
     files: Vec<PathBuf>,
+    schema_path: Option<PathBuf>,
     resolve: bool,
     no_redact: bool,
     format: &str,
@@ -318,13 +362,25 @@ fn cmd_dump(
     ignore_missing: bool,
 ) -> ExitCode {
     // Load config
-    let config = match load_config(&files, ignore_missing) {
+    let mut config = match load_config(&files, ignore_missing) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("{}", e.red());
             return ExitCode::from(2);
         }
     };
+
+    // Attach schema if provided (for default values)
+    if let Some(schema_file) = &schema_path {
+        let schema = match load_schema(schema_file) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("{}", e.red());
+                return ExitCode::from(2);
+            }
+        };
+        config.set_schema(schema);
+    }
 
     // Handle --sources flag: output source files instead of values
     if sources {
@@ -392,22 +448,36 @@ fn cmd_dump(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn cmd_get(
     files: Vec<PathBuf>,
     path: &str,
+    schema_path: Option<PathBuf>,
     resolve: bool,
     format: &str,
     default: Option<String>,
     ignore_missing: bool,
 ) -> ExitCode {
     // Load config
-    let config = match load_config(&files, ignore_missing) {
+    let mut config = match load_config(&files, ignore_missing) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("{}", e.red());
             return ExitCode::from(2);
         }
     };
+
+    // Attach schema if provided (for default values)
+    if let Some(schema_file) = &schema_path {
+        let schema = match load_schema(schema_file) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("{}", e.red());
+                return ExitCode::from(2);
+            }
+        };
+        config.set_schema(schema);
+    }
 
     // Get value
     let result = if resolve {

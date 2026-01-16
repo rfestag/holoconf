@@ -1,47 +1,64 @@
 # Schema Validation
 
-!!! note "Coming Soon"
-    This page is under construction. See [FEAT-004 Schema Validation](../specs/features/FEAT-004-schema-validation.md) for the full specification.
+HoloConf supports validating configuration against JSON Schema, helping you catch configuration errors early, enforce structure requirements, and apply default values for missing fields.
 
 ## Overview
 
-HoloConf supports validating configuration against JSON Schema, helping you catch configuration errors early and enforce structure requirements.
+Schemas serve two purposes in HoloConf:
 
-## Basic Validation
+1. **Validation**: Verify your configuration matches the expected structure and types
+2. **Default Values**: Automatically provide values for missing configuration paths
+
+## Loading with Schema
 
 === "Python"
 
     ```python
-    from holoconf import Config, ValidationError
+    from holoconf import Config
 
-    config = Config.from_file("config.yaml")
+    # Load config with schema attached for default values
+    config = Config.load("config.yaml", schema="schema.yaml")
 
-    try:
-        config.validate("schema.json")
-        print("Configuration is valid")
-    except ValidationError as e:
-        print(f"Validation failed: {e}")
-    ```
-
-=== "Rust"
-
-    ```rust
-    use holoconf::{Config, Error};
-
-    fn main() -> Result<(), Error> {
-        let config = Config::from_file("config.yaml")?;
-
-        config.validate("schema.json")?;
-        println!("Configuration is valid");
-
-        Ok(())
-    }
+    # Access a value that might be in config or schema default
+    print(config.database.pool_size)  # Returns schema default if not in config
     ```
 
 === "CLI"
 
     ```bash
-    holoconf validate config.yaml --schema schema.json
+    # Get a value with schema defaults
+    holoconf get config.yaml database.pool_size --schema schema.yaml
+
+    # Dump config with schema defaults applied
+    holoconf dump config.yaml --schema schema.yaml --resolve
+    ```
+
+## Explicit Validation
+
+Attaching a schema for defaults does **not** automatically validate. Use `validate()` to check:
+
+=== "Python"
+
+    ```python
+    from holoconf import Config, Schema, ValidationError
+
+    config = Config.load("config.yaml", schema="schema.yaml")
+
+    try:
+        config.validate()  # Uses attached schema
+        print("Configuration is valid")
+    except ValidationError as e:
+        print(f"Validation failed: {e}")
+
+    # Or validate with a different schema
+    other_schema = Schema.load("other.yaml")
+    config.validate(other_schema)
+    ```
+
+=== "CLI"
+
+    ```bash
+    holoconf validate config.yaml --schema schema.yaml
     ```
 
 ## Example Schema
@@ -72,6 +89,75 @@ HoloConf supports validating configuration against JSON Schema, helping you catc
   }
 }
 ```
+
+## Schema Default Values
+
+When a schema is attached to a config, accessing a missing path returns the schema default instead of raising `PathNotFoundError`:
+
+=== "Python"
+
+    ```python
+    from holoconf import Config, Schema
+
+    config = Config.load("config.yaml", schema="schema.yaml")
+
+    # If pool_size is not in config.yaml but schema has default: 10
+    print(config.database.pool_size)  # Returns 10
+
+    # You can also attach a schema after loading
+    config = Config.load("config.yaml")
+    schema = Schema.load("schema.yaml")
+    config.set_schema(schema)
+    ```
+
+### Value Precedence
+
+When accessing a value, the precedence is:
+
+1. **Config value**: If the path exists in the config, that value is used
+2. **Resolver default**: If using `${env:VAR,default=value}`, the resolver default
+3. **Schema default**: If the path is missing and schema has a default
+
+```yaml
+# schema.yaml
+type: object
+properties:
+  database:
+    type: object
+    properties:
+      pool_size:
+        type: integer
+        default: 10
+```
+
+```yaml
+# config.yaml
+database:
+  pool_size: 20  # Config wins - returns 20
+```
+
+### Null Handling
+
+If a config value is explicitly `null` and the schema doesn't allow null for that field, the schema default is used:
+
+```yaml
+# schema.yaml
+properties:
+  timeout:
+    type: integer  # null not allowed
+    default: 30
+```
+
+```yaml
+# config.yaml
+timeout: null  # null not allowed by schema
+```
+
+```python
+config.timeout  # Returns 30 (schema default)
+```
+
+If the schema allows null (using `type: ["integer", "null"]`), the null value is preserved.
 
 ## Type Coercion
 

@@ -300,6 +300,8 @@ impl PyConfig {
     ///
     /// Args:
     ///     path: Path to the YAML file
+    ///     schema: Optional path to a JSON Schema file. If provided, schema defaults
+    ///            will be used when accessing missing paths.
     ///     allow_http: Enable HTTP resolver (disabled by default for security)
     ///
     /// Returns:
@@ -309,8 +311,8 @@ impl PyConfig {
     ///     HoloconfError: If the file cannot be read or doesn't exist
     ///     ParseError: If the file cannot be parsed
     #[staticmethod]
-    #[pyo3(signature = (path, allow_http=false))]
-    fn load(path: &str, allow_http: bool) -> PyResult<Self> {
+    #[pyo3(signature = (path, schema=None, allow_http=false))]
+    fn load(path: &str, schema: Option<&str>, allow_http: bool) -> PyResult<Self> {
         let mut inner = CoreConfig::load(path).map_err(to_py_err)?;
         if allow_http {
             // Note: allow_http would need to be handled differently if needed
@@ -336,6 +338,13 @@ impl PyConfig {
 
             inner = CoreConfig::with_options(value, options);
         }
+
+        // If schema path provided, load and attach it
+        if let Some(schema_path) = schema {
+            let schema_obj = CoreSchema::from_file(schema_path).map_err(to_py_err)?;
+            inner.set_schema(schema_obj);
+        }
+
         Ok(Self { inner })
     }
 
@@ -345,11 +354,12 @@ impl PyConfig {
     ///
     /// Args:
     ///     path: Path to the YAML file
+    ///     schema: Optional path to a JSON Schema file
     ///     allow_http: Enable HTTP resolver (disabled by default for security)
     #[staticmethod]
-    #[pyo3(signature = (path, allow_http=false))]
-    fn required(path: &str, allow_http: bool) -> PyResult<Self> {
-        Self::load(path, allow_http)
+    #[pyo3(signature = (path, schema=None, allow_http=false))]
+    fn required(path: &str, schema: Option<&str>, allow_http: bool) -> PyResult<Self> {
+        Self::load(path, schema, allow_http)
     }
 
     /// Load an optional configuration file
@@ -598,6 +608,33 @@ impl PyConfig {
         self.inner.dump_sources().clone()
     }
 
+    /// Attach a schema to this config for default value lookup
+    ///
+    /// When a schema is attached, accessing a missing path will return the
+    /// schema's default value (if defined) instead of raising PathNotFoundError.
+    ///
+    /// Args:
+    ///     schema: A Schema object to attach
+    ///
+    /// Example:
+    ///     >>> config = Config.load("config.yaml")
+    ///     >>> schema = Schema.load("schema.yaml")
+    ///     >>> config.set_schema(schema)
+    ///     >>> config.pool_size  # Returns schema default if not in config
+    fn set_schema(&mut self, schema: &PySchema) {
+        self.inner.set_schema(schema.inner.clone());
+    }
+
+    /// Get the attached schema, if any
+    ///
+    /// Returns:
+    ///     The attached Schema object, or None if no schema is attached
+    fn get_schema(&self) -> Option<PySchema> {
+        self.inner
+            .get_schema()
+            .map(|s| PySchema { inner: s.clone() })
+    }
+
     /// Validate the raw (unresolved) configuration against a schema
     ///
     /// This performs structural validation before resolution, checking that
@@ -605,12 +642,17 @@ impl PyConfig {
     /// Interpolation placeholders (${...}) are allowed as valid values.
     ///
     /// Args:
-    ///     schema: A Schema object to validate against
+    ///     schema: Optional Schema object to validate against. If not provided,
+    ///            uses the attached schema (set via `set_schema()` or `load(schema=...)`).
     ///
     /// Raises:
     ///     ValidationError: If validation fails
-    fn validate_raw(&self, schema: &PySchema) -> PyResult<()> {
-        self.inner.validate_raw(&schema.inner).map_err(to_py_err)
+    ///     HoloconfError: If no schema is provided and none is attached
+    #[pyo3(signature = (schema=None))]
+    fn validate_raw(&self, schema: Option<&PySchema>) -> PyResult<()> {
+        self.inner
+            .validate_raw(schema.map(|s| &s.inner))
+            .map_err(to_py_err)
     }
 
     /// Validate the resolved configuration against a schema
@@ -619,28 +661,50 @@ impl PyConfig {
     /// against the schema, checking types, constraints, and patterns.
     ///
     /// Args:
-    ///     schema: A Schema object to validate against
+    ///     schema: Optional Schema object to validate against. If not provided,
+    ///            uses the attached schema (set via `set_schema()` or `load(schema=...)`).
     ///
     /// Raises:
     ///     ValidationError: If validation fails
     ///     ResolverError: If resolution fails
-    fn validate(&self, schema: &PySchema) -> PyResult<()> {
-        self.inner.validate(&schema.inner).map_err(to_py_err)
+    ///     HoloconfError: If no schema is provided and none is attached
+    #[pyo3(signature = (schema=None))]
+    fn validate(&self, schema: Option<&PySchema>) -> PyResult<()> {
+        self.inner
+            .validate(schema.map(|s| &s.inner))
+            .map_err(to_py_err)
     }
 
     /// Validate and collect all errors (instead of failing on first)
     ///
     /// Args:
-    ///     schema: A Schema object to validate against
+    ///     schema: Optional Schema object to validate against. If not provided,
+    ///            uses the attached schema (set via `set_schema()` or `load(schema=...)`).
     ///
     /// Returns:
     ///     A list of error message strings (empty if valid)
-    fn validate_collect(&self, schema: &PySchema) -> Vec<String> {
-        self.inner
-            .validate_collect(&schema.inner)
+    ///
+    /// Raises:
+    ///     HoloconfError: If no schema is provided and none is attached
+    #[pyo3(signature = (schema=None))]
+    fn validate_collect(&self, schema: Option<&PySchema>) -> PyResult<Vec<String>> {
+        // Need to handle the case where no schema is provided and none attached
+        let schema_ref = schema.map(|s| &s.inner);
+
+        // Check if we have a schema to use
+        if schema_ref.is_none() && self.inner.get_schema().is_none() {
+            return Err(to_py_err(holoconf_core::Error::validation(
+                "",
+                "No schema provided and no schema attached to config",
+            )));
+        }
+
+        Ok(self
+            .inner
+            .validate_collect(schema_ref)
             .into_iter()
             .map(|e| e.to_string())
-            .collect()
+            .collect())
     }
 
     /// Python dict-like access: config["key"]
