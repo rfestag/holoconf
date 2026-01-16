@@ -12,6 +12,21 @@ use crate::interpolation::{self, Interpolation, InterpolationArg};
 use crate::resolver::{global_registry, ResolvedValue, ResolverContext, ResolverRegistry};
 use crate::value::Value;
 
+/// Check if a path string contains glob metacharacters
+fn is_glob_pattern(path: &str) -> bool {
+    path.contains('*') || path.contains('?') || path.contains('[')
+}
+
+/// Expand a glob pattern to matching paths, sorted alphabetically
+fn expand_glob(pattern: &str) -> Result<Vec<PathBuf>> {
+    let mut paths: Vec<PathBuf> = glob::glob(pattern)
+        .map_err(|e| Error::parse(format!("Invalid glob pattern '{}': {}", pattern, e)))?
+        .filter_map(|r| r.ok())
+        .collect();
+    paths.sort();
+    Ok(paths)
+}
+
 /// Configuration options for loading configs
 #[derive(Debug, Clone, Default)]
 pub struct ConfigOptions {
@@ -126,13 +141,37 @@ impl Config {
     /// This is the primary way to load configuration. Use `Config::optional()`
     /// for files that may not exist.
     ///
+    /// Supports glob patterns like `config/*.yaml` or `config/**/*.yaml`.
+    /// When a glob pattern is used, matching files are sorted alphabetically
+    /// and merged in order (later files override earlier ones).
+    ///
     /// # Example
     ///
     /// ```ignore
     /// let config = Config::load("config.yaml")?;
+    /// let merged = Config::load("config/*.yaml")?;
     /// ```
     pub fn load(path: impl AsRef<Path>) -> Result<Self> {
-        Self::from_yaml_file(path)
+        let path_str = path.as_ref().to_string_lossy();
+
+        if is_glob_pattern(&path_str) {
+            let paths = expand_glob(&path_str)?;
+            if paths.is_empty() {
+                return Err(Error::file_not_found(
+                    format!("No files matched glob pattern '{}'", path_str),
+                    None,
+                ));
+            }
+            // Load first file, then merge the rest
+            let mut config = Self::from_yaml_file(&paths[0])?;
+            for p in &paths[1..] {
+                let other = Self::from_yaml_file(p)?;
+                config.merge(other);
+            }
+            Ok(config)
+        } else {
+            Self::from_yaml_file(path)
+        }
     }
 
     /// Alias for `load()` - load a required config file
@@ -148,14 +187,41 @@ impl Config {
     /// Use this for configuration files that may or may not be present,
     /// such as local overrides.
     ///
+    /// Supports glob patterns like `config/*.yaml` or `config/**/*.yaml`.
+    /// When a glob pattern is used, matching files are sorted alphabetically
+    /// and merged in order. Returns empty config if no files match.
+    ///
     /// # Example
     ///
     /// ```ignore
     /// let base = Config::load("base.yaml")?;
     /// let local = Config::optional("local.yaml")?;
+    /// let overrides = Config::optional("config/*.yaml")?;
     /// base.merge(&local);
     /// ```
     pub fn optional(path: impl AsRef<Path>) -> Result<Self> {
+        let path_str = path.as_ref().to_string_lossy();
+
+        if is_glob_pattern(&path_str) {
+            let paths = expand_glob(&path_str)?;
+            if paths.is_empty() {
+                // No files matched - return empty config (this is optional)
+                return Ok(Self::new(Value::Mapping(indexmap::IndexMap::new())));
+            }
+            // Load first file, then merge the rest
+            let mut config = Self::from_yaml_file(&paths[0])?;
+            for p in &paths[1..] {
+                let other = Self::from_yaml_file(p)?;
+                config.merge(other);
+            }
+            Ok(config)
+        } else {
+            Self::optional_single_file(path)
+        }
+    }
+
+    /// Load a single optional file (non-glob)
+    fn optional_single_file(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
         match std::fs::read_to_string(path) {
             Ok(content) => {

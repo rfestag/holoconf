@@ -269,6 +269,17 @@ class RustDriver(Driver):
                 config.merge(self.Config.load(path))
         return config
 
+    def load_glob(self, pattern: str, required: bool = True) -> Any:
+        """Load files matching a glob pattern.
+
+        Uses Config.load() for required globs (error if no matches)
+        and Config.optional() for optional globs (empty config if no matches).
+        """
+        if required:
+            return self.Config.load(pattern)
+        else:
+            return self.Config.optional(pattern)
+
     def load_merged_with_specs(self, specs: List[Dict[str, Any]]) -> Any:
         """Load merged files with optional file support.
 
@@ -378,6 +389,17 @@ class PythonDriver(Driver):
             else:
                 config.merge(self.Config.load(path))
         return config
+
+    def load_glob(self, pattern: str, required: bool = True) -> Any:
+        """Load files matching a glob pattern.
+
+        Uses Config.load() for required globs (error if no matches)
+        and Config.optional() for optional globs (empty config if no matches).
+        """
+        if required:
+            return self.Config.load(pattern)
+        else:
+            return self.Config.optional(pattern)
 
     def load_merged_with_specs(self, specs: List[Dict[str, Any]]) -> Any:
         """Load merged files with optional file support.
@@ -653,6 +675,8 @@ def run_test(driver: Driver, test: TestCase, suite_name: str) -> TestResult:
     mocks = test.given.get("mocks", {})
     config_merge = test.given.get("config_merge", [])
     config_merge_specs = test.given.get("config_merge_specs", [])
+    config_glob = test.given.get("config_glob", "")
+    glob_required = test.given.get("glob_required", True)  # Default to required
     temp_dir = None
     temp_files = {}  # Track created temp files for CLI substitution
 
@@ -710,7 +734,11 @@ def run_test(driver: Driver, test: TestCase, suite_name: str) -> TestResult:
         config = None
         load_error = None
         try:
-            if config_merge_specs:
+            if config_glob:
+                # Load files matching glob pattern
+                glob_pattern = str(Path(temp_dir) / config_glob)
+                config = driver.load_glob(glob_pattern, required=glob_required)
+            elif config_merge_specs:
                 # Merge multiple files with optional support
                 # Each spec is either a string (required) or a dict with 'path' and 'optional'
                 specs = []
