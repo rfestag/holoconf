@@ -65,7 +65,7 @@ class Config:
     """
 
     @staticmethod
-    def load(path: str, allow_http: bool = False) -> Config:
+    def load(path: str, schema: str | None = None, allow_http: bool = False) -> Config:
         """Load configuration from a YAML file (required - errors if missing).
 
         This is the primary way to load configuration. Use `Config.optional()`
@@ -73,6 +73,8 @@ class Config:
 
         Args:
             path: Path to the YAML file
+            schema: Optional path to a JSON Schema file. If provided, schema defaults
+                   will be used when accessing missing paths.
             allow_http: Enable HTTP resolver (disabled by default for security)
 
         Returns:
@@ -81,17 +83,22 @@ class Config:
         Raises:
             HoloconfError: If the file cannot be read or doesn't exist
             ParseError: If the file cannot be parsed
+
+        Example:
+            >>> config = Config.load("config.yaml", schema="schema.yaml")
+            >>> config.pool_size  # Returns schema default if not in config
         """
         ...
 
     @staticmethod
-    def required(path: str, allow_http: bool = False) -> Config:
+    def required(path: str, schema: str | None = None, allow_http: bool = False) -> Config:
         """Alias for `load()` - load a required config file.
 
         Provided for symmetry with `Config.optional()`.
 
         Args:
             path: Path to the YAML file
+            schema: Optional path to a JSON Schema file
             allow_http: Enable HTTP resolver (disabled by default for security)
 
         Returns:
@@ -349,22 +356,49 @@ class Config:
         """
         ...
 
-    def validate(self, schema: Schema) -> None:
+    def set_schema(self, schema: Schema) -> None:
+        """Attach a schema to this config for default value lookup.
+
+        When a schema is attached, accessing a missing path will return the
+        schema's default value (if defined) instead of raising PathNotFoundError.
+
+        Args:
+            schema: A Schema object to attach
+
+        Example:
+            >>> config = Config.load("config.yaml")
+            >>> schema = Schema.load("schema.yaml")
+            >>> config.set_schema(schema)
+            >>> config.pool_size  # Returns schema default if not in config
+        """
+        ...
+
+    def get_schema(self) -> Schema | None:
+        """Get the attached schema, if any.
+
+        Returns:
+            The attached Schema object, or None if no schema is attached
+        """
+        ...
+
+    def validate(self, schema: Schema | None = None) -> None:
         """Validate the resolved configuration against a schema.
 
         This resolves all values first, then validates the resolved values
         against the schema, checking types, constraints, and patterns.
 
         Args:
-            schema: A Schema object to validate against
+            schema: Optional Schema object to validate against. If not provided,
+                   uses the attached schema (set via `set_schema()` or `load(schema=...)`).
 
         Raises:
             ValidationError: If validation fails
             ResolverError: If resolution fails
+            HoloconfError: If no schema is provided and none is attached
         """
         ...
 
-    def validate_raw(self, schema: Schema) -> None:
+    def validate_raw(self, schema: Schema | None = None) -> None:
         """Validate the raw (unresolved) configuration against a schema.
 
         This performs structural validation before resolution, checking that
@@ -372,21 +406,27 @@ class Config:
         Interpolation placeholders (${...}) are allowed as valid values.
 
         Args:
-            schema: A Schema object to validate against
+            schema: Optional Schema object to validate against. If not provided,
+                   uses the attached schema (set via `set_schema()` or `load(schema=...)`).
 
         Raises:
             ValidationError: If validation fails
+            HoloconfError: If no schema is provided and none is attached
         """
         ...
 
-    def validate_collect(self, schema: Schema) -> list[str]:
+    def validate_collect(self, schema: Schema | None = None) -> list[str]:
         """Validate and collect all errors (instead of failing on first).
 
         Args:
-            schema: A Schema object to validate against
+            schema: Optional Schema object to validate against. If not provided,
+                   uses the attached schema (set via `set_schema()` or `load(schema=...)`).
 
         Returns:
             A list of error message strings (empty if valid)
+
+        Raises:
+            HoloconfError: If no schema is provided and none is attached
         """
         ...
 

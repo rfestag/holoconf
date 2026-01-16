@@ -33,6 +33,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+#### Schema Default Values
+- **Schema defaults for missing paths** - When a schema is attached to a config, accessing a missing path returns the schema default instead of `PathNotFoundError`
+  - `Config.load("config.yaml", schema="schema.yaml")` - Load with schema attached
+  - `config.set_schema(schema)` - Attach schema to existing config
+  - `config.get_schema()` - Retrieve attached schema
+- **Null-aware default lookup** - If a config value is `null` and the schema doesn't allow `null`, the schema default is used
+- **validate() uses attached schema** - Call `config.validate()` with no args to use the attached schema
+- **CLI --schema flag** - `holoconf get` and `holoconf dump` now accept `--schema` for default values
+- **Enhanced validate output** - `holoconf validate` now shows all validation errors with paths
+
 #### Resolver Extension Packages
 - **Global resolver registry** - Register resolvers once, use everywhere
   - `holoconf.register_resolver(name, func, force=False)` - Python API

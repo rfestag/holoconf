@@ -119,6 +119,120 @@ impl Schema {
     pub fn to_template(&self) -> String {
         generate_template(&self.schema)
     }
+
+    /// Get the default value for a config path from the schema
+    ///
+    /// Navigates the schema's `properties` structure to find the default
+    /// value for the given dot-separated path.
+    ///
+    /// # Example
+    /// ```
+    /// # use holoconf_core::Schema;
+    /// let schema = Schema::from_yaml(r#"
+    /// type: object
+    /// properties:
+    ///   database:
+    ///     type: object
+    ///     properties:
+    ///       port:
+    ///         type: integer
+    ///         default: 5432
+    /// "#).unwrap();
+    ///
+    /// assert_eq!(schema.get_default("database.port"), Some(holoconf_core::Value::Integer(5432)));
+    /// assert_eq!(schema.get_default("missing"), None);
+    /// ```
+    pub fn get_default(&self, path: &str) -> Option<Value> {
+        if path.is_empty() {
+            return self.schema.get("default").map(json_to_value);
+        }
+
+        let segments: Vec<&str> = path.split('.').collect();
+        self.get_default_at_path(&self.schema, &segments)
+    }
+
+    /// Internal helper to navigate schema and find default at path
+    fn get_default_at_path(&self, schema: &serde_json::Value, segments: &[&str]) -> Option<Value> {
+        if segments.is_empty() {
+            // At target - check for default
+            return schema.get("default").map(json_to_value);
+        }
+
+        let segment = segments[0];
+        let remaining = &segments[1..];
+
+        // Navigate into properties
+        if let Some(properties) = schema.get("properties") {
+            if let Some(prop_schema) = properties.get(segment) {
+                return self.get_default_at_path(prop_schema, remaining);
+            }
+        }
+
+        None
+    }
+
+    /// Check if null is allowed for a config path in the schema
+    ///
+    /// Returns true if:
+    /// - The schema allows `type: "null"` or `type: ["string", "null"]`
+    /// - The path doesn't exist in the schema (permissive by default)
+    ///
+    /// # Example
+    /// ```
+    /// # use holoconf_core::Schema;
+    /// let schema = Schema::from_yaml(r#"
+    /// type: object
+    /// properties:
+    ///   nullable_field:
+    ///     type: ["string", "null"]
+    ///   non_nullable:
+    ///     type: string
+    /// "#).unwrap();
+    ///
+    /// assert!(schema.allows_null("nullable_field"));
+    /// assert!(!schema.allows_null("non_nullable"));
+    /// assert!(schema.allows_null("missing")); // permissive for undefined paths
+    /// ```
+    pub fn allows_null(&self, path: &str) -> bool {
+        if path.is_empty() {
+            return self.type_allows_null(&self.schema);
+        }
+
+        let segments: Vec<&str> = path.split('.').collect();
+        self.allows_null_at_path(&self.schema, &segments)
+    }
+
+    /// Internal helper to check if null is allowed at a path
+    fn allows_null_at_path(&self, schema: &serde_json::Value, segments: &[&str]) -> bool {
+        if segments.is_empty() {
+            return self.type_allows_null(schema);
+        }
+
+        let segment = segments[0];
+        let remaining = &segments[1..];
+
+        // Navigate into properties
+        if let Some(properties) = schema.get("properties") {
+            if let Some(prop_schema) = properties.get(segment) {
+                return self.allows_null_at_path(prop_schema, remaining);
+            }
+        }
+
+        // Path not found in schema - be permissive
+        true
+    }
+
+    /// Check if a schema type allows null
+    fn type_allows_null(&self, schema: &serde_json::Value) -> bool {
+        match schema.get("type") {
+            Some(serde_json::Value::String(t)) => t == "null",
+            Some(serde_json::Value::Array(types)) => {
+                types.iter().any(|t| t.as_str() == Some("null"))
+            }
+            None => true, // No type constraint means anything is allowed
+            _ => false,   // Invalid type value (number, bool, object, null) - treat as not nullable
+        }
+    }
 }
 
 /// A single validation error
@@ -337,6 +451,33 @@ fn schema_default_string(schema: &serde_json::Value) -> String {
             }
         })
         .unwrap_or_else(|| "-".to_string())
+}
+
+/// Convert a serde_json::Value to holoconf Value
+fn json_to_value(json: &serde_json::Value) -> Value {
+    match json {
+        serde_json::Value::Null => Value::Null,
+        serde_json::Value::Bool(b) => Value::Bool(*b),
+        serde_json::Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                Value::Integer(i)
+            } else if let Some(f) = n.as_f64() {
+                Value::Float(f)
+            } else {
+                // Fallback for very large numbers
+                Value::Float(n.as_f64().unwrap_or(0.0))
+            }
+        }
+        serde_json::Value::String(s) => Value::String(s.clone()),
+        serde_json::Value::Array(arr) => Value::Sequence(arr.iter().map(json_to_value).collect()),
+        serde_json::Value::Object(obj) => {
+            let map: indexmap::IndexMap<String, Value> = obj
+                .iter()
+                .map(|(k, v)| (k.clone(), json_to_value(v)))
+                .collect();
+            Value::Mapping(map)
+        }
+    }
 }
 
 /// Convert a holoconf Value to serde_json::Value
@@ -1554,5 +1695,198 @@ properties:
         let template = schema.to_template();
         assert!(template.contains("8080"));
         assert!(template.contains("default:"));
+    }
+
+    // Tests for get_default() and allows_null()
+
+    #[test]
+    fn test_get_default_simple() {
+        let schema = Schema::from_yaml(
+            r#"
+type: object
+properties:
+  pool_size:
+    type: integer
+    default: 10
+  timeout:
+    type: number
+    default: 30.5
+  enabled:
+    type: boolean
+    default: true
+  name:
+    type: string
+    default: "default_name"
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(schema.get_default("pool_size"), Some(Value::Integer(10)));
+        assert_eq!(schema.get_default("timeout"), Some(Value::Float(30.5)));
+        assert_eq!(schema.get_default("enabled"), Some(Value::Bool(true)));
+        assert_eq!(
+            schema.get_default("name"),
+            Some(Value::String("default_name".into()))
+        );
+        assert_eq!(schema.get_default("nonexistent"), None);
+    }
+
+    #[test]
+    fn test_get_default_nested() {
+        let schema = Schema::from_yaml(
+            r#"
+type: object
+properties:
+  database:
+    type: object
+    properties:
+      host:
+        type: string
+        default: localhost
+      port:
+        type: integer
+        default: 5432
+      pool:
+        type: object
+        properties:
+          size:
+            type: integer
+            default: 10
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            schema.get_default("database.host"),
+            Some(Value::String("localhost".into()))
+        );
+        assert_eq!(
+            schema.get_default("database.port"),
+            Some(Value::Integer(5432))
+        );
+        assert_eq!(
+            schema.get_default("database.pool.size"),
+            Some(Value::Integer(10))
+        );
+        assert_eq!(schema.get_default("database.nonexistent"), None);
+    }
+
+    #[test]
+    fn test_get_default_object_level() {
+        let schema = Schema::from_yaml(
+            r#"
+type: object
+properties:
+  logging:
+    type: object
+    default:
+      level: info
+      format: json
+"#,
+        )
+        .unwrap();
+
+        let default = schema.get_default("logging").unwrap();
+        match default {
+            Value::Mapping(map) => {
+                assert_eq!(map.get("level"), Some(&Value::String("info".into())));
+                assert_eq!(map.get("format"), Some(&Value::String("json".into())));
+            }
+            _ => panic!("Expected mapping default"),
+        }
+    }
+
+    #[test]
+    fn test_get_default_null_default() {
+        let schema = Schema::from_yaml(
+            r#"
+type: object
+properties:
+  optional_value:
+    type:
+      - string
+      - "null"
+    default: null
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(schema.get_default("optional_value"), Some(Value::Null));
+    }
+
+    #[test]
+    fn test_allows_null_single_type() {
+        let schema = Schema::from_yaml(
+            r#"
+type: object
+properties:
+  required_string:
+    type: string
+  nullable_string:
+    type: "null"
+"#,
+        )
+        .unwrap();
+
+        assert!(!schema.allows_null("required_string"));
+        assert!(schema.allows_null("nullable_string"));
+    }
+
+    #[test]
+    fn test_allows_null_array_type() {
+        let schema = Schema::from_yaml(
+            r#"
+type: object
+properties:
+  nullable_value:
+    type:
+      - string
+      - "null"
+  non_nullable:
+    type:
+      - string
+      - integer
+"#,
+        )
+        .unwrap();
+
+        assert!(schema.allows_null("nullable_value"));
+        assert!(!schema.allows_null("non_nullable"));
+    }
+
+    #[test]
+    fn test_allows_null_nested() {
+        let schema = Schema::from_yaml(
+            r#"
+type: object
+properties:
+  database:
+    type: object
+    properties:
+      connection_string:
+        type:
+          - string
+          - "null"
+        default: null
+"#,
+        )
+        .unwrap();
+
+        assert!(schema.allows_null("database.connection_string"));
+    }
+
+    #[test]
+    fn test_allows_null_no_type_specified() {
+        // When type is not specified, null is implicitly allowed
+        let schema = Schema::from_yaml(
+            r#"
+type: object
+properties:
+  any_value: {}
+"#,
+        )
+        .unwrap();
+
+        assert!(schema.allows_null("any_value"));
     }
 }

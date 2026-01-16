@@ -115,6 +115,7 @@ holoconf get <FILES>... <PATH> [OPTIONS]
 | `-r, --resolve` | Resolve interpolations (default: raw value) |
 | `-f, --format` | Output format: `text`, `json`, `yaml` (default: text) |
 | `-d, --default` | Default value if path not found |
+| `--schema` | Path to schema file for default values |
 
 **Examples:**
 
@@ -138,6 +139,10 @@ fallback
 # Merge multiple files, then get
 $ holoconf get base.yaml production.yaml database.host
 prod-db.example.com
+
+# Get with schema defaults (returns schema default if path missing)
+$ holoconf get config.yaml database.pool_size --schema schema.yaml
+10
 ```
 
 ---
@@ -158,6 +163,7 @@ holoconf dump <FILES>... [OPTIONS]
 | `-f, --format` | Output format: `yaml`, `json` (default: yaml) |
 | `-o, --output` | Write to file instead of stdout |
 | `--no-redact` | Don't redact sensitive values |
+| `--schema` | Path to schema file for default values |
 
 **Examples:**
 
@@ -182,6 +188,9 @@ $ holoconf dump base.yaml production.yaml --resolve
 # Write to file
 $ holoconf dump config.yaml --resolve -o resolved.yaml
 ✓ Wrote to resolved.yaml
+
+# Dump with schema defaults applied
+$ holoconf dump config.yaml --schema schema.yaml --resolve
 ```
 
 ---

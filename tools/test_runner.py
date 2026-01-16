@@ -303,6 +303,9 @@ class RustDriver(Driver):
     def load_schema(self, yaml_content: str) -> Any:
         return self.Schema.from_yaml(yaml_content)
 
+    def set_schema(self, config: Any, schema: Any) -> None:
+        config.set_schema(schema)
+
     def validate(self, config: Any, schema: Any) -> None:
         config.validate(schema)
 
@@ -412,6 +415,9 @@ class PythonDriver(Driver):
 
     def load_schema(self, yaml_content: str) -> Any:
         return self.Schema.from_yaml(yaml_content)
+
+    def set_schema(self, config: Any, schema: Any) -> None:
+        config.set_schema(schema)
 
     def validate(self, config: Any, schema: Any) -> None:
         config.validate(schema)
@@ -829,6 +835,11 @@ def run_test(driver: Driver, test: TestCase, suite_name: str) -> TestResult:
 
         elif "access" in test.when:
             path = test.when["access"]
+            # If a schema is provided, attach it for default value lookup
+            schema_yaml = test.given.get("schema", "")
+            if schema_yaml:
+                schema = driver.load_schema(schema_yaml)
+                driver.set_schema(config, schema)
             try:
                 result = driver.access(config, path)
             except Exception as e:

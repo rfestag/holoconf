@@ -40,6 +40,8 @@ pub struct Config {
     resolvers: Arc<ResolverRegistry>,
     /// Configuration options
     options: ConfigOptions,
+    /// Optional schema for default value lookup
+    schema: Option<Arc<crate::schema::Schema>>,
 }
 
 /// Clone the global registry for use in a Config instance
@@ -61,6 +63,7 @@ impl Config {
             source_map: Arc::new(HashMap::new()),
             resolvers: clone_global_registry(),
             options: ConfigOptions::default(),
+            schema: None,
         }
     }
 
@@ -74,6 +77,7 @@ impl Config {
             source_map: Arc::new(HashMap::new()),
             resolvers: clone_global_registry(),
             options,
+            schema: None,
         }
     }
 
@@ -89,6 +93,7 @@ impl Config {
             source_map: Arc::new(source_map),
             resolvers: clone_global_registry(),
             options,
+            schema: None,
         }
     }
 
@@ -100,6 +105,7 @@ impl Config {
             source_map: Arc::new(HashMap::new()),
             resolvers: Arc::new(resolvers),
             options: ConfigOptions::default(),
+            schema: None,
         }
     }
 
@@ -233,6 +239,23 @@ impl Config {
         Ok(Self::new(value))
     }
 
+    /// Set or replace the schema for default value lookup
+    ///
+    /// When a schema is attached, `get()` will return schema defaults for
+    /// missing paths instead of raising `PathNotFoundError`.
+    ///
+    /// Note: Setting a schema clears the value cache since defaults may
+    /// now affect lookups.
+    pub fn set_schema(&mut self, schema: crate::schema::Schema) {
+        self.schema = Some(Arc::new(schema));
+        self.clear_cache();
+    }
+
+    /// Get a reference to the attached schema, if any
+    pub fn get_schema(&self) -> Option<&crate::schema::Schema> {
+        self.schema.as_ref().map(|s| s.as_ref())
+    }
+
     /// Get the raw (unresolved) value at a path
     pub fn get_raw(&self, path: &str) -> Result<&Value> {
         self.raw.get_path(path)
@@ -242,6 +265,9 @@ impl Config {
     ///
     /// This resolves any interpolation expressions in the value.
     /// Resolved values are cached for subsequent accesses.
+    ///
+    /// If a schema is attached and the path is not found (or is null when null
+    /// is not allowed), the schema default is returned instead.
     pub fn get(&self, path: &str) -> Result<Value> {
         // Check cache first
         {
@@ -251,20 +277,59 @@ impl Config {
             }
         }
 
-        // Get raw value
-        let raw_value = self.raw.get_path(path)?;
+        // Try to get raw value
+        let raw_result = self.raw.get_path(path);
 
-        // Resolve the value with an empty resolution stack
-        let mut resolution_stack = Vec::new();
-        let resolved = self.resolve_value(raw_value, path, &mut resolution_stack)?;
+        match raw_result {
+            Ok(raw_value) => {
+                // Resolve the value with an empty resolution stack
+                let mut resolution_stack = Vec::new();
+                let resolved = self.resolve_value(raw_value, path, &mut resolution_stack)?;
 
-        // Cache the result
-        {
-            let mut cache = self.cache.write().unwrap();
-            cache.insert(path.to_string(), resolved.clone());
+                // Check for null value that should use schema default
+                if resolved.value.is_null() {
+                    if let Some(schema) = &self.schema {
+                        // If schema doesn't allow null but has a default, use the default
+                        if !schema.allows_null(path) {
+                            if let Some(default_value) = schema.get_default(path) {
+                                let resolved_default = ResolvedValue::new(default_value.clone());
+                                // Cache the default
+                                {
+                                    let mut cache = self.cache.write().unwrap();
+                                    cache.insert(path.to_string(), resolved_default);
+                                }
+                                return Ok(default_value);
+                            }
+                        }
+                    }
+                }
+
+                // Cache the result
+                {
+                    let mut cache = self.cache.write().unwrap();
+                    cache.insert(path.to_string(), resolved.clone());
+                }
+
+                Ok(resolved.value)
+            }
+            Err(e) if matches!(e.kind, crate::error::ErrorKind::PathNotFound) => {
+                // Path not found - check schema defaults
+                if let Some(schema) = &self.schema {
+                    if let Some(default_value) = schema.get_default(path) {
+                        let resolved_default = ResolvedValue::new(default_value.clone());
+                        // Cache the default
+                        {
+                            let mut cache = self.cache.write().unwrap();
+                            cache.insert(path.to_string(), resolved_default);
+                        }
+                        return Ok(default_value);
+                    }
+                }
+                // No schema or no default - propagate error
+                Err(e)
+            }
+            Err(e) => Err(e),
         }
-
-        Ok(resolved.value)
     }
 
     /// Get a resolved string value, with type coercion if needed
@@ -437,7 +502,11 @@ impl Config {
     /// - Required keys are present
     /// - Object/array structure matches
     /// - Interpolations (${...}) are allowed as placeholders
-    pub fn validate_raw(&self, schema: &crate::schema::Schema) -> Result<()> {
+    ///
+    /// If `schema` is None, uses the attached schema (set via `set_schema()`).
+    /// Returns an error if no schema is provided and none is attached.
+    pub fn validate_raw(&self, schema: Option<&crate::schema::Schema>) -> Result<()> {
+        let schema = self.resolve_schema(schema)?;
         schema.validate(&self.raw)
     }
 
@@ -446,16 +515,32 @@ impl Config {
     /// This performs type/value validation (Phase 2 per ADR-007):
     /// - Resolved values match expected types
     /// - Constraints (min, max, pattern, enum) are checked
-    pub fn validate(&self, schema: &crate::schema::Schema) -> Result<()> {
+    ///
+    /// If `schema` is None, uses the attached schema (set via `set_schema()`).
+    /// Returns an error if no schema is provided and none is attached.
+    pub fn validate(&self, schema: Option<&crate::schema::Schema>) -> Result<()> {
+        let schema = self.resolve_schema(schema)?;
         let resolved = self.to_value(true, false)?;
         schema.validate(&resolved)
     }
 
     /// Validate and collect all errors (instead of failing on first)
+    ///
+    /// If `schema` is None, uses the attached schema (set via `set_schema()`).
+    /// Returns a single error if no schema is provided and none is attached.
     pub fn validate_collect(
         &self,
-        schema: &crate::schema::Schema,
+        schema: Option<&crate::schema::Schema>,
     ) -> Vec<crate::schema::ValidationError> {
+        let schema = match self.resolve_schema(schema) {
+            Ok(s) => s,
+            Err(e) => {
+                return vec![crate::schema::ValidationError {
+                    path: String::new(),
+                    message: e.to_string(),
+                }]
+            }
+        };
         match self.to_value(true, false) {
             Ok(resolved) => schema.validate_collect(&resolved),
             Err(e) => vec![crate::schema::ValidationError {
@@ -463,6 +548,16 @@ impl Config {
                 message: e.to_string(),
             }],
         }
+    }
+
+    /// Helper to resolve which schema to use (provided or attached)
+    fn resolve_schema<'a>(
+        &'a self,
+        schema: Option<&'a crate::schema::Schema>,
+    ) -> Result<&'a crate::schema::Schema> {
+        schema
+            .or_else(|| self.schema.as_ref().map(|s| s.as_ref()))
+            .ok_or_else(|| Error::validation("<root>", "No schema provided and none attached"))
     }
 
     /// Resolve a single value
@@ -836,6 +931,7 @@ impl Clone for Config {
             source_map: Arc::clone(&self.source_map),
             resolvers: Arc::clone(&self.resolvers),
             options: self.options.clone(),
+            schema: self.schema.clone(),
         }
     }
 }
@@ -1911,5 +2007,231 @@ value: ${failing:arg,default=should_not_be_used}
         let result = config.get("value");
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Network timeout"));
+    }
+
+    // Tests for schema default integration
+
+    #[test]
+    fn test_get_returns_schema_default() {
+        use crate::schema::Schema;
+
+        let yaml = r#"
+database:
+  host: localhost
+"#;
+        let schema_yaml = r#"
+type: object
+properties:
+  database:
+    type: object
+    properties:
+      host:
+        type: string
+      port:
+        type: integer
+        default: 5432
+      pool_size:
+        type: integer
+        default: 10
+"#;
+        let mut config = Config::from_yaml(yaml).unwrap();
+        let schema = Schema::from_yaml(schema_yaml).unwrap();
+        config.set_schema(schema);
+
+        // Existing value should work
+        assert_eq!(
+            config.get("database.host").unwrap(),
+            Value::String("localhost".into())
+        );
+
+        // Missing value with schema default should return default
+        assert_eq!(config.get("database.port").unwrap(), Value::Integer(5432));
+        assert_eq!(
+            config.get("database.pool_size").unwrap(),
+            Value::Integer(10)
+        );
+    }
+
+    #[test]
+    fn test_config_value_overrides_schema_default() {
+        use crate::schema::Schema;
+
+        let yaml = r#"
+port: 3000
+"#;
+        let schema_yaml = r#"
+type: object
+properties:
+  port:
+    type: integer
+    default: 8080
+"#;
+        let mut config = Config::from_yaml(yaml).unwrap();
+        let schema = Schema::from_yaml(schema_yaml).unwrap();
+        config.set_schema(schema);
+
+        // Config value should win over schema default
+        assert_eq!(config.get("port").unwrap(), Value::Integer(3000));
+    }
+
+    #[test]
+    fn test_no_schema_raises_path_not_found() {
+        let yaml = r#"
+existing: value
+"#;
+        let config = Config::from_yaml(yaml).unwrap();
+
+        // Without schema, missing path should error
+        let result = config.get("missing");
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err().kind,
+            crate::error::ErrorKind::PathNotFound
+        ));
+    }
+
+    #[test]
+    fn test_missing_path_no_default_raises_error() {
+        use crate::schema::Schema;
+
+        let yaml = r#"
+existing: value
+"#;
+        let schema_yaml = r#"
+type: object
+properties:
+  existing:
+    type: string
+  no_default:
+    type: string
+"#;
+        let mut config = Config::from_yaml(yaml).unwrap();
+        let schema = Schema::from_yaml(schema_yaml).unwrap();
+        config.set_schema(schema);
+
+        // Path exists in schema but no default, should error
+        let result = config.get("no_default");
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err().kind,
+            crate::error::ErrorKind::PathNotFound
+        ));
+    }
+
+    #[test]
+    fn test_validate_uses_attached_schema() {
+        use crate::schema::Schema;
+
+        let yaml = r#"
+name: test
+port: 8080
+"#;
+        let schema_yaml = r#"
+type: object
+required:
+  - name
+  - port
+properties:
+  name:
+    type: string
+  port:
+    type: integer
+"#;
+        let mut config = Config::from_yaml(yaml).unwrap();
+        let schema = Schema::from_yaml(schema_yaml).unwrap();
+        config.set_schema(schema);
+
+        // validate() with no arg should use attached schema
+        assert!(config.validate(None).is_ok());
+    }
+
+    #[test]
+    fn test_validate_no_schema_errors() {
+        let yaml = r#"
+name: test
+"#;
+        let config = Config::from_yaml(yaml).unwrap();
+
+        // validate() with no arg and no attached schema should error
+        let result = config.validate(None);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("No schema"));
+    }
+
+    #[test]
+    fn test_null_value_uses_default_when_null_disallowed() {
+        use crate::schema::Schema;
+
+        let yaml = r#"
+value: null
+"#;
+        let schema_yaml = r#"
+type: object
+properties:
+  value:
+    type: string
+    default: "fallback"
+"#;
+        let mut config = Config::from_yaml(yaml).unwrap();
+        let schema = Schema::from_yaml(schema_yaml).unwrap();
+        config.set_schema(schema);
+
+        // Null value with non-nullable schema type should use default
+        assert_eq!(
+            config.get("value").unwrap(),
+            Value::String("fallback".into())
+        );
+    }
+
+    #[test]
+    fn test_null_value_preserved_when_null_allowed() {
+        use crate::schema::Schema;
+
+        let yaml = r#"
+value: null
+"#;
+        let schema_yaml = r#"
+type: object
+properties:
+  value:
+    type:
+      - string
+      - "null"
+    default: "fallback"
+"#;
+        let mut config = Config::from_yaml(yaml).unwrap();
+        let schema = Schema::from_yaml(schema_yaml).unwrap();
+        config.set_schema(schema);
+
+        // Null value with nullable schema type should preserve null
+        assert_eq!(config.get("value").unwrap(), Value::Null);
+    }
+
+    #[test]
+    fn test_set_and_get_schema() {
+        use crate::schema::Schema;
+
+        let yaml = r#"
+name: test
+"#;
+        let mut config = Config::from_yaml(yaml).unwrap();
+
+        // No schema initially
+        assert!(config.get_schema().is_none());
+
+        let schema = Schema::from_yaml(
+            r#"
+type: object
+properties:
+  name:
+    type: string
+"#,
+        )
+        .unwrap();
+        config.set_schema(schema);
+
+        // Schema should now be attached
+        assert!(config.get_schema().is_some());
     }
 }
