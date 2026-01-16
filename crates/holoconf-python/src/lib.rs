@@ -232,6 +232,51 @@ impl Resolver for PyResolver {
                     }
                 })?;
 
+            // Check if result is a coroutine (async function) and await it
+            let inspect = py.import("inspect").map_err(|e| {
+                CoreError::resolver_custom(&self.name, format!("Failed to import inspect: {}", e))
+            })?;
+            let is_coroutine = inspect
+                .call_method1("iscoroutine", (result.bind(py),))
+                .map_err(|e| {
+                    CoreError::resolver_custom(
+                        &self.name,
+                        format!("Failed to check coroutine: {}", e),
+                    )
+                })?
+                .extract::<bool>()
+                .unwrap_or(false);
+
+            let result = if is_coroutine {
+                // Run the coroutine using asyncio.run()
+                let asyncio = py.import("asyncio").map_err(|e| {
+                    CoreError::resolver_custom(
+                        &self.name,
+                        format!("Failed to import asyncio: {}", e),
+                    )
+                })?;
+                asyncio
+                    .call_method1("run", (result.bind(py),))
+                    .map_err(|e| {
+                        // Check if this is a KeyError from the async function
+                        if e.is_instance_of::<pyo3::exceptions::PyKeyError>(py) {
+                            let resource = args
+                                .first()
+                                .cloned()
+                                .unwrap_or_else(|| "unknown".to_string());
+                            CoreError::not_found(resource, None)
+                        } else {
+                            CoreError::resolver_custom(
+                                &self.name,
+                                format!("Async resolver error: {}", e),
+                            )
+                        }
+                    })?
+                    .unbind()
+            } else {
+                result
+            };
+
             // Convert result to CoreResolvedValue
             let result_bound = result.bind(py);
 

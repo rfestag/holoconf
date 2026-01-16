@@ -105,8 +105,91 @@ class Driver:
         raise NotImplementedError
 
 
+def resolve_mock_data(name: str, mock_data: Dict[str, Any], path: str, **kwargs) -> Any:
+    """Core mock resolution logic shared by sync and async resolvers."""
+    import yaml as yaml_parser
+    import json as json_parser
+    from holoconf import ResolvedValue
+
+    # SSM-specific validation: paths must start with /
+    if name == "ssm" and not path.startswith("/"):
+        raise ValueError(f"SSM parameter path must start with /: {path}")
+
+    # CFN-specific validation: must be stack/output format
+    if name == "cfn" and "/" not in path:
+        raise ValueError(f"CloudFormation argument must be in stack-name/OutputKey format: {path}")
+
+    # S3-specific validation: must be bucket/key format
+    if name == "s3" and "/" not in path:
+        raise ValueError(f"S3 argument must be in bucket/key format: {path}")
+
+    # Check if this path exists in mock data
+    if path not in mock_data:
+        raise KeyError(f"{name} parameter not found: {path}")
+
+    entry = mock_data[path]
+
+    # Handle simple string values
+    if isinstance(entry, str):
+        return entry
+
+    # Handle non-string scalars (int, float, bool, list)
+    if not isinstance(entry, dict):
+        return entry
+
+    # Handle dict entries with value/type/region/profile/content/content_type
+    entry_region = entry.get("region")
+    entry_profile = entry.get("profile")
+
+    # Check region/profile match if specified in kwargs
+    if entry_region and kwargs.get("region") != entry_region:
+        raise KeyError(f"{name} parameter not found: {path} (region mismatch)")
+    if entry_profile and kwargs.get("profile") != entry_profile:
+        raise KeyError(f"{name} parameter not found: {path} (profile mismatch)")
+
+    # S3-specific handling
+    if name == "s3":
+        content = entry.get("content", "")
+        content_type = entry.get("content_type", "")
+        parse_mode = kwargs.get("parse", "auto")
+
+        if parse_mode == "text":
+            return content
+        elif parse_mode == "yaml":
+            return yaml_parser.safe_load(content)
+        elif parse_mode == "json":
+            return json_parser.loads(content)
+        elif parse_mode == "auto":
+            if path.endswith(".yaml") or path.endswith(".yml"):
+                return yaml_parser.safe_load(content)
+            elif path.endswith(".json"):
+                return json_parser.loads(content)
+            elif "yaml" in content_type.lower():
+                return yaml_parser.safe_load(content)
+            elif "json" in content_type.lower():
+                return json_parser.loads(content)
+            return content
+        return content
+
+    # SSM-specific handling (entry has 'value' key)
+    if "value" in entry:
+        value = entry.get("value")
+        entry_type = entry.get("type", "String")
+
+        if entry_type == "StringList":
+            return value.split(",")
+
+        if entry_type == "SecureString":
+            return ResolvedValue(value, sensitive=True)
+
+        return value
+
+    # No 'value' key - this is a raw dict/list to return as-is
+    return entry
+
+
 class MockResolver:
-    """A mock resolver that returns values from a dictionary.
+    """A mock resolver that returns values from a dictionary (sync).
 
     Mock data format:
         - Simple value: "key": "value"
@@ -123,88 +206,23 @@ class MockResolver:
         self.mock_data = mock_data
 
     def __call__(self, path: str, **kwargs) -> Any:
-        """Resolve a path from mock data."""
-        import yaml as yaml_parser
-        import json as json_parser
-        from holoconf import ResolvedValue
+        return resolve_mock_data(self.name, self.mock_data, path, **kwargs)
 
-        # SSM-specific validation: paths must start with /
-        if self.name == "ssm" and not path.startswith("/"):
-            raise ValueError(f"SSM parameter path must start with /: {path}")
 
-        # CFN-specific validation: must be stack/output format
-        if self.name == "cfn" and "/" not in path:
-            raise ValueError(f"CloudFormation argument must be in stack-name/OutputKey format: {path}")
+class AsyncMockResolver:
+    """A mock resolver that returns values from a dictionary (async).
 
-        # S3-specific validation: must be bucket/key format
-        if self.name == "s3" and "/" not in path:
-            raise ValueError(f"S3 argument must be in bucket/key format: {path}")
+    This is used to test async resolver support. The resolution logic is
+    identical to MockResolver but wrapped in an async function.
+    """
 
-        # Check if this path exists in mock data
-        if path not in self.mock_data:
-            raise KeyError(f"{self.name} parameter not found: {path}")
+    def __init__(self, name: str, mock_data: Dict[str, Any]):
+        self.name = name
+        self.mock_data = mock_data
 
-        entry = self.mock_data[path]
-
-        # Handle simple string values
-        if isinstance(entry, str):
-            return entry
-
-        # Handle dict entries with value/type/region/profile/content/content_type
-        if isinstance(entry, dict):
-            entry_region = entry.get("region")
-            entry_profile = entry.get("profile")
-
-            # Check region/profile match if specified in kwargs
-            if entry_region and kwargs.get("region") != entry_region:
-                raise KeyError(f"{self.name} parameter not found: {path} (region mismatch)")
-            if entry_profile and kwargs.get("profile") != entry_profile:
-                raise KeyError(f"{self.name} parameter not found: {path} (profile mismatch)")
-
-            # S3-specific handling
-            if self.name == "s3":
-                content = entry.get("content", "")
-                content_type = entry.get("content_type", "")
-                parse_mode = kwargs.get("parse", "auto")
-
-                # Determine how to parse based on mode, extension, or content type
-                if parse_mode == "text":
-                    return content
-                elif parse_mode == "yaml":
-                    return yaml_parser.safe_load(content)
-                elif parse_mode == "json":
-                    return json_parser.loads(content)
-                elif parse_mode == "auto":
-                    # Auto-detect from extension
-                    if path.endswith(".yaml") or path.endswith(".yml"):
-                        return yaml_parser.safe_load(content)
-                    elif path.endswith(".json"):
-                        return json_parser.loads(content)
-                    # Auto-detect from content type
-                    elif "yaml" in content_type.lower():
-                        return yaml_parser.safe_load(content)
-                    elif "json" in content_type.lower():
-                        return json_parser.loads(content)
-                    # Default to text
-                    return content
-                return content
-
-            # SSM-specific handling
-            value = entry.get("value")
-            entry_type = entry.get("type", "String")
-
-            # Handle StringList type
-            if entry_type == "StringList":
-                return value.split(",")
-
-            # Handle SecureString type - return sensitive value
-            if entry_type == "SecureString":
-                return ResolvedValue(value, sensitive=True)
-
-            # Plain string
-            return value
-
-        return entry
+    async def __call__(self, path: str, **kwargs) -> Any:
+        # Async wrapper around the shared resolution logic
+        return resolve_mock_data(self.name, self.mock_data, path, **kwargs)
 
 
 class RustDriver(Driver):
@@ -335,10 +353,13 @@ class RustDriver(Driver):
     def export_dict(self, config: Any, resolve: bool, redact: bool = False) -> Any:
         return config.to_dict(resolve=resolve, redact=redact)
 
-    def setup_mocks(self, mocks: Dict[str, Any]) -> None:
+    def setup_mocks(self, mocks: Dict[str, Any], is_async: bool = False) -> None:
         """Set up mock resolvers from test definition."""
         for resolver_name, mock_data in mocks.items():
-            mock_resolver = MockResolver(resolver_name, mock_data)
+            if is_async:
+                mock_resolver = AsyncMockResolver(resolver_name, mock_data)
+            else:
+                mock_resolver = MockResolver(resolver_name, mock_data)
             # Use force=True to override any existing resolver (including real ones)
             self.register_resolver(resolver_name, mock_resolver, force=True)
 
@@ -359,10 +380,13 @@ class PythonDriver(Driver):
                 "Build with: cd packages/python/holoconf && maturin develop"
             )
 
-    def setup_mocks(self, mocks: Dict[str, Any]) -> None:
+    def setup_mocks(self, mocks: Dict[str, Any], is_async: bool = False) -> None:
         """Set up mock resolvers from test definition."""
         for resolver_name, mock_data in mocks.items():
-            mock_resolver = MockResolver(resolver_name, mock_data)
+            if is_async:
+                mock_resolver = AsyncMockResolver(resolver_name, mock_data)
+            else:
+                mock_resolver = MockResolver(resolver_name, mock_data)
             # Use force=True to override any existing resolver (including real ones)
             self.register_resolver(resolver_name, mock_resolver, force=True)
 
@@ -677,6 +701,7 @@ def run_test(driver: Driver, test: TestCase, suite_name: str) -> TestResult:
     config_merge_specs = test.given.get("config_merge_specs", [])
     config_glob = test.given.get("config_glob", "")
     glob_required = test.given.get("glob_required", True)  # Default to required
+    resolver_async = test.given.get("resolver_async", False)  # Use async mocks
     temp_dir = None
     temp_files = {}  # Track created temp files for CLI substitution
 
@@ -686,7 +711,7 @@ def run_test(driver: Driver, test: TestCase, suite_name: str) -> TestResult:
 
         # Set up mock resolvers before any config loading
         if mocks and hasattr(driver, 'setup_mocks'):
-            driver.setup_mocks(mocks)
+            driver.setup_mocks(mocks, is_async=resolver_async)
 
         # Create temp directory
         temp_dir = tempfile.mkdtemp(prefix="holoconf_test_")

@@ -223,8 +223,120 @@ All AWS resolvers use the standard AWS credential chain:
 3. AWS config file (`~/.aws/config`)
 4. IAM role (EC2/ECS/Lambda)
 
+## Custom Resolvers
+
+You can register custom resolvers in Python to integrate with any data source.
+
+### Function Resolvers
+
+The simplest form is a function that takes a key and optional keyword arguments:
+
+```python
+import holoconf
+
+def my_lookup(key, region=None, **kwargs):
+    """Custom resolver that looks up values from an internal service."""
+    result = internal_api.get(key, region=region)
+    return result
+
+holoconf.register_resolver("lookup", my_lookup)
+```
+
+Now use it in your config:
+
+```yaml
+database:
+  host: ${lookup:db-host,region=us-east-1}
+```
+
+### Async Resolvers
+
+Async functions work automatically - HoloConf will await them:
+
+```python
+import holoconf
+
+async def fetch_secret(key, **kwargs):
+    """Async resolver that fetches secrets from a remote service."""
+    async with aiohttp.ClientSession() as session:
+        async with session.get(f"https://secrets.example.com/{key}") as resp:
+            return await resp.text()
+
+holoconf.register_resolver("secret", fetch_secret)
+```
+
+### Returning Sensitive Values
+
+For values that should be redacted in output, return a `ResolvedValue`:
+
+```python
+from holoconf import register_resolver, ResolvedValue
+
+def vault_resolver(path, **kwargs):
+    """Resolver for HashiCorp Vault secrets."""
+    secret = vault_client.read(path)
+    # Mark all Vault values as sensitive
+    return ResolvedValue(secret["data"]["value"], sensitive=True)
+
+register_resolver("vault", vault_resolver)
+```
+
+```yaml
+api:
+  key: ${vault:secret/data/api-key}  # Will show as [REDACTED]
+```
+
+### Return Types
+
+Resolvers can return various types:
+
+| Return Type | Result |
+|------------|--------|
+| `str`, `int`, `float`, `bool` | Scalar value |
+| `list` | List/array value |
+| `dict` | Dictionary/mapping value |
+| `ResolvedValue(value, sensitive=True)` | Value marked for redaction |
+
+### Error Handling
+
+Raise `KeyError` to indicate a resource wasn't found (enables `default=` fallback):
+
+```python
+def my_resolver(key, **kwargs):
+    result = cache.get(key)
+    if result is None:
+        raise KeyError(f"Key not found: {key}")
+    return result
+
+register_resolver("cache", my_resolver)
+```
+
+```yaml
+# Uses default if key not found
+value: ${cache:my-key,default=fallback}
+```
+
+### Callable Classes
+
+For resolvers that need initialization or state, use a callable class:
+
+```python
+from holoconf import register_resolver, ResolvedValue
+
+class VaultResolver:
+    def __init__(self, vault_addr):
+        self.client = hvac.Client(url=vault_addr)
+
+    def __call__(self, path, **kwargs):
+        secret = self.client.secrets.kv.read_secret_version(path=path)
+        return ResolvedValue(secret["data"]["data"], sensitive=True)
+
+register_resolver("vault", VaultResolver("https://vault.example.com"))
+```
+
 ## See Also
 
+- [ADR-002 Resolver Architecture](../adr/ADR-002-resolver-architecture.md) - Design rationale
 - [FEAT-002 Core Resolvers](../specs/features/FEAT-002-core-resolvers.md) - Full specification
 - [FEAT-007 AWS Resolvers](../specs/features/FEAT-007-aws-resolvers.md) - AWS resolver specification
 - [Interpolation](interpolation.md) - Interpolation syntax details
