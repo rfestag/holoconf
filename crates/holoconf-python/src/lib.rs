@@ -22,8 +22,8 @@ use std::sync::Arc;
 use holoconf_core::{
     error::ErrorKind,
     resolver::{ResolvedValue as CoreResolvedValue, Resolver, ResolverContext},
-    Config as CoreConfig, ConfigOptions, Error as CoreError, FileSpec as CoreFileSpec,
-    Schema as CoreSchema, Value as CoreValue,
+    Config as CoreConfig, ConfigOptions, Error as CoreError, Schema as CoreSchema,
+    Value as CoreValue,
 };
 
 // Define exception hierarchy per ADR-008
@@ -267,93 +267,6 @@ impl Resolver for PyResolver {
     }
 }
 
-/// File specification for optional file support
-///
-/// Use this to mark files as optional in load_merged_with_specs().
-#[pyclass(name = "FileSpec")]
-#[derive(Clone)]
-struct PyFileSpec {
-    path: String,
-    optional: bool,
-}
-
-#[pymethods]
-impl PyFileSpec {
-    /// Create a FileSpec for a required file
-    ///
-    /// Args:
-    ///     path: Path to the config file
-    #[new]
-    fn new(path: String) -> Self {
-        Self {
-            path,
-            optional: false,
-        }
-    }
-
-    /// Create a FileSpec for an optional file
-    ///
-    /// Optional files that don't exist are silently skipped.
-    ///
-    /// Args:
-    ///     path: Path to the config file
-    ///
-    /// Returns:
-    ///     A FileSpec marking the file as optional
-    #[staticmethod]
-    fn optional(path: String) -> Self {
-        Self {
-            path,
-            optional: true,
-        }
-    }
-
-    /// Create a FileSpec for a required file
-    ///
-    /// Args:
-    ///     path: Path to the config file
-    ///
-    /// Returns:
-    ///     A FileSpec marking the file as required
-    #[staticmethod]
-    fn required(path: String) -> Self {
-        Self {
-            path,
-            optional: false,
-        }
-    }
-
-    /// Check if this file is optional
-    #[getter]
-    fn is_optional(&self) -> bool {
-        self.optional
-    }
-
-    /// Get the path
-    #[getter]
-    fn path(&self) -> &str {
-        &self.path
-    }
-
-    fn __repr__(&self) -> String {
-        if self.optional {
-            format!("FileSpec.optional(\"{}\")", self.path)
-        } else {
-            format!("FileSpec.required(\"{}\")", self.path)
-        }
-    }
-}
-
-impl PyFileSpec {
-    fn to_core(&self) -> CoreFileSpec {
-        if self.optional {
-            CoreFileSpec::optional(&self.path)
-        } else {
-            CoreFileSpec::required(&self.path)
-        }
-    }
-}
-
 /// Configuration object for Python
 #[pyclass(name = "Config")]
 struct PyConfig {
@@ -380,87 +293,85 @@ impl PyConfig {
         Ok(Self { inner })
     }
 
-    /// Load configuration from a YAML file
+    /// Load configuration from a YAML file (required - errors if missing)
+    ///
+    /// This is the primary way to load configuration. Use `Config.optional()`
+    /// for files that may not exist.
+    ///
+    /// Args:
+    ///     path: Path to the YAML file
+    ///     allow_http: Enable HTTP resolver (disabled by default for security)
+    ///
+    /// Returns:
+    ///     A new Config object
+    ///
+    /// Raises:
+    ///     HoloconfError: If the file cannot be read or doesn't exist
+    ///     ParseError: If the file cannot be parsed
+    #[staticmethod]
+    #[pyo3(signature = (path, allow_http=false))]
+    fn load(path: &str, allow_http: bool) -> PyResult<Self> {
+        let mut inner = CoreConfig::load(path).map_err(to_py_err)?;
+        if allow_http {
+            // Note: allow_http would need to be handled differently if needed
+            // For now, we reload with options
+            let path_ref = std::path::Path::new(path);
+            let content = std::fs::read_to_string(path_ref).map_err(|e| {
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    to_py_err(holoconf_core::Error::file_not_found(path.to_string(), None))
+                } else {
+                    to_py_err(holoconf_core::Error::parse(format!(
+                        "Failed to read file '{}': {}",
+                        path, e
+                    )))
+                }
+            })?;
+
+            let value: holoconf_core::Value = serde_yaml::from_str(&content)
+                .map_err(|e| to_py_err(holoconf_core::Error::parse(e.to_string())))?;
+
+            let mut options = ConfigOptions::default();
+            options.base_path = path_ref.parent().map(|p| p.to_path_buf());
+            options.allow_http = allow_http;
+
+            inner = CoreConfig::with_options(value, options);
+        }
+        Ok(Self { inner })
+    }
+
+    /// Alias for `load()` - load a required config file
+    ///
+    /// Provided for symmetry with `Config.optional()`.
     ///
     /// Args:
     ///     path: Path to the YAML file
     ///     allow_http: Enable HTTP resolver (disabled by default for security)
     #[staticmethod]
     #[pyo3(signature = (path, allow_http=false))]
-    fn load(path: &str, allow_http: bool) -> PyResult<Self> {
-        let path_ref = std::path::Path::new(path);
-        let content = std::fs::read_to_string(path_ref).map_err(|e| {
-            to_py_err(holoconf_core::Error::parse(format!(
-                "Failed to read file '{}': {}",
-                path, e
-            )))
-        })?;
-
-        let value: holoconf_core::Value = serde_yaml::from_str(&content)
-            .map_err(|e| to_py_err(holoconf_core::Error::parse(e.to_string())))?;
-
-        let mut options = ConfigOptions::default();
-        options.base_path = path_ref.parent().map(|p| p.to_path_buf());
-        options.allow_http = allow_http;
-
-        let inner = CoreConfig::with_options(value, options);
-        Ok(Self { inner })
+    fn required(path: &str, allow_http: bool) -> PyResult<Self> {
+        Self::load(path, allow_http)
     }
 
-    /// Load and merge multiple YAML files
+    /// Load an optional configuration file
     ///
-    /// Files are merged in order, with later files overriding earlier ones.
-    /// All files are required - use load_merged_with_specs() for optional files.
-    ///
-    /// Args:
-    ///     paths: List of paths to YAML files
-    #[staticmethod]
-    fn load_merged(paths: Vec<String>) -> PyResult<Self> {
-        let path_refs: Vec<&str> = paths.iter().map(|s| s.as_str()).collect();
-        let inner = CoreConfig::load_merged(&path_refs).map_err(to_py_err)?;
-        Ok(Self { inner })
-    }
-
-    /// Load and merge multiple YAML files with optional file support
-    ///
-    /// Files are merged in order, with later files overriding earlier ones.
-    /// Optional files that don't exist are silently skipped.
-    ///
-    /// Args:
-    ///     specs: List of FileSpec objects (use FileSpec.optional() for optional files)
-    ///
-    /// Example:
-    ///     >>> config = Config.load_merged_with_specs([
-    ///     ...     FileSpec.required("base.yaml"),
-    ///     ...     FileSpec.required("environment.yaml"),
-    ///     ...     FileSpec.optional("local.yaml"),  # Won't error if missing
-    ///     ... ])
-    #[staticmethod]
-    fn load_merged_with_specs(specs: Vec<PyFileSpec>) -> PyResult<Self> {
-        let core_specs: Vec<CoreFileSpec> = specs.iter().map(|s| s.to_core()).collect();
-        let inner = CoreConfig::load_merged_with_specs(&core_specs).map_err(to_py_err)?;
-        Ok(Self { inner })
-    }
-
-    /// Create a FileSpec for an optional file
-    ///
-    /// Convenience method equivalent to FileSpec.optional(path).
-    /// Use with load_merged_with_specs().
+    /// Returns an empty Config if the file doesn't exist.
+    /// Use this for configuration files that may or may not be present,
+    /// such as local overrides.
     ///
     /// Args:
     ///     path: Path to the config file
     ///
     /// Returns:
-    ///     A FileSpec marking the file as optional
+    ///     A Config object (empty if file doesn't exist)
     ///
     /// Example:
-    ///     >>> config = Config.load_merged_with_specs([
-    ///     ...     FileSpec("base.yaml"),           # Required
-    ///     ...     Config.optional("local.yaml"),   # Optional
-    ///     ... ])
+    ///     >>> base = Config.load("base.yaml")
+    ///     >>> local = Config.optional("local.yaml")
+    ///     >>> base.merge(local)
     #[staticmethod]
-    fn optional(path: String) -> PyFileSpec {
-        PyFileSpec::optional(path)
+    fn optional(path: &str) -> PyResult<Self> {
+        let inner = CoreConfig::optional(path).map_err(to_py_err)?;
+        Ok(Self { inner })
     }
 
     /// Merge another config into this one
@@ -868,7 +779,6 @@ fn holoconf(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyConfig>()?;
     m.add_class::<PySchema>()?;
     m.add_class::<PyResolvedValue>()?;
-    m.add_class::<PyFileSpec>()?;
 
     // Add module-level functions
     m.add_function(wrap_pyfunction!(register_resolver, m)?)?;

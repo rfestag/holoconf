@@ -23,7 +23,7 @@ classes:
             required: false
             default: false
       - name: load
-        description: "Load YAML from file"
+        description: "Load YAML from file (required - errors if missing)"
         parameters:
           - name: path
             type: string
@@ -32,11 +32,21 @@ classes:
             type: bool
             required: false
             default: false
-      - name: load_merged
-        description: "Load and merge multiple YAML files"
+      - name: required
+        description: "Alias for load() - load a required config file"
         parameters:
-          - name: paths
-            type: list[string]
+          - name: path
+            type: string
+            required: true
+          - name: allow_http
+            type: bool
+            required: false
+            default: false
+      - name: optional
+        description: "Load an optional config file (empty if missing)"
+        parameters:
+          - name: path
+            type: string
             required: true
       - name: from_json
         description: "Parse JSON from string"

@@ -3,7 +3,14 @@
 //! This crate provides the core functionality for loading, parsing, and resolving
 //! configuration files with interpolation support.
 //!
+//! # Safety
+//!
+//! This crate contains no unsafe code. All unsafe operations are delegated to
+//! well-audited dependencies (serde, tokio, etc.).
+//!
 //! # Example
+
+#![forbid(unsafe_code)]
 //!
 //! ```rust
 //! use holoconf_core::Config;
@@ -26,7 +33,7 @@ pub mod value;
 
 mod config;
 
-pub use config::{Config, ConfigOptions, FileSpec};
+pub use config::{Config, ConfigOptions};
 pub use error::{Error, Result};
 pub use resolver::{ResolvedValue, Resolver, ResolverRegistry};
 pub use schema::Schema;

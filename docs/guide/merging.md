@@ -19,12 +19,11 @@ HoloConf allows you to merge multiple configuration files, enabling patterns lik
     from holoconf import Config
 
     # Load base configuration, then merge overrides
-    config = Config.from_files([
-        "config/base.yaml",
-        "config/production.yaml"
-    ])
+    base = Config.load("config/base.yaml")
+    production = Config.load("config/production.yaml")
+    base.merge(production)
 
-    # Later files override earlier ones
+    # Now 'base' contains the merged result
     ```
 
 === "Rust"
@@ -33,10 +32,9 @@ HoloConf allows you to merge multiple configuration files, enabling patterns lik
     use holoconf::Config;
 
     fn main() -> Result<(), holoconf::Error> {
-        let config = Config::from_files(&[
-            "config/base.yaml",
-            "config/production.yaml",
-        ])?;
+        let mut config = Config::load("config/base.yaml")?;
+        let production = Config::load("config/production.yaml")?;
+        config.merge(production);
 
         Ok(())
     }
@@ -106,10 +104,10 @@ config/
     from holoconf import Config
 
     env = os.environ.get("APP_ENV", "development")
-    config = Config.from_files([
-        "config/base.yaml",
-        f"config/{env}.yaml"
-    ])
+
+    config = Config.load("config/base.yaml")
+    env_config = Config.load(f"config/{env}.yaml")
+    config.merge(env_config)
     ```
 
 === "Rust"
@@ -120,10 +118,10 @@ config/
 
     fn main() -> Result<(), holoconf::Error> {
         let env = env::var("APP_ENV").unwrap_or_else(|_| "development".into());
-        let config = Config::from_files(&[
-            "config/base.yaml".into(),
-            format!("config/{}.yaml", env),
-        ])?;
+
+        let mut config = Config::load("config/base.yaml")?;
+        let env_config = Config::load(&format!("config/{}.yaml", env))?;
+        config.merge(env_config);
 
         Ok(())
     }
@@ -133,36 +131,35 @@ config/
 
 Sometimes you want to load configuration files that may or may not exist. For example, a `local.yaml` file that developers can create for local overrides but isn't committed to version control.
 
-Use `FileSpec` to specify which files are required and which are optional:
+Use `Config.optional()` to load files that might not exist:
 
 === "Python"
 
     ```python
-    from holoconf import Config, FileSpec
+    from holoconf import Config
 
-    # Load with optional files - missing optional files are silently skipped
-    config = Config.load_merged_with_specs([
-        FileSpec.required("config/base.yaml"),      # Must exist
-        FileSpec.optional("config/local.yaml"),     # Skipped if missing
-        FileSpec.required("config/production.yaml") # Must exist
-    ])
+    # Config.optional() returns empty config if file doesn't exist
+    config = Config.load("config/base.yaml")  # Required - errors if missing
+    local = Config.optional("config/local.yaml")  # Optional - empty if missing
+    config.merge(local)
 
-    # Convenience method for single optional file
-    config = Config.load("config/base.yaml")
-    config = config.optional("config/local.yaml")  # Merges if exists, no-op if missing
+    # Symmetry with Config.required() (alias for load)
+    config = Config.required("config/base.yaml")  # Same as Config.load()
     ```
 
 === "Rust"
 
     ```rust
-    use holoconf::{Config, FileSpec};
+    use holoconf::Config;
 
     fn main() -> Result<(), holoconf::Error> {
-        let config = Config::load_merged_with_specs(&[
-            FileSpec::required("config/base.yaml"),
-            FileSpec::optional("config/local.yaml"),
-            FileSpec::required("config/production.yaml"),
-        ])?;
+        // Config::optional() returns empty config if file doesn't exist
+        let mut config = Config::load("config/base.yaml")?;  // Required
+        let local = Config::optional("config/local.yaml")?;  // Optional
+        config.merge(local);
+
+        // Config::required() is an alias for load()
+        let config = Config::required("config/base.yaml")?;
 
         Ok(())
     }
@@ -170,9 +167,8 @@ Use `FileSpec` to specify which files are required and which are optional:
 
 ### Behavior
 
-- **Required files** (`FileSpec.required()`): Must exist. Returns an error if the file is not found.
-- **Optional files** (`FileSpec.optional()`): Silently skipped if missing. Merged normally if present.
-- **String paths**: When using `load_merged()` with plain strings, all files are treated as required.
+- **`Config.load(path)`** / **`Config.required(path)`**: Must exist. Returns an error if the file is not found.
+- **`Config.optional(path)`**: Returns an empty Config if the file doesn't exist. Loads normally if present.
 
 ### Common Pattern: Local Overrides
 
@@ -188,32 +184,38 @@ config/
 === "Python"
 
     ```python
-    from holoconf import Config, FileSpec
+    from holoconf import Config
     import os
 
     env = os.environ.get("APP_ENV", "development")
 
-    config = Config.load_merged_with_specs([
-        FileSpec.required("config/base.yaml"),
-        FileSpec.required(f"config/{env}.yaml"),
-        FileSpec.optional("config/local.yaml"),  # Developer overrides
-    ])
+    # Load and merge in order: base → environment → local overrides
+    config = Config.load("config/base.yaml")
+    env_config = Config.load(f"config/{env}.yaml")
+    config.merge(env_config)
+
+    # Local overrides are optional
+    local = Config.optional("config/local.yaml")
+    config.merge(local)
     ```
 
 === "Rust"
 
     ```rust
-    use holoconf::{Config, FileSpec};
+    use holoconf::Config;
     use std::env;
 
     fn main() -> Result<(), holoconf::Error> {
         let env = env::var("APP_ENV").unwrap_or_else(|_| "development".into());
 
-        let config = Config::load_merged_with_specs(&[
-            FileSpec::required("config/base.yaml"),
-            FileSpec::required(format!("config/{}.yaml", env)),
-            FileSpec::optional("config/local.yaml"),
-        ])?;
+        // Load and merge in order
+        let mut config = Config::load("config/base.yaml")?;
+        let env_config = Config::load(&format!("config/{}.yaml", env))?;
+        config.merge(env_config);
+
+        // Local overrides are optional
+        let local = Config::optional("config/local.yaml")?;
+        config.merge(local);
 
         Ok(())
     }

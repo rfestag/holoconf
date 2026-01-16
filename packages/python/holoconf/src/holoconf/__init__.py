@@ -36,7 +36,6 @@ from holoconf._holoconf import (
     CircularReferenceError,
     # Classes
     Config,
-    FileSpec,
     # Exceptions
     HoloconfError,
     ParseError,
@@ -114,7 +113,6 @@ __version__ = "0.1.0"
 __all__ = [
     "CircularReferenceError",
     "Config",
-    "FileSpec",
     "HoloconfError",
     "ParseError",
     "PathNotFoundError",

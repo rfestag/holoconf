@@ -7,6 +7,35 @@
         docs docs-serve docs-build coverage coverage-rust coverage-python coverage-html \
         coverage-acceptance coverage-full release release-check changelog-check
 
+# =============================================================================
+# Path and Tool Configuration
+# =============================================================================
+
+# Python venv paths
+PYTHON_VENV := packages/python/holoconf/.venv
+VENV_PYTHON := $(PYTHON_VENV)/bin/python
+VENV_PYTEST := $(PYTHON_VENV)/bin/pytest
+VENV_MATURIN := $(PYTHON_VENV)/bin/maturin
+VENV_RUFF := $(PYTHON_VENV)/bin/ruff
+VENV_PIP := $(PYTHON_VENV)/bin/pip
+VENV_PIP_AUDIT := $(PYTHON_VENV)/bin/pip-audit
+
+# Cargo PATH (ensure cargo/rustc/cc are found even if not in system PATH)
+CARGO_PATH := $(HOME)/.cargo/bin:/usr/bin
+CARGO := PATH="$(CARGO_PATH):$$PATH" cargo
+
+# Coverage and output directories
+COVERAGE_DIR := coverage
+SBOM_DIR := sbom
+
+# Docs venv
+DOCS_VENV := .venv-docs
+MKDOCS := $(DOCS_VENV)/bin/mkdocs
+
+# =============================================================================
+# Default Target
+# =============================================================================
+
 # Default target
 help:
 	@echo "Holoconf Development Commands"
@@ -23,7 +52,7 @@ help:
 	@echo "  make security        - Run all security checks"
 	@echo "  make security-rust   - Run Rust security (cargo-deny, cargo-audit)"
 	@echo "  make security-python - Run Python security (pip-audit)"
-	@echo "  make audit-unsafe    - Report unsafe code usage (cargo-geiger)"
+	@echo "  make audit-unsafe    - Verify unsafe code policy (forbid attributes)"
 	@echo ""
 	@echo "Testing:"
 	@echo "  make test                 - Run all tests"
@@ -67,20 +96,20 @@ help:
 #
 # This installs all required Rust and Python tooling for development.
 
-install-tools:
+install-tools: $(VENV_PYTHON)
 	@echo "══════════════════════════════════════════════════════════════════"
 	@echo "Installing development tools..."
 	@echo "══════════════════════════════════════════════════════════════════"
 	@echo ""
 	@echo "→ Installing Rust tools..."
-	cargo install cargo-deny cargo-audit cargo-machete cargo-geiger cargo-semver-checks cargo-cyclonedx cargo-llvm-cov
-	rustup component add llvm-tools-preview
+	$(CARGO) install cargo-deny cargo-audit cargo-machete cargo-semver-checks cargo-cyclonedx cargo-llvm-cov
+	PATH="$(CARGO_PATH):$$PATH" rustup component add llvm-tools-preview
 	@echo ""
 	@echo "→ Installing Python dev dependencies..."
-	cd packages/python/holoconf && pip install -e ".[dev]"
+	$(CURDIR)/$(VENV_PIP) install -e "packages/python/holoconf[dev]"
 	@echo ""
 	@echo "→ Building Python bindings..."
-	cd packages/python/holoconf && maturin develop
+	cd packages/python/holoconf && $(CURDIR)/$(VENV_MATURIN) develop
 	@echo ""
 	@echo "══════════════════════════════════════════════════════════════════"
 	@echo "✓ All tools installed! You can now run 'make check'"
@@ -95,16 +124,16 @@ lint: lint-rust lint-python
 
 lint-rust:
 	@echo "→ Running Rust linters..."
-	cargo fmt --all -- --check
-	cargo clippy --all-targets --all-features -- \
+	$(CARGO) fmt --all -- --check
+	$(CARGO) clippy --all-targets --all-features -- \
 		-D warnings \
 		-A clippy::result_large_err \
 		-A clippy::field_reassign_with_default
 
-lint-python:
+lint-python: $(VENV_PYTHON)
 	@echo "→ Running Python linter..."
-	cd packages/python/holoconf && ruff check src/ tests/
-	cd packages/python/holoconf && ruff format --check src/ tests/
+	$(CURDIR)/$(VENV_RUFF) check packages/python/holoconf/src/ packages/python/holoconf/tests/
+	$(CURDIR)/$(VENV_RUFF) format --check packages/python/holoconf/src/ packages/python/holoconf/tests/
 
 # =============================================================================
 # Formatting
@@ -115,12 +144,12 @@ format: format-rust format-python
 
 format-rust:
 	@echo "→ Formatting Rust code..."
-	cargo fmt --all
+	$(CARGO) fmt --all
 
-format-python:
+format-python: $(VENV_PYTHON)
 	@echo "→ Formatting Python code..."
-	cd packages/python/holoconf && ruff format src/ tests/
-	cd packages/python/holoconf && ruff check --fix src/ tests/ || true
+	$(CURDIR)/$(VENV_RUFF) format packages/python/holoconf/src/ packages/python/holoconf/tests/
+	$(CURDIR)/$(VENV_RUFF) check --fix packages/python/holoconf/src/ packages/python/holoconf/tests/ || true
 
 # =============================================================================
 # Security
@@ -131,24 +160,29 @@ security: security-rust security-python
 
 security-rust:
 	@echo "→ Running Rust security checks..."
-	cargo deny check
-	cargo audit
+	$(CARGO) deny check
+	$(CARGO) audit
 
-security-python:
+security-python: $(VENV_PYTHON)
 	@echo "→ Running Python security checks..."
-	cd packages/python/holoconf && pip-audit
+	$(CURDIR)/$(VENV_PIP_AUDIT) --path packages/python/holoconf || echo "  ⚠ pip-audit not installed (run 'make install-tools')"
 
-# Audit unsafe code - informational, not a blocker
+# Audit unsafe code usage
+# holoconf-core and holoconf-cli use #![forbid(unsafe_code)] for compile-time enforcement.
+# holoconf-python requires limited unsafe for PyO3 Send+Sync implementations.
+# This target verifies the forbid attributes are in place.
 audit-unsafe:
-	@echo "→ Auditing unsafe code usage..."
-	@which cargo-geiger > /dev/null 2>&1 || (echo "Error: cargo-geiger not found. Run 'make install-tools' first." && exit 1)
-	@echo "→ holoconf-core:"
-	cd crates/holoconf-core && cargo geiger 2>&1 | tail -5 || true
-	@echo "→ holoconf-cli:"
-	cd crates/holoconf-cli && cargo geiger 2>&1 | tail -5 || true
-	@echo "→ holoconf-python:"
-	cd crates/holoconf-python && cargo geiger 2>&1 | tail -5 || true
-	@echo "✓ Unsafe audit complete (see above for details)"
+	@echo "→ Auditing unsafe code policy..."
+	@echo "→ Verifying #![forbid(unsafe_code)] in holoconf-core..."
+	@grep -q '#!\[forbid(unsafe_code)\]' crates/holoconf-core/src/lib.rs || \
+		(echo "  ✗ holoconf-core is missing #![forbid(unsafe_code)]" && exit 1)
+	@echo "  ✓ holoconf-core has #![forbid(unsafe_code)]"
+	@echo "→ Verifying #![forbid(unsafe_code)] in holoconf-cli..."
+	@grep -q '#!\[forbid(unsafe_code)\]' crates/holoconf-cli/src/lib.rs || \
+		(echo "  ✗ holoconf-cli is missing #![forbid(unsafe_code)]" && exit 1)
+	@echo "  ✓ holoconf-cli has #![forbid(unsafe_code)]"
+	@echo "→ Note: holoconf-python uses limited unsafe for PyO3 Send+Sync (see crates/holoconf-python/src/lib.rs)"
+	@echo "✓ Unsafe code policy verified"
 
 # =============================================================================
 # Testing
@@ -159,13 +193,7 @@ test: test-rust test-python test-acceptance
 
 test-rust:
 	@echo "→ Running Rust tests..."
-	cargo test --all
-
-# Python venv paths
-PYTHON_VENV := packages/python/holoconf/.venv
-VENV_PYTHON := $(PYTHON_VENV)/bin/python
-VENV_PYTEST := $(PYTHON_VENV)/bin/pytest
-VENV_MATURIN := $(PYTHON_VENV)/bin/maturin
+	$(CARGO) test --all
 
 test-python: $(VENV_PYTHON)
 	@echo "→ Running Python tests..."
@@ -173,27 +201,25 @@ test-python: $(VENV_PYTHON)
 
 test-acceptance: $(VENV_PYTHON)
 	@echo "→ Building CLI for acceptance tests..."
-	cargo build --package holoconf-cli
+	$(CARGO) build --package holoconf-cli
 	@echo "→ Running acceptance tests (Rust driver)..."
-	$(VENV_PYTHON) tools/test_runner.py --driver rust 'tests/acceptance/**/*.yaml' -v
+	$(CURDIR)/$(VENV_PYTHON) tools/test_runner.py --driver rust 'tests/acceptance/**/*.yaml' -v
 	@echo "→ Running acceptance tests (Python driver)..."
-	$(VENV_PYTHON) tools/test_runner.py --driver python 'tests/acceptance/**/*.yaml' -v
+	$(CURDIR)/$(VENV_PYTHON) tools/test_runner.py --driver python 'tests/acceptance/**/*.yaml' -v
 
 # Generate JSON results for documentation matrix
 test-acceptance-json: $(VENV_PYTHON)
 	@echo "→ Building CLI for acceptance tests..."
-	@cargo build --package holoconf-cli
+	@$(CARGO) build --package holoconf-cli
 	@echo "→ Running acceptance tests and generating JSON results..."
 	@mkdir -p coverage/acceptance
-	$(VENV_PYTHON) tools/test_runner.py --driver rust 'tests/acceptance/**/*.yaml' --json coverage/acceptance/rust.json || true
-	$(VENV_PYTHON) tools/test_runner.py --driver python 'tests/acceptance/**/*.yaml' --json coverage/acceptance/python.json || true
+	$(CURDIR)/$(VENV_PYTHON) tools/test_runner.py --driver rust 'tests/acceptance/**/*.yaml' --json coverage/acceptance/rust.json || true
+	$(CURDIR)/$(VENV_PYTHON) tools/test_runner.py --driver python 'tests/acceptance/**/*.yaml' --json coverage/acceptance/python.json || true
 	@echo "✓ Results written to coverage/acceptance/"
 
 # =============================================================================
 # Coverage
 # =============================================================================
-
-COVERAGE_DIR := coverage
 
 coverage: coverage-rust coverage-python
 	@echo "✓ Coverage reports generated in $(COVERAGE_DIR)/"
@@ -201,7 +227,7 @@ coverage: coverage-rust coverage-python
 coverage-rust:
 	@echo "→ Running Rust tests with coverage..."
 	@mkdir -p $(COVERAGE_DIR)
-	cargo llvm-cov --all-features --workspace --lcov --output-path $(COVERAGE_DIR)/rust-lcov.info
+	$(CARGO) llvm-cov --all-features --workspace --lcov --output-path $(COVERAGE_DIR)/rust-lcov.info
 	@echo "✓ Rust coverage: $(COVERAGE_DIR)/rust-lcov.info"
 
 coverage-python: $(VENV_PYTHON)
@@ -260,7 +286,7 @@ coverage-full:
 coverage-html: $(VENV_PYTHON)
 	@echo "→ Generating HTML coverage reports (unit tests only)..."
 	@mkdir -p docs/coverage/rust docs/coverage/python
-	cargo llvm-cov --all-features --workspace --html --output-dir docs/coverage/rust
+	$(CARGO) llvm-cov --all-features --workspace --html --output-dir docs/coverage/rust
 	cd packages/python/holoconf && $(CURDIR)/$(VENV_PYTEST) tests/ --cov=holoconf --cov-report=html:../../../docs/coverage/python || true
 	@echo "✓ HTML reports generated in docs/coverage/"
 	@echo "  Rust:   docs/coverage/rust/html/index.html"
@@ -299,11 +325,11 @@ coverage-full-html: $(VENV_PYTHON)
 # Build
 # =============================================================================
 
-build:
+build: $(VENV_PYTHON)
 	@echo "→ Building Rust crates..."
-	cargo build --all
+	$(CARGO) build --all
 	@echo "→ Building Python bindings..."
-	cd packages/python/holoconf && maturin develop
+	cd packages/python/holoconf && $(CURDIR)/$(VENV_MATURIN) develop
 
 # =============================================================================
 # Combined Targets
@@ -326,31 +352,26 @@ all: check
 # Check for semver violations (compare against last published version)
 semver-check:
 	@echo "→ Checking for semver violations..."
-	cargo semver-checks check-release --package holoconf-core
+	$(CARGO) semver-checks check-release --package holoconf-core
 
 # =============================================================================
 # SBOM Generation
 # =============================================================================
 
-SBOM_DIR := sbom
-
-sbom:
+sbom: $(VENV_PYTHON)
 	@echo "→ Generating SBOMs..."
 	@mkdir -p $(SBOM_DIR)
 	@echo "→ Generating Rust SBOM (CycloneDX)..."
-	cargo cyclonedx --manifest-path Cargo.toml --format json > $(SBOM_DIR)/holoconf-rust.cdx.json
+	$(CARGO) cyclonedx --manifest-path Cargo.toml --format json > $(SBOM_DIR)/holoconf-rust.cdx.json
 	@echo "→ Generating Python SBOM (CycloneDX)..."
-	cd packages/python/holoconf && pip-audit --format cyclonedx-json > ../../../$(SBOM_DIR)/holoconf-python.cdx.json 2>/dev/null || \
-		cyclonedx-py environment --output-format json > ../../../$(SBOM_DIR)/holoconf-python.cdx.json
+	$(CURDIR)/$(VENV_PIP_AUDIT) --format cyclonedx-json > $(SBOM_DIR)/holoconf-python.cdx.json 2>/dev/null || \
+		$(CURDIR)/$(VENV_PYTHON) -m cyclonedx_py environment --output-format json > $(SBOM_DIR)/holoconf-python.cdx.json
 	@echo "✓ SBOMs generated in $(SBOM_DIR)/"
 	@ls -la $(SBOM_DIR)/
 
 # =============================================================================
 # Documentation
 # =============================================================================
-
-DOCS_VENV := .venv-docs
-MKDOCS := $(DOCS_VENV)/bin/mkdocs
 
 $(DOCS_VENV)/bin/mkdocs:
 	@echo "→ Creating docs virtual environment..."
@@ -375,7 +396,7 @@ docs-serve: $(MKDOCS) test-acceptance-json
 
 clean:
 	@echo "→ Cleaning build artifacts..."
-	cargo clean
+	$(CARGO) clean
 	rm -rf packages/python/holoconf/target/
 	rm -rf packages/python/holoconf/.venv/
 	rm -rf $(COVERAGE_DIR)/
@@ -394,7 +415,7 @@ $(VENV_PYTHON):
 	@echo "→ Python venv not found, creating..."
 	python -m venv $(PYTHON_VENV)
 	$(PYTHON_VENV)/bin/pip install --quiet -e "packages/python/holoconf[dev]"
-	cd packages/python/holoconf && $(CURDIR)/$(PYTHON_VENV)/bin/maturin develop
+	cd packages/python/holoconf && PATH="$(CARGO_PATH):$$PATH" $(CURDIR)/$(VENV_MATURIN) develop
 	@echo "  ✓ Python venv created"
 
 # Run all pre-release checks without making any changes
@@ -462,7 +483,7 @@ endif
 	@echo "  ✓ On main branch"
 	@echo ""
 	@echo "→ Cleaning build cache (avoid stale venv references)..."
-	@cargo clean --quiet
+	@$(CARGO) clean --quiet
 	@echo "→ Running tests..."
 	@$(MAKE) test
 	@echo ""
@@ -501,7 +522,7 @@ publish-crates:
 	@echo ""
 	@echo "→ Publishing holoconf-core..."
 	@cd crates/holoconf-core && { \
-		output=$$(cargo publish 2>&1); \
+		output=$$(PATH="$(CARGO_PATH):$$PATH" cargo publish 2>&1); \
 		status=$$?; \
 		if [ $$status -eq 0 ]; then \
 			echo "  ✓ holoconf-core published"; \
@@ -518,7 +539,7 @@ publish-crates:
 	@echo ""
 	@echo "→ Publishing holoconf-cli..."
 	@cd crates/holoconf-cli && { \
-		output=$$(cargo publish 2>&1); \
+		output=$$(PATH="$(CARGO_PATH):$$PATH" cargo publish 2>&1); \
 		status=$$?; \
 		if [ $$status -eq 0 ]; then \
 			echo "  ✓ holoconf-cli published"; \

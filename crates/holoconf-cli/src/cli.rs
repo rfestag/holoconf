@@ -186,13 +186,18 @@ fn load_config(files: &[PathBuf]) -> Result<Config, String> {
         return Err("No configuration files specified".to_string());
     }
 
-    if files.len() == 1 {
-        Config::from_yaml_file(&files[0])
-            .map_err(|e| format!("Failed to load {}: {}", files[0].display(), e))
-    } else {
-        let paths: Vec<&std::path::Path> = files.iter().map(|p| p.as_path()).collect();
-        Config::load_merged(&paths).map_err(|e| format!("Failed to load and merge files: {}", e))
+    // Load first file
+    let mut config = Config::load(&files[0])
+        .map_err(|e| format!("Failed to load {}: {}", files[0].display(), e))?;
+
+    // Merge subsequent files
+    for file in &files[1..] {
+        let next_config =
+            Config::load(file).map_err(|e| format!("Failed to load {}: {}", file.display(), e))?;
+        config.merge(next_config);
     }
+
+    Ok(config)
 }
 
 fn load_schema(path: &PathBuf) -> Result<Schema, String> {

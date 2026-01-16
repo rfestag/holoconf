@@ -189,19 +189,22 @@ const config = await Config.load(
 
 ### Source Tracking (Debug)
 
-Source tracking is always enabled and records which file each value came from (file-level, no line numbers):
+Source tracking is available when loading a single file with `Config.load()`:
 
 ```python
-config = Config.load_merged(["base.yaml", "override.yaml"])
+config = Config.load("config.yaml")
 
 # Get source file for a specific path
 source = config.get_source("database.host")
-print(source)  # "override.yaml"
+print(source)  # "config.yaml"
 
 # Get all sources as a dict
 sources = config.dump_sources()
-# {"database.host": "override.yaml", "database.port": "base.yaml", ...}
+# {"database.host": "config.yaml", "database.port": "config.yaml", ...}
 ```
+
+Note: Source tracking does not persist through `merge()` operations. For merged configs,
+individual file loading provides source info, but merged results track only values.
 
 #### CLI Usage
 

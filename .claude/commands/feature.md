@@ -18,12 +18,10 @@ Create a git worktree for parallel feature development.
    ```bash
    git fetch origin main
    git branch feature/$ARGUMENTS origin/main
-   git worktree add ../holoconf-$ARGUMENTS feature/$ARGUMENTS
    ```
 
 4. **Setup development environment**:
    ```bash
-   cd ../holoconf-$ARGUMENTS
    make install-tools
    ```
 
