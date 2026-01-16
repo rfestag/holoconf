@@ -1,0 +1,173 @@
+suite: glob_patterns
+description: Glob pattern support for loading multiple config files
+
+tests:
+  - name: glob_star_pattern_merges_alphabetically
+    given:
+      files:
+        config/a.yaml: |
+          key: a
+          from_a: true
+        config/b.yaml: |
+          key: b
+          from_b: true
+        config/c.yaml: |
+          key: c
+          from_c: true
+      config_glob: "config/*.yaml"
+    when:
+      access: key
+    then:
+      # Files sorted alphabetically: a.yaml, b.yaml, c.yaml
+      # c.yaml is last, so its value wins
+      value: c
+
+  - name: glob_preserves_unoverwritten_keys
+    given:
+      files:
+        config/a.yaml: |
+          key: a
+          from_a: true
+        config/b.yaml: |
+          key: b
+          from_b: true
+      config_glob: "config/*.yaml"
+    when:
+      access: from_a
+    then:
+      value: true
+
+  - name: glob_double_star_recursive
+    given:
+      files:
+        config/base.yaml: |
+          value: base
+          from_base: true
+        config/sub/override.yaml: |
+          value: override
+          from_sub: true
+        config/sub/deep/more.yaml: |
+          value: deep
+          from_deep: true
+      config_glob: "config/**/*.yaml"
+    when:
+      access: value
+    then:
+      # Alphabetical: base.yaml, sub/deep/more.yaml, sub/override.yaml
+      # sub/override.yaml is last alphabetically, so its value wins
+      value: override
+
+  - name: glob_question_mark_single_char
+    given:
+      files:
+        config/a.yaml: |
+          key: a
+        config/b.yaml: |
+          key: b
+        config/long_name.yaml: |
+          key: long
+      config_glob: "config/?.yaml"
+    when:
+      access: key
+    then:
+      # Only matches single-character names: a.yaml, b.yaml
+      # long_name.yaml is not matched
+      value: b
+
+  - name: glob_character_class
+    given:
+      files:
+        config/a.yaml: |
+          matched: true
+          key: a
+        config/b.yaml: |
+          matched: true
+          key: b
+        config/c.yaml: |
+          matched: false
+          key: c
+      config_glob: "config/[ab].yaml"
+    when:
+      access: key
+    then:
+      # Only matches a.yaml and b.yaml
+      value: b
+
+  - name: glob_required_no_matches_errors
+    given:
+      files: {}
+      config_glob: "nonexistent/*.yaml"
+      glob_required: true
+    when:
+      load: true
+    then:
+      error:
+        message_contains: "No files matched"
+
+  - name: glob_optional_no_matches_returns_empty
+    given:
+      files: {}
+      config_glob: "nonexistent/*.yaml"
+      glob_required: false
+    when:
+      export: dict
+      resolve: true
+    then:
+      value: {}
+
+  - name: glob_deep_merge
+    given:
+      files:
+        config/base.yaml: |
+          database:
+            host: localhost
+            port: 5432
+            pool:
+              min: 5
+              max: 20
+        config/override.yaml: |
+          database:
+            host: prod-db
+            pool:
+              max: 100
+      config_glob: "config/*.yaml"
+    when:
+      access: database
+    then:
+      value:
+        host: prod-db
+        port: 5432
+        pool:
+          min: 5
+          max: 100
+
+  - name: glob_with_numeric_prefixes
+    given:
+      files:
+        config/00-base.yaml: |
+          priority: 0
+        config/10-middle.yaml: |
+          priority: 10
+        config/99-last.yaml: |
+          priority: 99
+      config_glob: "config/*.yaml"
+    when:
+      access: priority
+    then:
+      # Alphabetical order: 00-base, 10-middle, 99-last
+      # 99-last.yaml is last, so its value wins
+      value: 99
+
+  - name: glob_empty_file_does_not_break
+    given:
+      files:
+        config/a.yaml: |
+          key: a
+        config/empty.yaml: ""
+        config/z.yaml: |
+          key: z
+      config_glob: "config/*.yaml"
+    when:
+      access: key
+    then:
+      value: z

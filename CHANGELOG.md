@@ -33,6 +33,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+#### Glob Pattern Support
+- **Glob patterns in `Config.load()` and `Config.optional()`** - Load and merge multiple files matching a pattern
+  - `Config.load("config/*.yaml")` - Load all matching files, error if none match
+  - `Config.optional("config/*.yaml")` - Load all matching files, empty config if none match
+- **Supported patterns**: `*` (any chars), `**` (recursive), `?` (single char), `[abc]` (char class)
+- **Alphabetical merge order** - Files are sorted before merging, so `00-base.yaml` loads before `99-local.yaml`
+
 #### Schema Default Values
 - **Schema defaults for missing paths** - When a schema is attached to a config, accessing a missing path returns the schema default instead of `PathNotFoundError`
   - `Config.load("config.yaml", schema="schema.yaml")` - Load with schema attached

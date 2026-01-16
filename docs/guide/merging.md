@@ -221,4 +221,97 @@ config/
     }
     ```
 
+## Glob Patterns
+
+When loading configurations from multiple files, you can use glob patterns to automatically match and merge files:
+
+=== "Python"
+
+    ```python
+    from holoconf import Config
+
+    # Load all YAML files in config/ directory
+    config = Config.load("config/*.yaml")
+
+    # Load recursively from nested directories
+    config = Config.load("config/**/*.yaml")
+    ```
+
+=== "Rust"
+
+    ```rust
+    use holoconf::Config;
+
+    fn main() -> Result<(), holoconf::Error> {
+        // Load all YAML files in config/ directory
+        let config = Config::load("config/*.yaml")?;
+
+        // Load recursively from nested directories
+        let config = Config::load("config/**/*.yaml")?;
+
+        Ok(())
+    }
+    ```
+
+### Supported Patterns
+
+| Pattern | Matches |
+|---------|---------|
+| `*` | Any sequence of characters (except `/`) |
+| `**` | Any sequence of directories |
+| `?` | Any single character |
+| `[abc]` | Any character in the set |
+| `[a-z]` | Any character in the range |
+
+### Merge Order
+
+Files matching a glob pattern are **sorted alphabetically** before merging. This means:
+
+- `00-base.yaml` is loaded before `10-override.yaml`
+- `a.yaml` is loaded before `b.yaml`
+- `config/base.yaml` is loaded before `config/sub/override.yaml`
+
+Use numeric prefixes to control the merge order:
+
+```
+config/
+├── 00-base.yaml       # Loaded first (base settings)
+├── 10-database.yaml   # Loaded second
+├── 20-logging.yaml    # Loaded third
+└── 99-local.yaml      # Loaded last (highest priority)
+```
+
+### Required vs Optional Globs
+
+- **`Config.load("pattern")`**: At least one file must match. Returns an error if no files match.
+- **`Config.optional("pattern")`**: Returns an empty config if no files match.
+
+=== "Python"
+
+    ```python
+    from holoconf import Config
+
+    # Error if no files match
+    config = Config.load("config/*.yaml")
+
+    # Empty config if no files match
+    overrides = Config.optional("overrides/*.yaml")
+    ```
+
+=== "Rust"
+
+    ```rust
+    use holoconf::Config;
+
+    fn main() -> Result<(), holoconf::Error> {
+        // Error if no files match
+        let config = Config::load("config/*.yaml")?;
+
+        // Empty config if no files match
+        let overrides = Config::optional("overrides/*.yaml")?;
+
+        Ok(())
+    }
+    ```
+
 See [ADR-004 Config Merging](../adr/ADR-004-config-merging.md) for the design rationale.
