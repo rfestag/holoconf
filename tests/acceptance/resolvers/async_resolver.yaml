@@ -1,0 +1,48 @@
+suite: async_resolver
+description: Async resolver support
+
+tests:
+  - name: async_function_resolver
+    given:
+      mocks:
+        async_lookup:
+          key1: "async_value"
+      config: |
+        value: ${async_lookup:key1}
+      resolver_async: true
+    when:
+      access: value
+    then:
+      value: "async_value"
+
+  - name: async_resolver_with_sensitivity
+    given:
+      mocks:
+        async_secrets:
+          password:
+            value: "async-secret"
+            type: SecureString
+      config: |
+        password: ${async_secrets:password}
+      resolver_async: true
+    when:
+      dump:
+        format: yaml
+        redact: true
+    then:
+      output_contains: "[REDACTED]"
+      output_not_contains: "async-secret"
+
+  - name: async_resolver_error_propagates
+    given:
+      mocks:
+        async_failing: {}
+      config: |
+        value: ${async_failing:missing}
+      resolver_async: true
+    when:
+      access: value
+    then:
+      error:
+        type: ResolverError
+        message_contains: "not found"

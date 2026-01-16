@@ -50,14 +50,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **CLI --schema flag** - `holoconf get` and `holoconf dump` now accept `--schema` for default values
 - **Enhanced validate output** - `holoconf validate` now shows all validation errors with paths
 
-#### Resolver Extension Packages
+#### Custom Resolver Registration
 - **Global resolver registry** - Register resolvers once, use everywhere
   - `holoconf.register_resolver(name, func, force=False)` - Python API
   - `register_global(resolver, force)` - Rust API
+- **Async resolver support** - Async functions automatically awaited via `asyncio.run()`
+  - `async def my_resolver(key, **kwargs): return await fetch(key)`
+- **Return types** - Resolvers can return scalars, lists, dicts, or `ResolvedValue` for sensitive data
+- **KeyError for default handling** - Custom resolvers raise `KeyError` to trigger framework default
 - **Plugin discovery** - Automatic discovery of installed resolver plugins
   - `holoconf.discover_plugins()` - Load all plugins via entry points
   - Entry point group: `holoconf.resolvers`
-- **KeyError for default handling** - Custom resolvers raise `KeyError` to trigger framework default
 - **holoconf-aws package** - AWS resolvers for SSM, CloudFormation, and S3
   - Rust crate: `holoconf-aws` with SSM, CFN, and S3 resolvers
   - Python package: `holoconf-aws` with auto-discovery via entry points

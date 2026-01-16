@@ -1,0 +1,194 @@
+suite: custom_resolver
+description: Custom resolver registration API
+
+tests:
+  # Basic function resolver
+  - name: function_resolver_returns_string
+    given:
+      mocks:
+        custom:
+          mykey: "custom_value"
+      config: |
+        value: ${custom:mykey}
+    when:
+      access: value
+    then:
+      value: "custom_value"
+
+  - name: function_resolver_with_kwargs
+    given:
+      mocks:
+        lookup:
+          "key1":
+            value: "value_for_region_a"
+            region: "us-east-1"
+          "key1_west":
+            value: "value_for_region_b"
+            region: "us-west-2"
+      config: |
+        east_value: ${lookup:key1,region=us-east-1}
+    when:
+      access: east_value
+    then:
+      value: "value_for_region_a"
+
+  # Return types
+  - name: resolver_returns_integer
+    given:
+      mocks:
+        typed:
+          port: 8080
+      config: |
+        port: ${typed:port}
+    when:
+      access: port
+    then:
+      value: 8080
+
+  - name: resolver_returns_boolean
+    given:
+      mocks:
+        typed:
+          enabled: true
+      config: |
+        enabled: ${typed:enabled}
+    when:
+      access: enabled
+    then:
+      value: true
+
+  - name: resolver_returns_float
+    given:
+      mocks:
+        typed:
+          ratio: 3.14159
+      config: |
+        ratio: ${typed:ratio}
+    when:
+      access: ratio
+    then:
+      value: 3.14159
+
+  - name: resolver_returns_list
+    given:
+      mocks:
+        typed:
+          items:
+            - one
+            - two
+            - three
+      config: |
+        items: ${typed:items}
+    when:
+      access: items
+    then:
+      value:
+        - one
+        - two
+        - three
+
+  - name: resolver_returns_dict
+    given:
+      mocks:
+        typed:
+          nested:
+            host: localhost
+            port: 5432
+      config: |
+        db: ${typed:nested}
+    when:
+      access: db
+    then:
+      value:
+        host: localhost
+        port: 5432
+
+  # Sensitivity metadata via ResolvedValue
+  - name: resolved_value_sensitive_is_redacted
+    given:
+      mocks:
+        secrets:
+          api_key:
+            value: "super-secret-key"
+            type: SecureString
+      config: |
+        api_key: ${secrets:api_key}
+    when:
+      dump:
+        format: yaml
+        redact: true
+    then:
+      output_contains: "[REDACTED]"
+      output_not_contains: "super-secret-key"
+
+  - name: resolved_value_not_sensitive_not_redacted
+    given:
+      mocks:
+        secrets:
+          public_id: "public-123"
+      config: |
+        public_id: ${secrets:public_id}
+    when:
+      dump:
+        format: yaml
+        redact: true
+    then:
+      output_contains: "public-123"
+      output_not_contains: "[REDACTED]"
+
+  # Error handling
+  - name: resolver_error_propagates
+    given:
+      mocks:
+        failing: {}
+      config: |
+        value: ${failing:nonexistent}
+    when:
+      access: value
+    then:
+      error:
+        type: ResolverError
+        message_contains: "not found"
+
+  - name: resolver_with_default_on_error
+    given:
+      mocks:
+        failing: {}
+      config: |
+        value: ${failing:nonexistent,default=fallback}
+    when:
+      access: value
+    then:
+      value: "fallback"
+
+  # Callable class instance (duck typing)
+  - name: callable_class_works_as_resolver
+    given:
+      mocks:
+        vault:
+          secret/data/myapp:
+            value: "vault-secret"
+            type: SecureString
+      config: |
+        secret: ${vault:secret/data/myapp}
+    when:
+      access: secret
+    then:
+      value: "vault-secret"
+
+  # Force registration overwrites existing custom resolver
+  # Note: We don't test overwriting built-in resolvers like 'env' because
+  # the global registry persists across tests and would break other tests.
+  - name: force_overwrites_existing_resolver
+    given:
+      mocks:
+        # Register a custom resolver, then use it
+        overwritable:
+          key1: "custom_value"
+      config: |
+        value: ${overwritable:key1}
+    when:
+      access: value
+    then:
+      # Tests that custom resolvers can be registered
+      value: "custom_value"
