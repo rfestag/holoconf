@@ -43,26 +43,102 @@ jobs:
           pytest tests/ -v
 
   # ==========================================================================
-  # Build Python wheels for all platforms
+  # Build Python wheels - manylinux (glibc) x86_64 and aarch64
   # ==========================================================================
-  build-python:
-    name: Build Python (${{ matrix.target }})
+  build-python-manylinux:
+    name: Build Python manylinux (${{ matrix.target }})
     needs: [validate]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            manylinux: auto
-          - os: macos-15
-            target: x86_64-apple-darwin
-          - os: macos-14
-            target: aarch64-apple-darwin
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
+        target:
+          - x86_64-unknown-linux-gnu
+          - aarch64-unknown-linux-gnu
+    steps:
+      - uses: actions/checkout@v4
 
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          manylinux: "2_28"
+          args: --release --out dist
+          working-directory: packages/python/holoconf
+          sccache: true
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-manylinux-${{ matrix.target }}
+          path: packages/python/holoconf/dist/*.whl
+
+  # ==========================================================================
+  # Build Python wheels - musllinux (Alpine) x86_64 and aarch64
+  # ==========================================================================
+  build-python-musllinux:
+    name: Build Python musllinux (${{ matrix.target }})
+    needs: [validate]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - x86_64-unknown-linux-musl
+          - aarch64-unknown-linux-musl
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          manylinux: musllinux_1_2
+          args: --release --out dist
+          working-directory: packages/python/holoconf
+          sccache: true
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-musllinux-${{ matrix.target }}
+          path: packages/python/holoconf/dist/*.whl
+
+  # ==========================================================================
+  # Build Python wheels - macOS (universal2 for both Intel and Apple Silicon)
+  # ==========================================================================
+  build-python-macos:
+    name: Build Python macOS (universal2)
+    needs: [validate]
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build wheels (universal2)
+        uses: PyO3/maturin-action@v1
+        with:
+          target: universal2-apple-darwin
+          args: --release --out dist
+          working-directory: packages/python/holoconf
+          sccache: true
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-macos-universal2
+          path: packages/python/holoconf/dist/*.whl
+
+  # ==========================================================================
+  # Build Python wheels - Windows x86_64
+  # ==========================================================================
+  build-python-windows:
+    name: Build Python Windows (x86_64)
+    needs: [validate]
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -73,8 +149,7 @@ jobs:
       - name: Build wheels
         uses: PyO3/maturin-action@v1
         with:
-          target: ${{ matrix.target }}
-          manylinux: ${{ matrix.manylinux || 'auto' }}
+          target: x86_64-pc-windows-msvc
           args: --release --out dist
           working-directory: packages/python/holoconf
           sccache: true
@@ -82,30 +157,12 @@ jobs:
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
-          name: wheels-${{ matrix.target }}
+          name: wheels-windows-x86_64
           path: packages/python/holoconf/dist/*.whl
 
-  build-python-linux-aarch64:
-    name: Build Python (aarch64-unknown-linux-gnu)
-    needs: [validate]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Build wheels (cross-compile)
-        uses: PyO3/maturin-action@v1
-        with:
-          target: aarch64-unknown-linux-gnu
-          manylinux: auto
-          args: --release --out dist -i python3.9 -i python3.10 -i python3.11 -i python3.12
-          working-directory: packages/python/holoconf
-
-      - name: Upload wheels
-        uses: actions/upload-artifact@v4
-        with:
-          name: wheels-aarch64-unknown-linux-gnu
-          path: packages/python/holoconf/dist/*.whl
-
+  # ==========================================================================
+  # Build Python source distribution
+  # ==========================================================================
   build-python-sdist:
     name: Build Python sdist
     needs: [validate]
@@ -231,7 +288,7 @@ jobs:
   # ==========================================================================
   publish-pypi:
     name: Publish to PyPI
-    needs: [build-python, build-python-linux-aarch64, build-python-sdist]
+    needs: [build-python-manylinux, build-python-musllinux, build-python-macos, build-python-windows, build-python-sdist]
     runs-on: ubuntu-latest
     environment:
       name: pypi
