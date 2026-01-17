@@ -1861,6 +1861,40 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Unreleased">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#security" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Security
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Security">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#file-resolver-path-traversal-protection-breaking-change" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        File Resolver Path Traversal Protection (Breaking Change)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2321,6 +2355,40 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Unreleased">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#security" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Security
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Security">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#file-resolver-path-traversal-protection-breaking-change" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        File Resolver Path Traversal Protection (Breaking Change)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2763,6 +2831,21 @@
 <p>The format is based on <a href="https://keepachangelog.com/en/1.1.0/">Keep a Changelog</a>,
 and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semantic Versioning</a>.</p>
 <h2 id="unreleased"><a href="https://github.com/holoconf/holoconf/compare/v0.1.0...HEAD">Unreleased</a><a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
+<h3 id="security">Security<a class="headerlink" href="#security" title="Permanent link">&para;</a></h3>
+<h4 id="file-resolver-path-traversal-protection-breaking-change">File Resolver Path Traversal Protection (Breaking Change)<a class="headerlink" href="#file-resolver-path-traversal-protection-breaking-change" title="Permanent link">&para;</a></h4>
+<ul>
+<li><strong>File access now sandboxed by default</strong> - The <code>file</code> resolver restricts access to the config file's parent directory to prevent path traversal attacks</li>
+<li>Automatically allows: Files in the same directory as the config file and its subdirectories</li>
+<li>Blocks by default: Absolute paths like <code>/etc/passwd</code> or paths outside the config directory</li>
+<li>Relative paths are resolved relative to the config file's directory</li>
+<li>Symlinks are resolved and validated against allowed roots</li>
+<li><strong>New <code>file_roots</code> parameter</strong> - Explicitly allow access to additional directories</li>
+<li>Python: <code>Config.load("config.yaml", file_roots=["/etc/myapp", "/var/lib/myapp"])</code></li>
+<li>Rust: <code>ConfigOptions { file_roots: vec![PathBuf::from("/etc/myapp")], .. }</code></li>
+<li><strong>Automatic root accumulation</strong> - Parent directories are automatically added to allowed roots when loading files</li>
+<li><strong>Merge behavior</strong> - When merging configs, <code>file_roots</code> from both configs are combined (union)</li>
+<li><strong>Breaking change</strong>: Configs that reference files outside their directory will now fail unless <code>file_roots</code> is specified</li>
+</ul>
 <h2 id="020-2026-01-17">[0.2.0] - 2026-01-17<a class="headerlink" href="#020-2026-01-17" title="Permanent link">&para;</a></h2>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <h4 id="simplified-config-loading-api-breaking-change">Simplified Config Loading API (Breaking Change)<a class="headerlink" href="#simplified-config-loading-api-breaking-change" title="Permanent link">&para;</a></h4>
