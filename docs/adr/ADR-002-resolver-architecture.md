@@ -182,7 +182,11 @@ holoconf.register("vault", new VaultResolver());
 
 The core wraps simple functions internally, defaulting `sensitive=False`. The class form enables resolver-aware redaction during serialization.
 
-Async resolvers enable parallel resolution internally (ADR-003), but access appears synchronous - the value blocks until resolved. For explicit async access, use `load_async()` and `resolve_all()`.
+Async resolvers enable parallel resolution internally, but access appears synchronous - the value blocks until resolved. For explicit async access, use `resolve_all()` to resolve all values in parallel.
+
+> **Note:** `load_async()` was considered but not implemented for file loading. Async
+> file I/O provides minimal benefit for small local config files. The async value is
+> in resolver execution (SSM, HTTP, etc.), not file loading.
 
 ### Resolver Return Types
 
