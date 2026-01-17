@@ -68,6 +68,7 @@ class Config:
     def load(
         path: str,
         schema: str | None = None,
+        file_roots: list[str] | None = None,
         allow_http: bool = False,
         http_allowlist: list[str] | None = None,
         http_proxy: str | None = None,
@@ -88,6 +89,8 @@ class Config:
             path: Path to the YAML file
             schema: Optional path to a JSON Schema file. If provided, schema defaults
                    will be used when accessing missing paths.
+            file_roots: Additional allowed directory paths for file resolver (security).
+                       The config file's parent directory is automatically allowed.
             allow_http: Enable HTTP resolver (disabled by default for security)
             http_allowlist: List of URL patterns to allow (glob-style)
             http_proxy: Proxy URL (e.g., "http://proxy:8080" or "socks5://proxy:1080")
@@ -116,6 +119,7 @@ class Config:
     def required(
         path: str,
         schema: str | None = None,
+        file_roots: list[str] | None = None,
         allow_http: bool = False,
         http_allowlist: list[str] | None = None,
         http_proxy: str | None = None,
@@ -134,6 +138,8 @@ class Config:
         Args:
             path: Path to the YAML file
             schema: Optional path to a JSON Schema file
+            file_roots: Additional allowed directory paths for file resolver (security).
+                       The config file's parent directory is automatically allowed.
             allow_http: Enable HTTP resolver (disabled by default for security)
             http_allowlist: List of URL patterns to allow (glob-style)
             http_proxy: Proxy URL (e.g., "http://proxy:8080" or "socks5://proxy:1080")
@@ -179,6 +185,7 @@ class Config:
     def loads(
         yaml: str,
         base_path: str | None = None,
+        file_roots: list[str] | None = None,
         allow_http: bool = False,
         http_allowlist: list[str] | None = None,
         http_proxy: str | None = None,
@@ -195,6 +202,8 @@ class Config:
         Args:
             yaml: YAML content as a string
             base_path: Optional base path for resolving relative file references
+            file_roots: Additional allowed directory paths for file resolver (security).
+                       If base_path is set, it's automatically allowed.
             allow_http: Enable HTTP resolver (disabled by default for security)
             http_allowlist: List of URL patterns to allow (glob-style)
             http_proxy: Proxy URL (e.g., "http://proxy:8080" or "socks5://proxy:1080")
