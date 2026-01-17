@@ -317,16 +317,30 @@ impl Error {
         } else {
             allowlist.join(", ")
         };
+
+        let help_msg = if let Some(ref path) = config_path {
+            format!(
+                "The URL specified by '{}' is not in the allowlist.\n\
+                 Update the allowlist or change the URL to match an allowed pattern.\n\
+                 Current allowlist patterns: {}\n\
+                 Use 'holoconf dump --include-sources' to see which file contains this value.",
+                path, allowlist_str
+            )
+        } else {
+            format!(
+                "The URL is not in the allowlist.\n\
+                 Current allowlist patterns: {}",
+                allowlist_str
+            )
+        };
+
         Self {
             kind: ErrorKind::Resolver(ResolverErrorKind::HttpNotAllowed {
-                url: url_str.clone(),
+                url: url_str,
             }),
             path: config_path,
             source_location: None,
-            help: Some(format!(
-                "Add '{}' to the http_allowlist, or use a pattern that matches it.\nCurrent allowlist: {}",
-                url_str, allowlist_str
-            )),
+            help: Some(help_msg),
             cause: None,
         }
     }

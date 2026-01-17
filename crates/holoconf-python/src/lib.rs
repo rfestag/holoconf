@@ -335,7 +335,9 @@ impl PyConfig {
     ///     http_client_cert: Path to client certificate (PEM or P12/PFX) for mTLS
     ///     http_client_key: Path to client private key PEM (not needed for P12/PFX)
     ///     http_client_key_password: Password for encrypted key or P12/PFX file
-    ///     http_insecure: DANGEROUS - Skip TLS certificate verification
+    ///
+    ///     NOTE: http_insecure removed for security. Use insecure=true kwarg on individual
+    ///           http/https resolver calls instead (e.g., ${https:url,insecure=true})
     #[staticmethod]
     #[pyo3(signature = (
         yaml,
@@ -349,8 +351,7 @@ impl PyConfig {
         http_extra_ca_bundle=None,
         http_client_cert=None,
         http_client_key=None,
-        http_client_key_password=None,
-        http_insecure=false
+        http_client_key_password=None
     ))]
     #[allow(clippy::too_many_arguments)]
     fn loads(
@@ -366,7 +367,6 @@ impl PyConfig {
         http_client_cert: Option<&str>,
         http_client_key: Option<&str>,
         http_client_key_password: Option<&str>,
-        http_insecure: bool,
     ) -> PyResult<Self> {
         let mut options = ConfigOptions::default();
         if let Some(bp) = base_path {
@@ -390,7 +390,7 @@ impl PyConfig {
         options.http_client_cert = http_client_cert.map(std::path::PathBuf::from);
         options.http_client_key = http_client_key.map(std::path::PathBuf::from);
         options.http_client_key_password = http_client_key_password.map(String::from);
-        options.http_insecure = http_insecure;
+        // http_insecure removed - use insecure=true kwarg on resolver calls
         let inner = CoreConfig::from_yaml_with_options(yaml, options).map_err(to_py_err)?;
         Ok(Self { inner })
     }
@@ -415,7 +415,9 @@ impl PyConfig {
     ///     http_client_cert: Path to client certificate (PEM or P12/PFX) for mTLS
     ///     http_client_key: Path to client private key PEM (not needed for P12/PFX)
     ///     http_client_key_password: Password for encrypted key or P12/PFX file
-    ///     http_insecure: DANGEROUS - Skip TLS certificate verification
+    ///
+    ///     NOTE: http_insecure removed for security. Use insecure=true kwarg on individual
+    ///           http/https resolver calls instead (e.g., ${https:url,insecure=true})
     ///
     /// Returns:
     ///     A new Config object
@@ -436,8 +438,7 @@ impl PyConfig {
         http_extra_ca_bundle=None,
         http_client_cert=None,
         http_client_key=None,
-        http_client_key_password=None,
-        http_insecure=false
+        http_client_key_password=None
     ))]
     #[allow(clippy::too_many_arguments)]
     fn load(
@@ -453,7 +454,6 @@ impl PyConfig {
         http_client_cert: Option<&str>,
         http_client_key: Option<&str>,
         http_client_key_password: Option<&str>,
-        http_insecure: bool,
     ) -> PyResult<Self> {
         let mut options = ConfigOptions::default();
         // Add additional file_roots from parameter (parent dir is auto-added by Rust core)
@@ -471,7 +471,7 @@ impl PyConfig {
         options.http_client_cert = http_client_cert.map(std::path::PathBuf::from);
         options.http_client_key = http_client_key.map(std::path::PathBuf::from);
         options.http_client_key_password = http_client_key_password.map(String::from);
-        options.http_insecure = http_insecure;
+        // http_insecure removed - use insecure=true kwarg on resolver calls
 
         // Use load_with_options which supports glob patterns
         let mut inner = CoreConfig::load_with_options(path, options).map_err(to_py_err)?;
@@ -502,7 +502,9 @@ impl PyConfig {
     ///     http_client_cert: Path to client certificate (PEM or P12/PFX) for mTLS
     ///     http_client_key: Path to client private key PEM (not needed for P12/PFX)
     ///     http_client_key_password: Password for encrypted key or P12/PFX file
-    ///     http_insecure: DANGEROUS - Skip TLS certificate verification
+    ///
+    ///     NOTE: http_insecure removed for security. Use insecure=true kwarg on individual
+    ///           http/https resolver calls instead (e.g., ${https:url,insecure=true})
     #[staticmethod]
     #[pyo3(signature = (
         path,
@@ -516,8 +518,7 @@ impl PyConfig {
         http_extra_ca_bundle=None,
         http_client_cert=None,
         http_client_key=None,
-        http_client_key_password=None,
-        http_insecure=false
+        http_client_key_password=None
     ))]
     #[allow(clippy::too_many_arguments)]
     fn required(
@@ -533,7 +534,6 @@ impl PyConfig {
         http_client_cert: Option<&str>,
         http_client_key: Option<&str>,
         http_client_key_password: Option<&str>,
-        http_insecure: bool,
     ) -> PyResult<Self> {
         Self::load(
             path,
@@ -548,7 +548,6 @@ impl PyConfig {
             http_client_cert,
             http_client_key,
             http_client_key_password,
-            http_insecure,
         )
     }
 
