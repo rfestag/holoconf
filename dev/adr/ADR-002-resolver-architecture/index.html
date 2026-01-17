@@ -2236,7 +2236,12 @@
 </span><span id="__span-5-12"><a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a><span class="nx">holoconf</span><span class="p">.</span><span class="nx">register</span><span class="p">(</span><span class="s2">&quot;vault&quot;</span><span class="p">,</span><span class="w"> </span><span class="ow">new</span><span class="w"> </span><span class="nx">VaultResolver</span><span class="p">());</span>
 </span></code></pre></div>
 <p>The core wraps simple functions internally, defaulting <code>sensitive=False</code>. The class form enables resolver-aware redaction during serialization.</p>
-<p>Async resolvers enable parallel resolution internally (ADR-003), but access appears synchronous - the value blocks until resolved. For explicit async access, use <code>load_async()</code> and <code>resolve_all()</code>.</p>
+<p>Async resolvers enable parallel resolution internally, but access appears synchronous - the value blocks until resolved. For explicit async access, use <code>resolve_all()</code> to resolve all values in parallel.</p>
+<blockquote>
+<p><strong>Note:</strong> <code>load_async()</code> was considered but not implemented for file loading. Async
+file I/O provides minimal benefit for small local config files. The async value is
+in resolver execution (SSM, HTTP, etc.), not file loading.</p>
+</blockquote>
 <h3 id="resolver-return-types">Resolver Return Types<a class="headerlink" href="#resolver-return-types" title="Permanent link">&para;</a></h3>
 <p>Resolvers can return scalars or complex types:</p>
 <table>
