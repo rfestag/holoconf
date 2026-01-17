@@ -222,6 +222,13 @@ Fetches content from remote URLs.
 | `timeout` | int | 30 | Request timeout in seconds |
 | `header` | string | - | HTTP header to include as `Name:Value` (repeatable) |
 | `sensitive` | bool | `false` | Mark the resolved value as sensitive |
+| `proxy` | string | - | HTTP or SOCKS proxy URL (overrides config-level `http_proxy`) |
+| `ca_bundle` | string | - | Path to CA bundle (replaces default roots, overrides `http_ca_bundle`) |
+| `extra_ca_bundle` | string | - | Path to extra CA (adds to default roots, overrides `http_extra_ca_bundle`) |
+| `client_cert` | string | - | Path to client certificate (PEM or P12/PFX) |
+| `client_key` | string | - | Path to client private key (PEM) |
+| `key_password` | string | - | Password for encrypted key or P12/PFX |
+| `insecure` | bool | `false` | Skip TLS verification (DANGEROUS, dev only) |
 
 **Parse Modes:**
 
@@ -282,6 +289,80 @@ config = Config.load(
     allow_http=True,
     http_allowlist=["https://config.internal/*", "https://api.example.com/config/*"]
 )
+```
+
+**TLS/Proxy Configuration:**
+
+Config-level options apply to all HTTP requests. Per-request kwargs override config-level settings.
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `http_proxy` | string | HTTP or SOCKS proxy URL (e.g., `http://proxy:8080`, `socks5://proxy:1080`) |
+| `http_proxy_from_env` | bool | Auto-detect proxy from `HTTP_PROXY`/`HTTPS_PROXY` environment variables |
+| `http_ca_bundle` | path | Replace default root certificates with custom CA bundle |
+| `http_extra_ca_bundle` | path | Add extra CA certificates to default root certificates |
+| `http_client_cert` | path | Client certificate for mTLS (PEM or P12/PFX format) |
+| `http_client_key` | path | Client private key for mTLS (PEM format, not needed for P12/PFX) |
+| `http_client_key_password` | string | Password for encrypted private key or P12/PFX bundle |
+| `http_insecure` | bool | Skip TLS verification (DANGEROUS, dev only) |
+
+**Supported Key/Certificate Formats:**
+- Unencrypted PEM certificate and key files
+- Encrypted PKCS#8 PEM private keys (password protected)
+- P12/PFX bundles containing certificate and key (password protected)
+
+```python
+# mTLS with PEM files
+config = Config.load(
+    "config.yaml",
+    allow_http=True,
+    http_client_cert="/path/to/client.pem",
+    http_client_key="/path/to/client-key.pem"
+)
+
+# mTLS with encrypted key
+config = Config.load(
+    "config.yaml",
+    allow_http=True,
+    http_client_cert="/path/to/client.pem",
+    http_client_key="/path/to/client-key.pem",
+    http_client_key_password="secret"
+)
+
+# mTLS with P12/PFX bundle
+config = Config.load(
+    "config.yaml",
+    allow_http=True,
+    http_client_cert="/path/to/identity.p12",
+    http_client_key_password="secret"
+)
+
+# Custom CA for internal services
+config = Config.load(
+    "config.yaml",
+    allow_http=True,
+    http_extra_ca_bundle="/etc/ssl/certs/internal-ca.pem"
+)
+
+# Proxy configuration
+config = Config.load(
+    "config.yaml",
+    allow_http=True,
+    http_proxy="http://proxy.corp.com:8080"
+)
+```
+
+**Per-request overrides in YAML:**
+
+```yaml
+# Override proxy for specific request
+value: ${http:https://api.example.com/config,proxy=http://proxy:8080}
+
+# mTLS for specific request
+value: ${http:https://secure.corp/config,client_cert=/path/cert.pem,client_key=/path/key.pem}
+
+# Custom CA for specific request
+value: ${http:https://internal.corp/config,extra_ca_bundle=/path/to/ca.pem}
 ```
 
 ## API Surface

@@ -69,6 +69,16 @@ pub enum ResolverErrorKind {
     HttpDisabled,
     /// URL not in allowlist
     HttpNotAllowed { url: String },
+    /// TLS configuration error
+    TlsConfigError { message: String },
+    /// Proxy configuration error
+    ProxyConfigError { message: String },
+    /// PEM file loading error
+    PemLoadError { path: String, message: String },
+    /// P12/PFX file loading error
+    P12LoadError { path: String, message: String },
+    /// Key decryption error
+    KeyDecryptionError { message: String },
     /// Referenced config path not found
     RefNotFound { ref_path: String },
     /// Unknown resolver
@@ -321,6 +331,84 @@ impl Error {
         }
     }
 
+    /// Create a TLS configuration error
+    pub fn tls_config_error(message: impl Into<String>) -> Self {
+        Self {
+            kind: ErrorKind::Resolver(ResolverErrorKind::TlsConfigError {
+                message: message.into(),
+            }),
+            path: None,
+            source_location: None,
+            help: Some("Check your TLS configuration (CA bundles, client certificates)".into()),
+            cause: None,
+        }
+    }
+
+    /// Create a proxy configuration error
+    pub fn proxy_config_error(message: impl Into<String>) -> Self {
+        Self {
+            kind: ErrorKind::Resolver(ResolverErrorKind::ProxyConfigError {
+                message: message.into(),
+            }),
+            path: None,
+            source_location: None,
+            help: Some(
+                "Check your proxy URL format (e.g., http://proxy:8080 or socks5://proxy:1080)"
+                    .into(),
+            ),
+            cause: None,
+        }
+    }
+
+    /// Create a PEM file loading error
+    pub fn pem_load_error(path: impl Into<String>, message: impl Into<String>) -> Self {
+        let path_str = path.into();
+        Self {
+            kind: ErrorKind::Resolver(ResolverErrorKind::PemLoadError {
+                path: path_str.clone(),
+                message: message.into(),
+            }),
+            path: None,
+            source_location: None,
+            help: Some(format!(
+                "Ensure '{}' exists and contains valid PEM-encoded data",
+                path_str
+            )),
+            cause: None,
+        }
+    }
+
+    /// Create a P12/PFX file loading error
+    pub fn p12_load_error(path: impl Into<String>, message: impl Into<String>) -> Self {
+        let path_str = path.into();
+        Self {
+            kind: ErrorKind::Resolver(ResolverErrorKind::P12LoadError {
+                path: path_str.clone(),
+                message: message.into(),
+            }),
+            path: None,
+            source_location: None,
+            help: Some(format!(
+                "Ensure '{}' exists and contains a valid PKCS#12/PFX bundle with the correct password",
+                path_str
+            )),
+            cause: None,
+        }
+    }
+
+    /// Create a key decryption error
+    pub fn key_decryption_error(message: impl Into<String>) -> Self {
+        Self {
+            kind: ErrorKind::Resolver(ResolverErrorKind::KeyDecryptionError {
+                message: message.into(),
+            }),
+            path: None,
+            source_location: None,
+            help: Some("Check that the password is correct for the encrypted private key".into()),
+            cause: None,
+        }
+    }
+
     /// Create an internal error (bug in holoconf)
     pub fn internal(message: impl Into<String>) -> Self {
         Self {
@@ -367,6 +455,21 @@ impl fmt::Display for Error {
                 }
                 ResolverErrorKind::AlreadyRegistered { name } => {
                     write!(f, "Resolver '{}' is already registered", name)?
+                }
+                ResolverErrorKind::TlsConfigError { message } => {
+                    write!(f, "TLS configuration error: {}", message)?
+                }
+                ResolverErrorKind::ProxyConfigError { message } => {
+                    write!(f, "Proxy configuration error: {}", message)?
+                }
+                ResolverErrorKind::PemLoadError { path, message } => {
+                    write!(f, "Failed to load PEM file '{}': {}", path, message)?
+                }
+                ResolverErrorKind::P12LoadError { path, message } => {
+                    write!(f, "Failed to load P12/PFX file '{}': {}", path, message)?
+                }
+                ResolverErrorKind::KeyDecryptionError { message } => {
+                    write!(f, "Failed to decrypt private key: {}", message)?
                 }
             },
             ErrorKind::Validation => write!(f, "Validation error")?,

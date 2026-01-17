@@ -38,6 +38,24 @@ pub struct ConfigOptions {
     pub http_allowlist: Vec<String>,
     /// Additional file roots for file resolver sandboxing
     pub file_roots: Vec<PathBuf>,
+
+    // --- TLS/Proxy Options ---
+    /// HTTP proxy URL (e.g., "http://proxy:8080" or "socks5://proxy:1080")
+    pub http_proxy: Option<String>,
+    /// Whether to auto-detect proxy from environment variables (HTTP_PROXY, HTTPS_PROXY)
+    pub http_proxy_from_env: bool,
+    /// Path to CA bundle PEM file (replaces default webpki-roots)
+    pub http_ca_bundle: Option<PathBuf>,
+    /// Path to extra CA bundle PEM file (appends to webpki-roots)
+    pub http_extra_ca_bundle: Option<PathBuf>,
+    /// Path to client certificate PEM or P12/PFX file (for mTLS)
+    pub http_client_cert: Option<PathBuf>,
+    /// Path to client private key PEM file (for mTLS, not needed for P12/PFX)
+    pub http_client_key: Option<PathBuf>,
+    /// Password for encrypted private key or P12/PFX file
+    pub http_client_key_password: Option<String>,
+    /// DANGEROUS: Skip TLS certificate verification (dev only)
+    pub http_insecure: bool,
 }
 
 /// The main configuration container
@@ -174,11 +192,54 @@ impl Config {
         }
     }
 
+    /// Load a configuration file with custom options
+    ///
+    /// This is the main entry point for loading config with HTTP/TLS/proxy options.
+    /// Supports glob patterns like `config/*.yaml` or `config/**/*.yaml`.
+    /// When a glob pattern is used, matching files are sorted alphabetically
+    /// and merged in order.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let mut options = ConfigOptions::default();
+    /// options.allow_http = true;
+    /// options.http_proxy = Some("http://proxy:8080".into());
+    /// let config = Config::load_with_options("config.yaml", options)?;
+    /// ```
+    pub fn load_with_options(path: impl AsRef<Path>, options: ConfigOptions) -> Result<Self> {
+        let path_str = path.as_ref().to_string_lossy();
+
+        if is_glob_pattern(&path_str) {
+            let paths = expand_glob(&path_str)?;
+            if paths.is_empty() {
+                return Err(Error::file_not_found(
+                    format!("No files matched glob pattern '{}'", path_str),
+                    None,
+                ));
+            }
+            // Load first file with options, then merge the rest
+            let mut config = Self::from_yaml_file_with_options(&paths[0], options.clone())?;
+            for p in &paths[1..] {
+                let other = Self::from_yaml_file_with_options(p, options.clone())?;
+                config.merge(other);
+            }
+            Ok(config)
+        } else {
+            Self::from_yaml_file_with_options(path, options)
+        }
+    }
+
     /// Alias for `load()` - load a required config file
     ///
     /// Provided for symmetry with `Config::optional()`.
     pub fn required(path: impl AsRef<Path>) -> Result<Self> {
         Self::load(path)
+    }
+
+    /// Load a required config file with custom options
+    pub fn required_with_options(path: impl AsRef<Path>, options: ConfigOptions) -> Result<Self> {
+        Self::load_with_options(path, options)
     }
 
     /// Load an optional configuration file
@@ -255,6 +316,14 @@ impl Config {
 
     /// Load configuration from a YAML file
     fn from_yaml_file(path: impl AsRef<Path>) -> Result<Self> {
+        Self::from_yaml_file_with_options(path, ConfigOptions::default())
+    }
+
+    /// Load configuration from a YAML file with custom options
+    fn from_yaml_file_with_options(
+        path: impl AsRef<Path>,
+        mut options: ConfigOptions,
+    ) -> Result<Self> {
         let path = path.as_ref();
         let content = std::fs::read_to_string(path).map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
@@ -276,8 +345,10 @@ impl Config {
         let mut source_map = HashMap::new();
         value.collect_leaf_paths("", &filename, &mut source_map);
 
-        let mut options = ConfigOptions::default();
-        options.base_path = path.parent().map(|p| p.to_path_buf());
+        // Set base_path from file location if not already set
+        if options.base_path.is_none() {
+            options.base_path = path.parent().map(|p| p.to_path_buf());
+        }
 
         Ok(Self::with_options_and_sources(value, options, source_map))
     }
@@ -658,12 +729,24 @@ impl Config {
             Interpolation::Literal(s) => Ok(ResolvedValue::new(Value::String(s.clone()))),
 
             Interpolation::Resolver { name, args, kwargs } => {
-                // Create resolver context
+                // Create resolver context with all options
                 let mut ctx = ResolverContext::new(path);
                 ctx.config_root = Some(Arc::clone(&self.raw));
                 if let Some(base) = &self.options.base_path {
                     ctx.base_path = Some(base.clone());
                 }
+                // HTTP options
+                ctx.allow_http = self.options.allow_http;
+                ctx.http_allowlist = self.options.http_allowlist.clone();
+                // TLS/Proxy options
+                ctx.http_proxy = self.options.http_proxy.clone();
+                ctx.http_proxy_from_env = self.options.http_proxy_from_env;
+                ctx.http_ca_bundle = self.options.http_ca_bundle.clone();
+                ctx.http_extra_ca_bundle = self.options.http_extra_ca_bundle.clone();
+                ctx.http_client_cert = self.options.http_client_cert.clone();
+                ctx.http_client_key = self.options.http_client_key.clone();
+                ctx.http_client_key_password = self.options.http_client_key_password.clone();
+                ctx.http_insecure = self.options.http_insecure;
 
                 // Resolve arguments
                 let resolved_args: Vec<String> = args
@@ -1932,6 +2015,7 @@ nested:
             allow_http: true,
             http_allowlist: vec![],
             file_roots: vec!["/custom/path".into()],
+            ..Default::default()
         };
         let config = Config::with_options(value, options);
 
@@ -1946,6 +2030,7 @@ nested:
             allow_http: true,
             http_allowlist: vec![],
             file_roots: vec![],
+            ..Default::default()
         };
         let config = Config::from_yaml_with_options(yaml, options).unwrap();
 

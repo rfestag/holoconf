@@ -180,6 +180,153 @@ The URL allowlist supports glob-style patterns:
 4. **Set appropriate timeouts** - Prevent hanging on slow responses
 5. **Use authentication** - Add authorization headers for private endpoints
 
+#### Proxy Configuration
+
+Configure HTTP/SOCKS proxy for requests:
+
+=== "Python"
+
+    ```python
+    from holoconf import Config
+
+    # Explicit proxy
+    config = Config.load(
+        "config.yaml",
+        allow_http=True,
+        http_proxy="http://proxy.corp.com:8080"
+    )
+
+    # SOCKS proxy
+    config = Config.load(
+        "config.yaml",
+        allow_http=True,
+        http_proxy="socks5://proxy.corp.com:1080"
+    )
+
+    # Auto-detect from environment (HTTP_PROXY, HTTPS_PROXY)
+    config = Config.load(
+        "config.yaml",
+        allow_http=True,
+        http_proxy_from_env=True
+    )
+    ```
+
+Per-request proxy override in YAML:
+
+```yaml
+value: ${http:https://api.example.com/config,proxy=http://proxy:8080}
+```
+
+#### Custom CA Certificates
+
+For internal/corporate CAs or self-signed certificates:
+
+=== "Python"
+
+    ```python
+    from holoconf import Config
+
+    # Replace default roots with custom CA bundle
+    config = Config.load(
+        "config.yaml",
+        allow_http=True,
+        http_ca_bundle="/etc/ssl/certs/internal-ca.pem"
+    )
+
+    # Add extra CA to default roots
+    config = Config.load(
+        "config.yaml",
+        allow_http=True,
+        http_extra_ca_bundle="/etc/ssl/certs/extra-ca.pem"
+    )
+    ```
+
+Per-request CA override in YAML:
+
+```yaml
+# Replace CA bundle
+value: ${http:https://internal.corp/config,ca_bundle=/path/to/ca.pem}
+
+# Add extra CA
+value: ${http:https://api.example.com/config,extra_ca_bundle=/path/to/extra.pem}
+```
+
+#### Mutual TLS (mTLS) / Client Certificates
+
+For services requiring client certificate authentication:
+
+=== "Python"
+
+    ```python
+    from holoconf import Config
+
+    # PEM certificate and key
+    config = Config.load(
+        "config.yaml",
+        allow_http=True,
+        http_client_cert="/path/to/client.pem",
+        http_client_key="/path/to/client-key.pem"
+    )
+
+    # Encrypted private key
+    config = Config.load(
+        "config.yaml",
+        allow_http=True,
+        http_client_cert="/path/to/client.pem",
+        http_client_key="/path/to/client-key-encrypted.pem",
+        http_client_key_password="secret"
+    )
+
+    # P12/PFX bundle (includes both cert and key)
+    config = Config.load(
+        "config.yaml",
+        allow_http=True,
+        http_client_cert="/path/to/identity.p12",
+        http_client_key_password="secret"
+    )
+    ```
+
+Per-request mTLS in YAML:
+
+```yaml
+# PEM files
+value: ${http:https://secure.corp/config,client_cert=/path/cert.pem,client_key=/path/key.pem}
+
+# With encrypted key
+value: ${http:https://secure.corp/config,client_cert=/path/cert.pem,client_key=/path/key.pem,key_password=secret}
+
+# P12/PFX bundle
+value: ${http:https://secure.corp/config,client_cert=/path/identity.p12,key_password=secret}
+```
+
+#### Disabling TLS Verification
+
+!!! danger "http_insecure is dangerous"
+    Setting `http_insecure=true` disables ALL TLS certificate verification.
+    This exposes your application to man-in-the-middle attacks.
+
+    **Never use in production.** Only for local development with self-signed certs.
+
+=== "Python"
+
+    ```python
+    from holoconf import Config
+
+    # DANGEROUS: For development only
+    config = Config.load(
+        "config.yaml",
+        allow_http=True,
+        http_insecure=True  # DO NOT USE IN PRODUCTION
+    )
+    ```
+
+Per-request insecure mode in YAML:
+
+```yaml
+# DANGEROUS: Skip TLS verification
+value: ${http:https://dev.local/config,insecure=true}
+```
+
 ## Lazy Resolution
 
 Resolvers are invoked **lazily** - values are only resolved when accessed, not when the configuration is loaded. This means:

@@ -14,5 +14,4 @@ crate-type = ["cdylib"]
 [dependencies]
 holoconf-core.workspace = true
 pyo3 = { version = "0.24", features = ["extension-module"] }
-serde_yaml = "0.9"
 indexmap = "2.7"
