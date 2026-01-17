@@ -91,6 +91,8 @@ pub struct ResolverContext {
     pub config_root: Option<Arc<Value>>,
     /// The base path for relative file paths
     pub base_path: Option<std::path::PathBuf>,
+    /// Allowed root directories for file resolver (path traversal protection)
+    pub file_roots: std::collections::HashSet<std::path::PathBuf>,
     /// Resolution stack for circular reference detection
     pub resolution_stack: Vec<String>,
     /// Whether HTTP resolver is enabled
@@ -122,6 +124,7 @@ impl ResolverContext {
             config_path: config_path.into(),
             config_root: None,
             base_path: None,
+            file_roots: std::collections::HashSet::new(),
             resolution_stack: Vec::new(),
             allow_http: false,
             http_allowlist: Vec::new(),
@@ -502,6 +505,71 @@ fn file_resolver(
     } else {
         std::path::PathBuf::from(file_path_str)
     };
+
+    // Validate path is within allowed roots (path traversal protection)
+    // Security: Empty file_roots would bypass all validation - deny by default
+    if ctx.file_roots.is_empty() {
+        return Err(Error::resolver_custom(
+            "file",
+            "File resolver requires allowed directories to be configured. \
+             Use Config.load() which auto-configures the parent directory, or \
+             specify file_roots explicitly for Config.loads()."
+                .to_string(),
+        )
+        .with_path(ctx.config_path.clone()));
+    }
+
+    // Canonicalize file path to resolve symlinks and get absolute path
+    // This also checks if file exists (canonicalize fails if file doesn't exist)
+    let canonical_path = file_path.canonicalize().map_err(|e| {
+        // Check if this is a "not found" error for better error message
+        if e.kind() == std::io::ErrorKind::NotFound {
+            return Error::file_not_found(file_path_str, Some(ctx.config_path.clone()));
+        }
+        Error::resolver_custom("file", format!("Failed to resolve file path: {}", e))
+            .with_path(ctx.config_path.clone())
+    })?;
+
+    // Validate against allowed roots
+    let mut canonicalization_errors = Vec::new();
+    let is_allowed = ctx.file_roots.iter().any(|root| {
+        match root.canonicalize() {
+            Ok(canonical_root) => canonical_path.starts_with(&canonical_root),
+            Err(e) => {
+                // Log but don't fail - root might not exist yet
+                canonicalization_errors.push((root.clone(), e));
+                false
+            }
+        }
+    });
+
+    if !is_allowed {
+        // Sanitize error message to avoid information disclosure
+        let display_path = if let Some(base) = &ctx.base_path {
+            file_path
+                .strip_prefix(base)
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|_| "<outside allowed directories>".to_string())
+        } else {
+            "<outside allowed directories>".to_string()
+        };
+
+        let mut msg = format!(
+            "Access denied: file '{}' is outside allowed directories.",
+            display_path
+        );
+
+        if !canonicalization_errors.is_empty() {
+            msg.push_str(&format!(
+                " Note: {} configured root(s) could not be validated.",
+                canonicalization_errors.len()
+            ));
+        }
+
+        msg.push_str(" Use file_roots parameter to extend allowed directories.");
+
+        return Err(Error::resolver_custom("file", msg).with_path(ctx.config_path.clone()));
+    }
 
     // Handle binary encoding separately - returns Value::Bytes directly
     if encoding == "binary" {
@@ -1301,6 +1369,7 @@ mod tests {
 
         let mut ctx = ResolverContext::new("test.path");
         ctx.base_path = Some(temp_dir.clone());
+        ctx.file_roots.insert(temp_dir.clone());
 
         let args = vec!["holoconf_test_file.txt".to_string()];
         let mut kwargs = HashMap::new();
@@ -1329,6 +1398,7 @@ mod tests {
 
         let mut ctx = ResolverContext::new("test.path");
         ctx.base_path = Some(temp_dir.clone());
+        ctx.file_roots.insert(temp_dir.clone());
 
         let args = vec!["holoconf_test.yaml".to_string()];
         let kwargs = HashMap::new();
@@ -1502,6 +1572,7 @@ mod tests {
 
         let mut ctx = ResolverContext::new("test.path");
         ctx.base_path = Some(temp_dir.clone());
+        ctx.file_roots.insert(temp_dir.clone());
 
         let args = vec!["holoconf_test.json".to_string()];
         let kwargs = HashMap::new();
@@ -1525,7 +1596,8 @@ mod tests {
             writeln!(file, "absolute path content").unwrap();
         }
 
-        let ctx = ResolverContext::new("test.path");
+        let mut ctx = ResolverContext::new("test.path");
+        ctx.file_roots.insert(temp_dir.clone());
         // No base path - using absolute path directly
         let args = vec![test_file.to_string_lossy().to_string()];
         let mut kwargs = HashMap::new();
@@ -1556,6 +1628,7 @@ mod tests {
 
         let mut ctx = ResolverContext::new("test.path");
         ctx.base_path = Some(temp_dir.clone());
+        ctx.file_roots.insert(temp_dir.clone());
 
         let args = vec!["holoconf_invalid.yaml".to_string()];
         let kwargs = HashMap::new();
@@ -1583,6 +1656,7 @@ mod tests {
 
         let mut ctx = ResolverContext::new("test.path");
         ctx.base_path = Some(temp_dir.clone());
+        ctx.file_roots.insert(temp_dir.clone());
 
         let args = vec!["holoconf_invalid.json".to_string()];
         let kwargs = HashMap::new();
@@ -1610,6 +1684,7 @@ mod tests {
 
         let mut ctx = ResolverContext::new("test.path");
         ctx.base_path = Some(temp_dir.clone());
+        ctx.file_roots.insert(temp_dir.clone());
 
         let args = vec!["holoconf_test.xyz".to_string()];
         let kwargs = HashMap::new();
@@ -1640,6 +1715,7 @@ mod tests {
 
         let mut ctx = ResolverContext::new("test.path");
         ctx.base_path = Some(temp_dir.clone());
+        ctx.file_roots.insert(temp_dir.clone());
 
         let args = vec!["holoconf_utf8.txt".to_string()];
         let mut kwargs = HashMap::new();
@@ -1668,6 +1744,7 @@ mod tests {
 
         let mut ctx = ResolverContext::new("test.path");
         ctx.base_path = Some(temp_dir.clone());
+        ctx.file_roots.insert(temp_dir.clone());
 
         let args = vec!["holoconf_ascii.txt".to_string()];
         let mut kwargs = HashMap::new();
@@ -1699,6 +1776,7 @@ mod tests {
 
         let mut ctx = ResolverContext::new("test.path");
         ctx.base_path = Some(temp_dir.clone());
+        ctx.file_roots.insert(temp_dir.clone());
 
         let args = vec!["holoconf_binary.bin".to_string()];
         let mut kwargs = HashMap::new();
@@ -1730,6 +1808,7 @@ mod tests {
 
         let mut ctx = ResolverContext::new("test.path");
         ctx.base_path = Some(temp_dir.clone());
+        ctx.file_roots.insert(temp_dir.clone());
 
         let args = vec!["holoconf_default_enc.txt".to_string()];
         let kwargs = HashMap::new(); // No encoding specified
@@ -1759,6 +1838,7 @@ mod tests {
 
         let mut ctx = ResolverContext::new("test.path");
         ctx.base_path = Some(temp_dir.clone());
+        ctx.file_roots.insert(temp_dir.clone());
 
         let args = vec!["holoconf_binary_bytes.bin".to_string()];
         let mut kwargs = HashMap::new();
@@ -1785,6 +1865,7 @@ mod tests {
 
         let mut ctx = ResolverContext::new("test.path");
         ctx.base_path = Some(temp_dir.clone());
+        ctx.file_roots.insert(temp_dir.clone());
 
         let args = vec!["holoconf_binary_empty.bin".to_string()];
         let mut kwargs = HashMap::new();
@@ -1818,6 +1899,7 @@ mod tests {
         let registry = ResolverRegistry::with_builtins();
         let mut ctx = ResolverContext::new("test.path");
         ctx.base_path = Some(temp_dir.clone());
+        ctx.file_roots.insert(temp_dir.clone());
 
         let args = vec!["holoconf_sensitive_test.txt".to_string()];
         let mut kwargs = HashMap::new();

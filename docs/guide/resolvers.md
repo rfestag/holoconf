@@ -104,6 +104,54 @@ app:
   optional_config: ${file:./local.yaml,default={}}
 ```
 
+!!! info "Security - Path Traversal Protection"
+    File access is restricted to the config file's parent directory by default. Attempts to read files outside this directory (like `/etc/passwd`) will be blocked. To allow additional directories, use the `file_roots` parameter.
+
+=== "Python"
+
+    ```python
+    # Auto-allowed: files in same directory as config
+    config = Config.load("/app/config.yaml")
+    # ✓ Can read: /app/data.txt, /app/subdir/file.txt
+    # ✗ Blocked: /etc/passwd, /other/path/file.txt
+
+    # Allow additional directories
+    config = Config.load(
+        "/app/config.yaml",
+        file_roots=["/etc/myapp", "/var/lib/myapp"]
+    )
+    # ✓ Can read: /app/*, /etc/myapp/*, /var/lib/myapp/*
+    ```
+
+=== "Rust"
+
+    ```rust
+    // Auto-allowed: files in same directory as config
+    let config = Config::load("/app/config.yaml")?;
+    // ✓ Can read: /app/data.txt, /app/subdir/file.txt
+    // ✗ Blocked: /etc/passwd, /other/path/file.txt
+
+    // Allow additional directories
+    use holoconf::ConfigOptions;
+    use std::path::PathBuf;
+
+    let mut options = ConfigOptions::default();
+    options.file_roots = vec![
+        PathBuf::from("/etc/myapp"),
+        PathBuf::from("/var/lib/myapp")
+    ];
+    let config = Config::load_with_options("/app/config.yaml", options)?;
+    ```
+
+=== "CLI"
+
+    ```bash
+    # File access limited to config directory
+    holoconf get app.secrets /app/config.yaml
+    # ✓ Reads /app/secrets.yaml
+    # ✗ Would block /etc/passwd reference
+    ```
+
 #### File Resolver Options
 
 | Option | Description | Example |

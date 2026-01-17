@@ -350,12 +350,18 @@ impl Config {
             options.base_path = path.parent().map(|p| p.to_path_buf());
         }
 
+        // Auto-add parent directory to file_roots for path traversal protection
+        if let Some(parent) = path.parent() {
+            options.file_roots.push(parent.to_path_buf());
+        }
+
         Ok(Self::with_options_and_sources(value, options, source_map))
     }
 
     /// Merge another config into this one
     ///
     /// The other config's values override this config's values per ADR-004 merge semantics.
+    /// File roots from both configs are unioned for path traversal protection.
     pub fn merge(&mut self, other: Config) {
         // Get a mutable reference to our raw value
         if let Some(raw) = Arc::get_mut(&mut self.raw) {
@@ -366,6 +372,14 @@ impl Config {
             new_raw.merge((*other.raw).clone());
             self.raw = Arc::new(new_raw);
         }
+
+        // Union file_roots from both configs
+        for root in &other.options.file_roots {
+            if !self.options.file_roots.contains(root) {
+                self.options.file_roots.push(root.clone());
+            }
+        }
+
         // Clear the cache since values may have changed
         self.clear_cache();
     }
@@ -736,6 +750,8 @@ impl Config {
                 if let Some(base) = &self.options.base_path {
                     ctx.base_path = Some(base.clone());
                 }
+                // File security options
+                ctx.file_roots = self.options.file_roots.iter().cloned().collect();
                 // HTTP options
                 ctx.allow_http = self.options.allow_http;
                 ctx.http_allowlist = self.options.http_allowlist.clone();

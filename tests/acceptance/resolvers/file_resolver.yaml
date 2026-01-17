@@ -99,3 +99,28 @@ tests:
     then:
       # ASCII mode should strip non-ASCII characters
       value: "Hello, !"
+
+  # Path Security Tests
+  # Note: These tests will fail until path validation is implemented
+
+  - name: allows_file_in_subdirectory
+    given:
+      files:
+        subdir/data.txt: "allowed"
+      config: |
+        value: ${file:subdir/data.txt}
+    when:
+      access: value
+    then:
+      value: "allowed"
+
+  - name: blocks_absolute_path_outside_roots
+    given:
+      config: |
+        value: ${file:/etc/passwd}
+    when:
+      access: value
+    then:
+      error:
+        type: ResolverError
+        message_contains: "allowed"

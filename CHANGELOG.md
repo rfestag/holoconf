@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+#### File Resolver Path Traversal Protection (Breaking Change)
+- **File access now sandboxed by default** - The `file` resolver restricts access to the config file's parent directory to prevent path traversal attacks
+  - Automatically allows: Files in the same directory as the config file and its subdirectories
+  - Blocks by default: Absolute paths like `/etc/passwd` or paths outside the config directory
+  - Relative paths are resolved relative to the config file's directory
+  - Symlinks are resolved and validated against allowed roots
+- **New `file_roots` parameter** - Explicitly allow access to additional directories
+  - Python: `Config.load("config.yaml", file_roots=["/etc/myapp", "/var/lib/myapp"])`
+  - Rust: `ConfigOptions { file_roots: vec![PathBuf::from("/etc/myapp")], .. }`
+- **Automatic root accumulation** - Parent directories are automatically added to allowed roots when loading files
+- **Merge behavior** - When merging configs, `file_roots` from both configs are combined (union)
+- **Breaking change**: Configs that reference files outside their directory will now fail unless `file_roots` is specified
+
 ## [0.2.0] - 2026-01-17
 
 ### Changed
