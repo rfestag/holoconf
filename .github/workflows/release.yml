@@ -46,15 +46,17 @@ jobs:
   # Build Python wheels - manylinux (glibc) x86_64 and aarch64
   # ==========================================================================
   build-python-manylinux:
-    name: Build Python manylinux (${{ matrix.target }})
+    name: Build Python manylinux (${{ matrix.arch }})
     needs: [validate]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        target:
-          - x86_64-unknown-linux-gnu
-          - aarch64-unknown-linux-gnu
+        include:
+          - target: x86_64-unknown-linux-gnu
+            arch: x86_64
+          - target: aarch64-unknown-linux-gnu
+            arch: aarch64
     steps:
       - uses: actions/checkout@v4
 
@@ -70,22 +72,24 @@ jobs:
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
-          name: wheels-manylinux-${{ matrix.target }}
+          name: wheels-manylinux-${{ matrix.arch }}
           path: packages/python/holoconf/dist/*.whl
 
   # ==========================================================================
   # Build Python wheels - musllinux (Alpine) x86_64 and aarch64
   # ==========================================================================
   build-python-musllinux:
-    name: Build Python musllinux (${{ matrix.target }})
+    name: Build Python musllinux (${{ matrix.arch }})
     needs: [validate]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        target:
-          - x86_64-unknown-linux-musl
-          - aarch64-unknown-linux-musl
+        include:
+          - target: x86_64-unknown-linux-musl
+            arch: x86_64
+          - target: aarch64-unknown-linux-musl
+            arch: aarch64
     steps:
       - uses: actions/checkout@v4
 
@@ -101,7 +105,7 @@ jobs:
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
-          name: wheels-musllinux-${{ matrix.target }}
+          name: wheels-musllinux-${{ matrix.arch }}
           path: packages/python/holoconf/dist/*.whl
 
   # ==========================================================================

@@ -55,14 +55,16 @@ jobs:
   # Build wheels - manylinux (glibc) x86_64 and aarch64
   # ==========================================================================
   build-manylinux:
-    name: Build manylinux (${{ matrix.target }})
+    name: Build manylinux (${{ matrix.arch }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        target:
-          - x86_64-unknown-linux-gnu
-          - aarch64-unknown-linux-gnu
+        include:
+          - target: x86_64-unknown-linux-gnu
+            arch: x86_64
+          - target: aarch64-unknown-linux-gnu
+            arch: aarch64
     steps:
       - uses: actions/checkout@v4
 
@@ -78,21 +80,23 @@ jobs:
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
-          name: wheels-manylinux-${{ matrix.target }}
+          name: wheels-manylinux-${{ matrix.arch }}
           path: packages/python/holoconf/dist/*.whl
 
   # ==========================================================================
   # Build wheels - musllinux (Alpine) x86_64 and aarch64
   # ==========================================================================
   build-musllinux:
-    name: Build musllinux (${{ matrix.target }})
+    name: Build musllinux (${{ matrix.arch }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        target:
-          - x86_64-unknown-linux-musl
-          - aarch64-unknown-linux-musl
+        include:
+          - target: x86_64-unknown-linux-musl
+            arch: x86_64
+          - target: aarch64-unknown-linux-musl
+            arch: aarch64
     steps:
       - uses: actions/checkout@v4
 
@@ -108,7 +112,7 @@ jobs:
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
-          name: wheels-musllinux-${{ matrix.target }}
+          name: wheels-musllinux-${{ matrix.arch }}
           path: packages/python/holoconf/dist/*.whl
 
   # ==========================================================================
