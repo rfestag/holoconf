@@ -73,10 +73,16 @@ jobs:
         with:
           target: ${{ matrix.target }}
           manylinux: "2_28"
-          # Use explicit CPython path to avoid PyPy builds (abi3 only needs one interpreter)
-          args: --release --out dist -i /opt/python/cp38-cp38/bin/python
+          args: --release --out dist
           working-directory: packages/python/holoconf
           sccache: true
+
+      - name: Keep only abi3 wheel (remove PyPy builds)
+        working-directory: packages/python/holoconf
+        run: |
+          ls -la dist/
+          rm -f dist/*-pp*.whl
+          ls -la dist/
 
       - name: Upload wheels
         uses: actions/upload-artifact@v4
@@ -106,10 +112,16 @@ jobs:
         with:
           target: ${{ matrix.target }}
           manylinux: musllinux_1_2
-          # Use explicit CPython path to avoid PyPy builds (abi3 only needs one interpreter)
-          args: --release --out dist -i /opt/python/cp38-cp38/bin/python
+          args: --release --out dist
           working-directory: packages/python/holoconf
           sccache: true
+
+      - name: Keep only abi3 wheel (remove PyPy builds)
+        working-directory: packages/python/holoconf
+        run: |
+          ls -la dist/
+          rm -f dist/*-pp*.whl
+          ls -la dist/
 
       - name: Upload wheels
         uses: actions/upload-artifact@v4
