@@ -13,6 +13,7 @@ This review uses specialized agents for thorough analysis:
 - **rust-expert**: Deep Rust analysis (if `crates/` changed)
 - **python-expert**: Python bindings review (if `packages/python/` changed)
 - **security-reviewer**: Security assessment (run in parallel)
+- **doc-writer**: Documentation review (if `docs/` changed or user-facing features added)
 
 ## Steps
 
@@ -39,6 +40,9 @@ This review uses specialized agents for thorough analysis:
    **If Python files changed** (`packages/python/`, `crates/holoconf-python/`):
    - Use `python-expert` agent for PyO3 patterns, type stubs, Pythonic design
 
+   **If docs changed** (`docs/`):
+   - Use `doc-writer` agent for style consistency, multi-language examples
+
    **Always**:
    - Use `security-reviewer` agent for vulnerability assessment
    - Use `pr-reviewer` agent for overall quality and standards
@@ -47,7 +51,9 @@ This review uses specialized agents for thorough analysis:
    - [ ] Missing tests for new functionality?
    - [ ] Breaking API changes?
    - [ ] Security concerns (sensitive data handling, path traversal, etc.)?
-   - [ ] Documentation updates needed?
+   - [ ] Documentation updated for user-facing changes?
+   - [ ] Docs follow style guide (Rust Book for guides, formal for ADRs)?
+   - [ ] Multi-language examples included (Python, Rust, CLI)?
    - [ ] CHANGELOG.md updated?
    - [ ] Type stubs updated (if Python API changed)?
    - [ ] Follows project patterns (ADRs, specs)?
