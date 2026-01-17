@@ -2,6 +2,9 @@ suite: http_resolver
 description: HTTP resolver behavior (disabled by default for security)
 
 tests:
+  # === Security: Disabled by Default ===
+  # These tests verify the HTTP resolver is disabled by default (no actual HTTP calls)
+
   - name: http_resolver_disabled_by_default
     given:
       config: |
@@ -10,4 +13,31 @@ tests:
       access: remote
     then:
       error:
+        type: ResolverError
         message_contains: "HTTP resolver is disabled"
+
+  - name: http_resolver_disabled_error_includes_help
+    given:
+      config: |
+        remote: ${http:https://config.internal/app.yaml}
+    when:
+      access: remote
+    then:
+      error:
+        message_contains: "allow_http"
+
+  - name: http_no_url_error
+    given:
+      config: |
+        bad: ${http:}
+    when:
+      access: bad
+    then:
+      error:
+        type: ResolverError
+        message_contains: "requires a URL"
+
+  # Note: Tests for actual HTTP functionality (fetching, parsing, headers, timeouts,
+  # allowlists) require HTTP mocking and are implemented as Rust unit tests in
+  # crates/holoconf-core/src/resolver.rs using the mockito crate.
+  # See issue #3 for test coverage details.

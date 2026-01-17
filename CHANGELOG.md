@@ -50,6 +50,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **CLI --schema flag** - `holoconf get` and `holoconf dump` now accept `--schema` for default values
 - **Enhanced validate output** - `holoconf validate` now shows all validation errors with paths
 
+#### HTTP Resolver
+- **Full HTTP resolver implementation** - Fetch configuration from remote URLs
+  - Disabled by default for security - enable with `allow_http=True`
+  - URL allowlist support for restricting which URLs can be fetched
+  - Parse modes: `auto`, `yaml`, `json`, `text`, `binary`
+  - Configurable timeout via `timeout=<seconds>` parameter
+  - Custom header support via `header=Name:Value` parameter
+  - Auto-detection from Content-Type and URL extension
+- **Security controls**:
+  - `allow_http` option to explicitly enable HTTP resolver
+  - `http_allowlist` option to restrict accessible URLs with glob patterns
+- **Example usage**:
+  ```yaml
+  config: ${http:https://config.example.com/settings.yaml}
+  api_key: ${http:https://api.example.com/key,header=Authorization:Bearer token}
+  ```
+
 #### Custom Resolver Registration
 - **Global resolver registry** - Register resolvers once, use everywhere
   - `holoconf.register_resolver(name, func, force=False)` - Python API
