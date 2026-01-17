@@ -1,16 +1,31 @@
 ---
-description: Complete the current feature - push and create PR
+description: Push branch and create pull request
 ---
 
-# Complete Current Feature
+# Create Pull Request
 
-Push the feature branch and create a pull request. GitHub will squash commits at merge time (see ADR-018).
+Push the current branch and create a pull request following the project's PR template.
 
 ## Pre-checks
 
-1. Run `git branch --show-current` to verify not on `main` (abort if on `main`)
-2. Check `git status` for uncommitted changes
-3. Check if in a worktree: `git rev-parse --git-common-dir` differs from `git rev-parse --git-dir`
+1. **Verify not on main**:
+   ```bash
+   git branch --show-current
+   ```
+   Abort if on `main` - inform user to create a feature branch first
+
+2. **Check for uncommitted changes**:
+   ```bash
+   git status --short
+   ```
+   If changes exist, ask whether to commit or stash them
+
+3. **Check if in worktree**:
+   ```bash
+   git rev-parse --git-common-dir
+   git rev-parse --git-dir
+   ```
+   (Different values = in worktree)
 
 ## Steps
 
@@ -40,7 +55,7 @@ Push the feature branch and create a pull request. GitHub will squash commits at
 6. **Fill in the PR template** based on your analysis:
    - Parse each section of the template
    - For "Summary": Write 1-3 sentences derived from commit messages
-   - For "Related Issue": Link if mentioned in commits, otherwise leave blank
+   - For "Related Issue": Link if mentioned in commits (Fixes #N), otherwise leave blank
    - For "Spec / ADR": Link if changes implement a spec or ADR
    - For checkbox sections: Mark `[x]` for items that apply based on files changed
    - Remove HTML comments from the filled template

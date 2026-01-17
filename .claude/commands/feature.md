@@ -1,36 +1,38 @@
 ---
-description: Create a new feature branch with git worktree for parallel development
+description: Create a new feature request issue
 ---
 
-# Start New Feature: $ARGUMENTS
+# Create Feature Issue: $ARGUMENTS
 
-Create a git worktree for parallel feature development.
+Create a GitHub issue for a new feature request using the project's feature template.
 
 ## Steps
 
-1. **Validate**: Ensure feature name is provided. If `$ARGUMENTS` is empty, ask the user for a name.
+1. **Validate input**: If `$ARGUMENTS` is empty, ask user for feature description
 
-2. **Check state**:
-   - Run `git status --short` to check for uncommitted changes
-   - If changes exist, ask user to commit or stash first
-
-3. **Create worktree**:
+2. **Read the issue template**:
    ```bash
-   git fetch origin main
-   git branch feature/$ARGUMENTS origin/main
+   cat .github/ISSUE_TEMPLATE/2-feature.yml
    ```
 
-4. **Setup development environment**:
+3. **Gather required fields**:
+   - **Target Package(s)**: Ask or infer from description (holoconf-core, holoconf-cli, holoconf-python, Documentation)
+   - **Feature Type**: New Feature / Enhancement to existing feature / Breaking change
+   - **Problem Statement**: Derive from `$ARGUMENTS`
+   - **Proposed Solution**: Optional, ask user or leave for later
+   - **Alternatives Considered**: Optional
+
+4. **Create issue**:
    ```bash
-   make install-tools
+   gh issue create \
+     --title "[Feature]: <concise summary>" \
+     --label "enhancement,triage" \
+     --body "<filled-template>"
    ```
 
-5. **Report**: Tell user:
-   - The worktree is ready at `/home/ryan/Code/holoconf-$ARGUMENTS/`
-   - Run `make check` to verify everything works
-   - All future work for this feature happens in the worktree directory
+5. **Report**: Show issue number and URL
 
 ## Notes
-- If branch already exists, check for existing worktree with `git worktree list` and offer to switch
-- User should open the worktree in a new VS Code window (SCM view > Worktrees > Open in New Window)
-- Run `/feature-done` when ready to create a PR
+- Use conventional commit style in title: descriptive but concise
+- Include any relevant spec references (FEAT-xxx) in the body
+- If the feature is large, suggest breaking it into sub-issues

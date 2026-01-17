@@ -42,10 +42,11 @@ if "database" in config:
 
 # Get with default
 timeout = config.get("api.timeout", 30)
-
-# Async loading (for async applications)
-config = await Config.load_async("config.yaml")
 ```
+
+> **Note:** `load_async()` was considered but not implemented. Async file I/O provides
+> minimal benefit for small local config files. The real async value is in *resolver*
+> execution (SSM, HTTP, etc.), which is tracked separately.
 
 ### JavaScript/TypeScript
 
@@ -80,9 +81,6 @@ let config = Config::load("config.yaml")?;
 // Access values
 let host: &str = config.get("database.host")?;
 let port: i32 = config.get("database.port")?;
-
-// Async loading
-let config = Config::load_async("config.yaml").await?;
 ```
 
 ## Behavior
