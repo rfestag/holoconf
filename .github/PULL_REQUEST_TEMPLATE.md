@@ -10,7 +10,13 @@
 
 <!-- For new features: Link to spec in docs/specs/features/FEAT-xxx-name.md -->
 <!-- For architectural changes: Link to ADR in docs/adr/ADR-xxx-topic.md -->
-<!-- Leave blank for bug fixes or small changes -->
+<!-- For bug fixes or small changes: Write "N/A - bug fix" or similar -->
+
+**Related specs:** <!-- e.g., FEAT-002, ADR-008 -->
+
+- [ ] Specs consulted before implementation
+- [ ] Specs created/updated if new behavior
+- [ ] Implementation matches spec requirements
 
 ## Changes
 

@@ -56,7 +56,11 @@ Push the current branch and create a pull request following the project's PR tem
    - Parse each section of the template
    - For "Summary": Write 1-3 sentences derived from commit messages
    - For "Related Issue": Link if mentioned in commits (Fixes #N), otherwise leave blank
-   - For "Spec / ADR": Link if changes implement a spec or ADR
+   - For "Spec / ADR":
+     - **Required for new features**: Link to FEAT spec in `docs/specs/features/`
+     - **Required for architectural changes**: Link to ADR in `docs/adr/`
+     - For bug fixes or small changes: Write "N/A - bug fix" or similar
+     - Mark the spec compliance checkboxes
    - For checkbox sections: Mark `[x]` for items that apply based on files changed
    - Remove HTML comments from the filled template
 

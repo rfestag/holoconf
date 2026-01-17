@@ -42,6 +42,15 @@ This is **holoconf**, a hierarchical configuration library with:
 - `too-many-lines-threshold = 80`
 - `too-many-arguments-threshold = 6`
 
+## Before Implementation
+
+**IMPORTANT**: Before writing any code, identify relevant specs:
+
+1. Search `docs/specs/features/` for related FEATs
+2. Search `docs/adr/` for architectural constraints (especially ADR-001, ADR-002, ADR-008)
+3. If no spec exists for new behavior, flag to main agent before proceeding
+4. Note which ADRs constrain the implementation in your response
+
 ## Review Focus Areas
 
 1. **Memory Safety**: Ownership, borrowing, lifetimes

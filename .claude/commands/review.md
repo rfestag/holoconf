@@ -48,15 +48,26 @@ This review uses specialized agents for thorough analysis:
    - Use `pr-reviewer` agent for overall quality and standards
 
 5. **Review checklist**:
+
+   **Spec Compliance**:
+   - [ ] Relevant ADRs identified and followed?
+   - [ ] FEAT spec exists for new features?
+   - [ ] Existing specs updated if behavior changed?
+   - [ ] PR description includes spec links?
+
+   **Code Quality**:
    - [ ] Missing tests for new functionality?
    - [ ] Breaking API changes?
    - [ ] Security concerns (sensitive data handling, path traversal, etc.)?
+
+   **Documentation**:
    - [ ] Documentation updated for user-facing changes?
    - [ ] Docs follow style guide (Rust Book for guides, formal for ADRs)?
    - [ ] Multi-language examples included (Python, Rust, CLI)?
+
+   **Housekeeping**:
    - [ ] CHANGELOG.md updated?
    - [ ] Type stubs updated (if Python API changed)?
-   - [ ] Follows project patterns (ADRs, specs)?
 
 6. **Summarize findings from all agents**:
    - Consolidate issues with specific `file:line` references

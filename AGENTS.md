@@ -60,9 +60,23 @@ Always run `make check` before creating a PR. This runs:
 - All tests (unit + acceptance)
 - Unsafe code audit
 
+## Key Specs Reference
+
+These ADRs apply to most changes - consult before implementing:
+
+| ADR | Topic | When Relevant |
+|-----|-------|---------------|
+| ADR-001 | Multi-Language Architecture | Any core API change |
+| ADR-002 | Resolver Architecture | Adding/modifying resolvers |
+| ADR-004 | Config Merging Semantics | Merge behavior changes |
+| ADR-008 | Error Handling Strategy | New error types/handling |
+| ADR-013 | Testing Architecture | Test structure changes |
+
+Feature specs: `docs/specs/features/` - check for existing spec before implementing any feature.
+
 ## Rules
 
-@.claude/rules/tdd-workflow.md
+@.claude/rules/sdd-workflow.md
 @.claude/rules/github-workflow.md
 @.claude/rules/rust-patterns.md
 @.claude/rules/python-patterns.md

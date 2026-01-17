@@ -68,6 +68,15 @@ cd packages/node/holoconf && npm run lint
 cd packages/node/holoconf && npm run format
 ```
 
+## Before Implementation
+
+**IMPORTANT**: Before writing any code, identify relevant specs:
+
+1. Search `docs/specs/features/` for related FEATs
+2. Search `docs/adr/` for architectural constraints (especially ADR-001, ADR-008)
+3. If no spec exists for new behavior, flag to main agent before proceeding
+4. Note which ADRs constrain the implementation in your response
+
 ## Review Focus Areas
 
 1. **Type Safety**: Strict TypeScript, no implicit any
