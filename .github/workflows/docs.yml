@@ -3,12 +3,13 @@ name: Documentation
 on:
   push:
     branches: [main]
+    tags: ['v*']  # Deploy versioned docs on tags
   pull_request:
     branches: [main]
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write  # mike needs write access for gh-pages
   pages: write
   id-token: write
 
@@ -41,32 +42,30 @@ jobs:
           pip install -e ".[dev]"
           maturin develop
 
-      - name: Build documentation
+      - name: Configure Git for mike
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Build documentation (PR check)
+        if: github.event_name == 'pull_request'
         run: |
           source packages/python/holoconf/.venv/bin/activate
           mkdocs build --strict
 
-      - name: Upload artifact
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: site
+      - name: Deploy versioned docs (tag)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          source packages/python/holoconf/.venv/bin/activate
+          VERSION=${GITHUB_REF#refs/tags/v}
+          mike deploy --push --update-aliases $VERSION latest
+          mike set-default --push latest
 
-  deploy:
-    name: Deploy Docs
-    needs: build
-    runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    permissions:
-      pages: write
-      id-token: write
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+      - name: Deploy dev docs (main branch)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          source packages/python/holoconf/.venv/bin/activate
+          mike deploy --push dev
 
   # ==========================================================================
   # Gate Job - docs build must pass
