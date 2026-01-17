@@ -77,6 +77,18 @@ api_key: ${env:API_KEY,default=dev-key,sensitive=true}
     }
     ```
 
+=== "CLI"
+
+    ```bash
+    # Test environment variable resolution
+    export DATABASE_URL="postgres://prod-server/mydb"
+    holoconf get database.url config.yaml
+    # Output: postgres://prod-server/mydb
+
+    # View the resolved configuration
+    holoconf dump config.yaml --resolve
+    ```
+
 ### Self-References
 
 ```yaml
@@ -104,13 +116,28 @@ database:
 
 When dumping with redaction:
 
-```python
-config = Config.from_file("config.yaml")
-print(config.to_yaml(redact=True))
-# database:
-#   host: localhost
-#   password: '[REDACTED]'
-```
+=== "Python"
+
+    ```python
+    config = Config.from_file("config.yaml")
+    print(config.to_yaml(redact=True))
+    # database:
+    #   host: localhost
+    #   password: '[REDACTED]'
+    ```
+
+=== "CLI"
+
+    ```bash
+    # Dump with sensitive values redacted (default behavior)
+    holoconf dump config.yaml --resolve
+    # database:
+    #   host: localhost
+    #   password: '[REDACTED]'
+
+    # Include sensitive values (use with caution!)
+    holoconf dump config.yaml --resolve --no-redact
+    ```
 
 ### Nested Defaults
 

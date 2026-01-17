@@ -1,5 +1,13 @@
 # FEAT-002: Core Resolvers
 
+## Status
+
+Implemented
+
+## Changelog
+
+- 2026-01-17: Marked as Implemented (v0.2.0)
+
 ## Overview
 
 Provide built-in resolvers for common value sources: environment variables, self-references within the config, local files, and remote URLs.

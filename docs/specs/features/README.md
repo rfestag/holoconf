@@ -24,12 +24,13 @@ A feature spec is a document that defines the expected behavior of a user-facing
 
 | Feature | Description | Status |
 |---------|-------------|--------|
-| [FEAT-001](FEAT-001-config-loading.md) | Configuration File Loading | Draft |
-| [FEAT-002](FEAT-002-core-resolvers.md) | Core Resolvers (env, self, file) | Draft |
-| [FEAT-003](FEAT-003-config-merging.md) | Configuration Merging | Draft |
-| [FEAT-004](FEAT-004-schema-validation.md) | Schema Validation | Draft |
-| [FEAT-005](FEAT-005-serialization.md) | Serialization and Export | Draft |
-| [FEAT-006](FEAT-006-cli.md) | Command Line Interface | Draft |
+| [FEAT-001](FEAT-001-config-loading.md) | Configuration File Loading | Implemented |
+| [FEAT-002](FEAT-002-core-resolvers.md) | Core Resolvers (env, self, file, http) | Implemented |
+| [FEAT-003](FEAT-003-config-merging.md) | Configuration Merging | Implemented |
+| [FEAT-004](FEAT-004-schema-validation.md) | Schema Validation | Implemented |
+| [FEAT-005](FEAT-005-serialization.md) | Serialization and Export | Implemented |
+| [FEAT-006](FEAT-006-cli.md) | Command Line Interface | Implemented |
+| [FEAT-007](FEAT-007-aws-resolvers.md) | AWS Resolvers (SSM, CloudFormation, S3) | Implemented |
 
 </div>
 

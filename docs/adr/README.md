@@ -41,6 +41,8 @@ An ADR is a document that captures an important architectural decision made alon
 | [ADR-015](ADR-015-documentation-site.md) | Documentation Site | **Accepted** |
 | [ADR-016](ADR-016-pyo3-api-documentation.md) | PyO3 API Documentation | **Accepted** |
 | [ADR-017](ADR-017-release-process.md) | Release Process | **Accepted** |
+| [ADR-018](ADR-018-git-workflow.md) | Pull Request and Merge Process | **Accepted** |
+| [ADR-019](ADR-019-resolver-extension-packages.md) | Resolver Extension Packages | **Accepted** |
 
 </div>
 

@@ -2,10 +2,11 @@
 
 ## Status
 
-Draft
+Implemented
 
 ## Changelog
 
+- 2026-01-17: Marked as Implemented (v0.2.0)
 - 2026-01-11: Initial draft
 
 ## Overview
