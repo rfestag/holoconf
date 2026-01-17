@@ -93,6 +93,10 @@ pub struct ResolverContext {
     pub base_path: Option<std::path::PathBuf>,
     /// Resolution stack for circular reference detection
     pub resolution_stack: Vec<String>,
+    /// Whether HTTP resolver is enabled
+    pub allow_http: bool,
+    /// HTTP URL allowlist (glob patterns)
+    pub http_allowlist: Vec<String>,
 }
 
 impl ResolverContext {
@@ -103,7 +107,21 @@ impl ResolverContext {
             config_root: None,
             base_path: None,
             resolution_stack: Vec::new(),
+            allow_http: false,
+            http_allowlist: Vec::new(),
         }
+    }
+
+    /// Set whether HTTP resolver is enabled
+    pub fn with_allow_http(mut self, allow: bool) -> Self {
+        self.allow_http = allow;
+        self
+    }
+
+    /// Set HTTP URL allowlist
+    pub fn with_http_allowlist(mut self, allowlist: Vec<String>) -> Self {
+        self.http_allowlist = allowlist;
+        self
     }
 
     /// Set the config root for self-references
@@ -484,13 +502,25 @@ fn file_resolver(
 
 /// Built-in HTTP resolver
 ///
-/// This resolver is registered but disabled by default for security.
-/// To enable HTTP resolution, set allow_http=true in ConfigOptions.
+/// Fetches content from remote URLs.
 ///
-/// When the `http` feature is not enabled, this always returns an error.
+/// Usage:
+///   ${http:https://example.com/config.yaml}           - Auto-detect parse mode
+///   ${http:https://example.com/config,parse=yaml}     - Parse as YAML
+///   ${http:https://example.com/config,parse=json}     - Parse as JSON
+///   ${http:https://example.com/config,parse=text}     - Read as text
+///   ${http:https://example.com/config,parse=binary}   - Read as binary
+///   ${http:https://example.com/config,timeout=60}     - Timeout in seconds
+///   ${http:https://example.com/config,header=Auth:Bearer token} - Add header
+///   ${http:https://example.com/config,default={}}     - Default if request fails
+///   ${http:https://example.com/config,sensitive=true} - Mark as sensitive
+///
+/// Security:
+/// - Disabled by default (requires allow_http=true in ConfigOptions)
+/// - URL allowlist can restrict which URLs are accessible
 fn http_resolver(
     args: &[String],
-    _kwargs: &HashMap<String, String>,
+    kwargs: &HashMap<String, String>,
     ctx: &ResolverContext,
 ) -> Result<ResolvedValue> {
     if args.is_empty() {
@@ -499,21 +529,195 @@ fn http_resolver(
 
     let url = &args[0];
 
-    // The http resolver is always disabled by default for security
-    // Users must enable it explicitly via ConfigOptions.allow_http
-    // This is just a placeholder that always returns an error
-    // The actual HTTP fetching is done in the Config when allow_http is true
+    // Check if HTTP is enabled
+    if !ctx.allow_http {
+        return Err(Error {
+            kind: crate::error::ErrorKind::Resolver(crate::error::ResolverErrorKind::HttpDisabled),
+            path: Some(ctx.config_path.clone()),
+            source_location: None,
+            help: Some(format!(
+                "Enable HTTP resolver with Config.load(..., allow_http=True)\nURL: {}",
+                url
+            )),
+            cause: None,
+        });
+    }
 
-    Err(Error {
-        kind: crate::error::ErrorKind::Resolver(crate::error::ResolverErrorKind::HttpDisabled),
-        path: Some(ctx.config_path.clone()),
-        source_location: None,
-        help: Some(format!(
-            "Enable HTTP resolver with Config.load(..., allow_http=True)\nURL: {}",
-            url
-        )),
-        cause: None,
-    })
+    // Check URL against allowlist if configured
+    if !ctx.http_allowlist.is_empty() {
+        let url_allowed = ctx
+            .http_allowlist
+            .iter()
+            .any(|pattern| url_matches_pattern(url, pattern));
+        if !url_allowed {
+            return Err(Error::http_not_in_allowlist(
+                url,
+                &ctx.http_allowlist,
+                Some(ctx.config_path.clone()),
+            ));
+        }
+    }
+
+    // Perform the actual HTTP request
+    #[cfg(feature = "http")]
+    {
+        http_fetch(url, kwargs, ctx)
+    }
+
+    #[cfg(not(feature = "http"))]
+    {
+        // If compiled without HTTP feature, return an error
+        let _ = kwargs; // Suppress unused warning
+        Err(Error::resolver_custom(
+            "http",
+            "HTTP support not compiled in. Rebuild with --features http",
+        ))
+    }
+}
+
+/// Check if a URL matches an allowlist pattern
+///
+/// Supports glob-style patterns:
+/// - `https://example.com/*` matches any path on example.com
+/// - `https://*.example.com/*` matches any subdomain
+fn url_matches_pattern(url: &str, pattern: &str) -> bool {
+    // Convert glob pattern to regex
+    let regex_pattern = pattern
+        .replace('.', r"\.")
+        .replace('*', ".*")
+        .replace('?', ".");
+
+    if let Ok(re) = regex::Regex::new(&format!("^{}$", regex_pattern)) {
+        re.is_match(url)
+    } else {
+        // If pattern is invalid, do exact match
+        url == pattern
+    }
+}
+
+/// Perform HTTP request and parse response
+#[cfg(feature = "http")]
+fn http_fetch(
+    url: &str,
+    kwargs: &HashMap<String, String>,
+    ctx: &ResolverContext,
+) -> Result<ResolvedValue> {
+    use std::time::Duration;
+
+    let parse_mode = kwargs.get("parse").map(|s| s.as_str()).unwrap_or("auto");
+    let timeout_secs: u64 = kwargs
+        .get("timeout")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(30);
+
+    // Build agent with timeout configuration
+    let config = ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(timeout_secs)))
+        .build();
+    let agent: ureq::Agent = config.into();
+
+    // Build the request
+    let mut request = agent.get(url);
+
+    // Add custom headers
+    for (key, value) in kwargs {
+        if key == "header" {
+            // Parse header in format "Name:Value"
+            if let Some((name, val)) = value.split_once(':') {
+                request = request.header(name.trim(), val.trim());
+            }
+        }
+    }
+
+    // Send request
+    let response = request.call().map_err(|e| {
+        let error_msg = match &e {
+            ureq::Error::StatusCode(code) => format!("HTTP {}", code),
+            ureq::Error::Timeout(kind) => format!("Request timeout: {:?}", kind),
+            ureq::Error::Io(io_err) => format!("Connection error: {}", io_err),
+            _ => format!("HTTP request failed: {}", e),
+        };
+        Error::http_request_failed(url, &error_msg, Some(ctx.config_path.clone()))
+    })?;
+
+    // Get content type from response
+    let content_type = response
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string())
+        .unwrap_or_default();
+
+    // Handle binary mode separately
+    if parse_mode == "binary" {
+        let bytes = response.into_body().read_to_vec().map_err(|e| {
+            Error::http_request_failed(url, e.to_string(), Some(ctx.config_path.clone()))
+        })?;
+        return Ok(ResolvedValue::new(Value::Bytes(bytes)));
+    }
+
+    // Read response body as text
+    let body = response.into_body().read_to_string().map_err(|e| {
+        Error::http_request_failed(url, e.to_string(), Some(ctx.config_path.clone()))
+    })?;
+
+    // Determine actual parse mode
+    let actual_parse_mode = if parse_mode == "auto" {
+        detect_parse_mode(url, &content_type)
+    } else {
+        parse_mode
+    };
+
+    // Parse content based on mode
+    match actual_parse_mode {
+        "yaml" => {
+            let value: Value = serde_yaml::from_str(&body).map_err(|e| {
+                Error::parse(format!("Failed to parse YAML from {}: {}", url, e))
+                    .with_path(ctx.config_path.clone())
+            })?;
+            Ok(ResolvedValue::new(value))
+        }
+        "json" => {
+            let value: Value = serde_json::from_str(&body).map_err(|e| {
+                Error::parse(format!("Failed to parse JSON from {}: {}", url, e))
+                    .with_path(ctx.config_path.clone())
+            })?;
+            Ok(ResolvedValue::new(value))
+        }
+        _ => {
+            // Default to text mode
+            Ok(ResolvedValue::new(Value::String(body)))
+        }
+    }
+}
+
+/// Detect parse mode from URL extension or content type
+#[cfg(feature = "http")]
+fn detect_parse_mode<'a>(url: &str, content_type: &str) -> &'a str {
+    // Check content type first
+    let ct_lower = content_type.to_lowercase();
+    if ct_lower.contains("application/json") || ct_lower.contains("text/json") {
+        return "json";
+    }
+    if ct_lower.contains("application/yaml")
+        || ct_lower.contains("application/x-yaml")
+        || ct_lower.contains("text/yaml")
+    {
+        return "yaml";
+    }
+
+    // Check URL extension
+    if let Some(path) = url.split('?').next() {
+        if path.ends_with(".json") {
+            return "json";
+        }
+        if path.ends_with(".yaml") || path.ends_with(".yml") {
+            return "yaml";
+        }
+    }
+
+    // Default to text
+    "text"
 }
 
 #[cfg(test)]
@@ -1391,6 +1595,316 @@ value: ${env:HOLOCONF_LAZY_MISSING_VAR,default=${custom_default:fallback}}
         assert!(
             default_called.load(Ordering::SeqCst),
             "The default resolver should have been called when main value is missing"
+        );
+    }
+}
+
+// HTTP resolver tests (require http feature and mockito)
+#[cfg(all(test, feature = "http"))]
+mod http_resolver_tests {
+    use super::*;
+    use mockito::Server;
+
+    #[test]
+    fn test_http_fetch_json() {
+        let mut server = Server::new();
+        let mock = server
+            .mock("GET", "/config.json")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"key": "value", "number": 42}"#)
+            .create();
+
+        let ctx = ResolverContext::new("test.path").with_allow_http(true);
+        let args = vec![format!("{}/config.json", server.url())];
+        let kwargs = HashMap::new();
+
+        let result = http_resolver(&args, &kwargs, &ctx).unwrap();
+        assert!(result.value.is_mapping());
+
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_fetch_yaml() {
+        let mut server = Server::new();
+        let mock = server
+            .mock("GET", "/config.yaml")
+            .with_status(200)
+            .with_header("content-type", "application/yaml")
+            .with_body("key: value\nnumber: 42")
+            .create();
+
+        let ctx = ResolverContext::new("test.path").with_allow_http(true);
+        let args = vec![format!("{}/config.yaml", server.url())];
+        let kwargs = HashMap::new();
+
+        let result = http_resolver(&args, &kwargs, &ctx).unwrap();
+        assert!(result.value.is_mapping());
+
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_fetch_text() {
+        let mut server = Server::new();
+        let mock = server
+            .mock("GET", "/data.txt")
+            .with_status(200)
+            .with_header("content-type", "text/plain")
+            .with_body("Hello, World!")
+            .create();
+
+        let ctx = ResolverContext::new("test.path").with_allow_http(true);
+        let args = vec![format!("{}/data.txt", server.url())];
+        let kwargs = HashMap::new();
+
+        let result = http_resolver(&args, &kwargs, &ctx).unwrap();
+        assert_eq!(result.value.as_str(), Some("Hello, World!"));
+
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_fetch_binary() {
+        let mut server = Server::new();
+        let binary_data = vec![0x00, 0x01, 0x02, 0xFF, 0xFE];
+        let mock = server
+            .mock("GET", "/data.bin")
+            .with_status(200)
+            .with_header("content-type", "application/octet-stream")
+            .with_body(binary_data.clone())
+            .create();
+
+        let ctx = ResolverContext::new("test.path").with_allow_http(true);
+        let args = vec![format!("{}/data.bin", server.url())];
+        let mut kwargs = HashMap::new();
+        kwargs.insert("parse".to_string(), "binary".to_string());
+
+        let result = http_resolver(&args, &kwargs, &ctx).unwrap();
+        assert!(result.value.is_bytes());
+        assert_eq!(result.value.as_bytes().unwrap(), &binary_data);
+
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_fetch_explicit_parse_mode() {
+        let mut server = Server::new();
+        // Return JSON but with text/plain content-type
+        let mock = server
+            .mock("GET", "/data")
+            .with_status(200)
+            .with_header("content-type", "text/plain")
+            .with_body(r#"{"key": "value"}"#)
+            .create();
+
+        let ctx = ResolverContext::new("test.path").with_allow_http(true);
+        let args = vec![format!("{}/data", server.url())];
+        let mut kwargs = HashMap::new();
+        kwargs.insert("parse".to_string(), "json".to_string());
+
+        let result = http_resolver(&args, &kwargs, &ctx).unwrap();
+        assert!(result.value.is_mapping());
+
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_fetch_with_custom_header() {
+        let mut server = Server::new();
+        let mock = server
+            .mock("GET", "/protected")
+            .match_header("Authorization", "Bearer my-token")
+            .with_status(200)
+            .with_body("authorized content")
+            .create();
+
+        let ctx = ResolverContext::new("test.path").with_allow_http(true);
+        let args = vec![format!("{}/protected", server.url())];
+        let mut kwargs = HashMap::new();
+        kwargs.insert(
+            "header".to_string(),
+            "Authorization:Bearer my-token".to_string(),
+        );
+
+        let result = http_resolver(&args, &kwargs, &ctx).unwrap();
+        assert_eq!(result.value.as_str(), Some("authorized content"));
+
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_fetch_404_error() {
+        let mut server = Server::new();
+        let mock = server.mock("GET", "/notfound").with_status(404).create();
+
+        let ctx = ResolverContext::new("test.path").with_allow_http(true);
+        let args = vec![format!("{}/notfound", server.url())];
+        let kwargs = HashMap::new();
+
+        let result = http_resolver(&args, &kwargs, &ctx);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("HTTP"));
+
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_disabled_by_default() {
+        let ctx = ResolverContext::new("test.path");
+        // allow_http defaults to false
+        let args = vec!["https://example.com/config.yaml".to_string()];
+        let kwargs = HashMap::new();
+
+        let result = http_resolver(&args, &kwargs, &ctx);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("disabled"));
+    }
+
+    #[test]
+    fn test_http_allowlist_blocks_url() {
+        let ctx = ResolverContext::new("test.path")
+            .with_allow_http(true)
+            .with_http_allowlist(vec!["https://allowed.example.com/*".to_string()]);
+
+        let args = vec!["https://blocked.example.com/config.yaml".to_string()];
+        let kwargs = HashMap::new();
+
+        let result = http_resolver(&args, &kwargs, &ctx);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.to_string().contains("not in allowlist")
+                || err.to_string().contains("HttpNotAllowed")
+        );
+    }
+
+    #[test]
+    fn test_http_allowlist_allows_matching_url() {
+        let mut server = Server::new();
+        let mock = server
+            .mock("GET", "/config.yaml")
+            .with_status(200)
+            .with_body("key: value")
+            .create();
+
+        // The allowlist pattern needs to match the server URL
+        let server_url = server.url();
+        let ctx = ResolverContext::new("test.path")
+            .with_allow_http(true)
+            .with_http_allowlist(vec![format!("{}/*", server_url)]);
+
+        let args = vec![format!("{}/config.yaml", server_url)];
+        let kwargs = HashMap::new();
+
+        let result = http_resolver(&args, &kwargs, &ctx).unwrap();
+        assert!(result.value.is_mapping());
+
+        mock.assert();
+    }
+
+    #[test]
+    fn test_url_matches_pattern_exact() {
+        assert!(url_matches_pattern(
+            "https://example.com/config.yaml",
+            "https://example.com/config.yaml"
+        ));
+        assert!(!url_matches_pattern(
+            "https://example.com/other.yaml",
+            "https://example.com/config.yaml"
+        ));
+    }
+
+    #[test]
+    fn test_url_matches_pattern_wildcard() {
+        assert!(url_matches_pattern(
+            "https://example.com/config.yaml",
+            "https://example.com/*"
+        ));
+        assert!(url_matches_pattern(
+            "https://example.com/path/to/config.yaml",
+            "https://example.com/*"
+        ));
+        assert!(!url_matches_pattern(
+            "https://other.com/config.yaml",
+            "https://example.com/*"
+        ));
+    }
+
+    #[test]
+    fn test_url_matches_pattern_subdomain() {
+        assert!(url_matches_pattern(
+            "https://api.example.com/config",
+            "https://*.example.com/*"
+        ));
+        assert!(url_matches_pattern(
+            "https://staging.example.com/config",
+            "https://*.example.com/*"
+        ));
+        assert!(!url_matches_pattern(
+            "https://example.com/config",
+            "https://*.example.com/*"
+        ));
+    }
+
+    #[test]
+    fn test_detect_parse_mode_from_content_type() {
+        assert_eq!(
+            detect_parse_mode("http://example.com/data", "application/json"),
+            "json"
+        );
+        assert_eq!(
+            detect_parse_mode("http://example.com/data", "text/json"),
+            "json"
+        );
+        assert_eq!(
+            detect_parse_mode("http://example.com/data", "application/yaml"),
+            "yaml"
+        );
+        assert_eq!(
+            detect_parse_mode("http://example.com/data", "application/x-yaml"),
+            "yaml"
+        );
+        assert_eq!(
+            detect_parse_mode("http://example.com/data", "text/yaml"),
+            "yaml"
+        );
+        assert_eq!(
+            detect_parse_mode("http://example.com/data", "text/plain"),
+            "text"
+        );
+    }
+
+    #[test]
+    fn test_detect_parse_mode_from_url_extension() {
+        assert_eq!(
+            detect_parse_mode("http://example.com/config.json", ""),
+            "json"
+        );
+        assert_eq!(
+            detect_parse_mode("http://example.com/config.yaml", ""),
+            "yaml"
+        );
+        assert_eq!(
+            detect_parse_mode("http://example.com/config.yml", ""),
+            "yaml"
+        );
+        assert_eq!(
+            detect_parse_mode("http://example.com/config.txt", ""),
+            "text"
+        );
+        assert_eq!(detect_parse_mode("http://example.com/config", ""), "text");
+    }
+
+    #[test]
+    fn test_detect_parse_mode_content_type_takes_precedence() {
+        // Content-Type should take precedence over URL extension
+        assert_eq!(
+            detect_parse_mode("http://example.com/config.yaml", "application/json"),
+            "json"
         );
     }
 }

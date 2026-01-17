@@ -273,6 +273,54 @@ impl Error {
         }
     }
 
+    /// Create an HTTP request failed error
+    pub fn http_request_failed(
+        url: impl Into<String>,
+        message: impl Into<String>,
+        config_path: Option<String>,
+    ) -> Self {
+        let url_str = url.into();
+        Self {
+            kind: ErrorKind::Resolver(ResolverErrorKind::HttpError {
+                url: url_str.clone(),
+                status: None,
+            }),
+            path: config_path,
+            source_location: None,
+            help: Some(format!(
+                "Check that the URL '{}' is accessible and returns valid content",
+                url_str
+            )),
+            cause: Some(message.into()),
+        }
+    }
+
+    /// Create an HTTP not in allowlist error
+    pub fn http_not_in_allowlist(
+        url: impl Into<String>,
+        allowlist: &[String],
+        config_path: Option<String>,
+    ) -> Self {
+        let url_str = url.into();
+        let allowlist_str = if allowlist.is_empty() {
+            "(empty)".to_string()
+        } else {
+            allowlist.join(", ")
+        };
+        Self {
+            kind: ErrorKind::Resolver(ResolverErrorKind::HttpNotAllowed {
+                url: url_str.clone(),
+            }),
+            path: config_path,
+            source_location: None,
+            help: Some(format!(
+                "Add '{}' to the http_allowlist, or use a pattern that matches it.\nCurrent allowlist: {}",
+                url_str, allowlist_str
+            )),
+            cause: None,
+        }
+    }
+
     /// Create an internal error (bug in holoconf)
     pub fn internal(message: impl Into<String>) -> Self {
         Self {

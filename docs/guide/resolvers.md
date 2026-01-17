@@ -115,7 +115,70 @@ Fetch configuration from HTTP endpoints.
 feature_flags: ${http:https://config.example.com/flags.json}
 # With fallback if request fails
 remote_config: ${http:https://api.example.com/config,default={}}
+# With authentication header
+private_config: ${http:https://api.example.com/config,header=Authorization:Bearer token}
+# With explicit parse mode
+raw_data: ${http:https://api.example.com/data,parse=text}
 ```
+
+#### Enabling HTTP Resolver
+
+=== "Python"
+
+    ```python
+    from holoconf import Config
+
+    # Enable HTTP resolver
+    config = Config.from_file("config.yaml", allow_http=True)
+
+    # With URL allowlist for additional security
+    config = Config.from_file(
+        "config.yaml",
+        allow_http=True,
+        http_allowlist=["https://config.example.com/*", "https://*.internal.com/*"]
+    )
+    ```
+
+=== "Rust"
+
+    ```rust
+    use holoconf::Config;
+
+    let config = Config::builder()
+        .allow_http(true)
+        .http_allowlist(vec!["https://config.example.com/*"])
+        .load("config.yaml")?;
+    ```
+
+#### HTTP Resolver Options
+
+| Option | Description | Example |
+|--------|-------------|---------|
+| `parse=auto` | Auto-detect from Content-Type or URL extension (default) | `${http:https://example.com/config}` |
+| `parse=yaml` | Parse response as YAML | `${http:https://example.com/config,parse=yaml}` |
+| `parse=json` | Parse response as JSON | `${http:https://example.com/config,parse=json}` |
+| `parse=text` | Return response as text | `${http:https://example.com/data,parse=text}` |
+| `parse=binary` | Return response as raw bytes | `${http:https://example.com/cert,parse=binary}` |
+| `timeout=30` | Request timeout in seconds (default: 30) | `${http:https://example.com/config,timeout=60}` |
+| `header=Name:Value` | Add custom HTTP header | `${http:https://api.com/config,header=Authorization:Bearer token}` |
+
+#### URL Allowlist Patterns
+
+The URL allowlist supports glob-style patterns:
+
+| Pattern | Matches |
+|---------|---------|
+| `https://example.com/*` | Any path on example.com |
+| `https://*.example.com/*` | Any subdomain of example.com |
+| `https://api.example.com/config/*` | Specific path prefix |
+
+#### Security Best Practices
+
+1. **Keep HTTP disabled by default** - Only enable when needed
+2. **Use URL allowlist** - Restrict which URLs can be fetched
+3. **Use HTTPS** - Always use HTTPS for sensitive configuration
+4. **Set appropriate timeouts** - Prevent hanging on slow responses
+5. **Use authentication** - Add authorization headers for private endpoints
 
 ## Lazy Resolution
 
