@@ -326,14 +326,59 @@ impl PyConfig {
     ///     yaml: YAML content as a string
     ///     base_path: Optional base path for resolving relative file references
     ///     allow_http: Enable HTTP resolver (disabled by default for security)
+    ///     http_allowlist: List of URL patterns to allow (glob-style)
+    ///     http_proxy: Proxy URL (e.g., "http://proxy:8080" or "socks5://proxy:1080")
+    ///     http_proxy_from_env: Auto-detect proxy from HTTP_PROXY/HTTPS_PROXY env vars
+    ///     http_ca_bundle: Path to CA bundle PEM file (replaces default roots)
+    ///     http_extra_ca_bundle: Path to extra CA bundle PEM file (adds to default roots)
+    ///     http_client_cert: Path to client certificate (PEM or P12/PFX) for mTLS
+    ///     http_client_key: Path to client private key PEM (not needed for P12/PFX)
+    ///     http_client_key_password: Password for encrypted key or P12/PFX file
+    ///     http_insecure: DANGEROUS - Skip TLS certificate verification
     #[staticmethod]
-    #[pyo3(signature = (yaml, base_path=None, allow_http=false))]
-    fn loads(yaml: &str, base_path: Option<&str>, allow_http: bool) -> PyResult<Self> {
+    #[pyo3(signature = (
+        yaml,
+        base_path=None,
+        allow_http=false,
+        http_allowlist=None,
+        http_proxy=None,
+        http_proxy_from_env=false,
+        http_ca_bundle=None,
+        http_extra_ca_bundle=None,
+        http_client_cert=None,
+        http_client_key=None,
+        http_client_key_password=None,
+        http_insecure=false
+    ))]
+    #[allow(clippy::too_many_arguments)]
+    fn loads(
+        yaml: &str,
+        base_path: Option<&str>,
+        allow_http: bool,
+        http_allowlist: Option<Vec<String>>,
+        http_proxy: Option<&str>,
+        http_proxy_from_env: bool,
+        http_ca_bundle: Option<&str>,
+        http_extra_ca_bundle: Option<&str>,
+        http_client_cert: Option<&str>,
+        http_client_key: Option<&str>,
+        http_client_key_password: Option<&str>,
+        http_insecure: bool,
+    ) -> PyResult<Self> {
         let mut options = ConfigOptions::default();
         if let Some(bp) = base_path {
             options.base_path = Some(std::path::PathBuf::from(bp));
         }
         options.allow_http = allow_http;
+        options.http_allowlist = http_allowlist.unwrap_or_default();
+        options.http_proxy = http_proxy.map(String::from);
+        options.http_proxy_from_env = http_proxy_from_env;
+        options.http_ca_bundle = http_ca_bundle.map(std::path::PathBuf::from);
+        options.http_extra_ca_bundle = http_extra_ca_bundle.map(std::path::PathBuf::from);
+        options.http_client_cert = http_client_cert.map(std::path::PathBuf::from);
+        options.http_client_key = http_client_key.map(std::path::PathBuf::from);
+        options.http_client_key_password = http_client_key_password.map(String::from);
+        options.http_insecure = http_insecure;
         let inner = CoreConfig::from_yaml_with_options(yaml, options).map_err(to_py_err)?;
         Ok(Self { inner })
     }
@@ -348,6 +393,15 @@ impl PyConfig {
     ///     schema: Optional path to a JSON Schema file. If provided, schema defaults
     ///            will be used when accessing missing paths.
     ///     allow_http: Enable HTTP resolver (disabled by default for security)
+    ///     http_allowlist: List of URL patterns to allow (glob-style)
+    ///     http_proxy: Proxy URL (e.g., "http://proxy:8080" or "socks5://proxy:1080")
+    ///     http_proxy_from_env: Auto-detect proxy from HTTP_PROXY/HTTPS_PROXY env vars
+    ///     http_ca_bundle: Path to CA bundle PEM file (replaces default roots)
+    ///     http_extra_ca_bundle: Path to extra CA bundle PEM file (adds to default roots)
+    ///     http_client_cert: Path to client certificate (PEM or P12/PFX) for mTLS
+    ///     http_client_key: Path to client private key PEM (not needed for P12/PFX)
+    ///     http_client_key_password: Password for encrypted key or P12/PFX file
+    ///     http_insecure: DANGEROUS - Skip TLS certificate verification
     ///
     /// Returns:
     ///     A new Config object
@@ -356,33 +410,49 @@ impl PyConfig {
     ///     HoloconfError: If the file cannot be read or doesn't exist
     ///     ParseError: If the file cannot be parsed
     #[staticmethod]
-    #[pyo3(signature = (path, schema=None, allow_http=false))]
-    fn load(path: &str, schema: Option<&str>, allow_http: bool) -> PyResult<Self> {
-        let mut inner = CoreConfig::load(path).map_err(to_py_err)?;
-        if allow_http {
-            // Note: allow_http would need to be handled differently if needed
-            // For now, we reload with options
-            let path_ref = std::path::Path::new(path);
-            let content = std::fs::read_to_string(path_ref).map_err(|e| {
-                if e.kind() == std::io::ErrorKind::NotFound {
-                    to_py_err(holoconf_core::Error::file_not_found(path.to_string(), None))
-                } else {
-                    to_py_err(holoconf_core::Error::parse(format!(
-                        "Failed to read file '{}': {}",
-                        path, e
-                    )))
-                }
-            })?;
+    #[pyo3(signature = (
+        path,
+        schema=None,
+        allow_http=false,
+        http_allowlist=None,
+        http_proxy=None,
+        http_proxy_from_env=false,
+        http_ca_bundle=None,
+        http_extra_ca_bundle=None,
+        http_client_cert=None,
+        http_client_key=None,
+        http_client_key_password=None,
+        http_insecure=false
+    ))]
+    #[allow(clippy::too_many_arguments)]
+    fn load(
+        path: &str,
+        schema: Option<&str>,
+        allow_http: bool,
+        http_allowlist: Option<Vec<String>>,
+        http_proxy: Option<&str>,
+        http_proxy_from_env: bool,
+        http_ca_bundle: Option<&str>,
+        http_extra_ca_bundle: Option<&str>,
+        http_client_cert: Option<&str>,
+        http_client_key: Option<&str>,
+        http_client_key_password: Option<&str>,
+        http_insecure: bool,
+    ) -> PyResult<Self> {
+        let mut options = ConfigOptions::default();
+        options.allow_http = allow_http;
+        options.http_allowlist = http_allowlist.unwrap_or_default();
+        options.http_proxy = http_proxy.map(String::from);
+        options.http_proxy_from_env = http_proxy_from_env;
+        options.http_ca_bundle = http_ca_bundle.map(std::path::PathBuf::from);
+        options.http_extra_ca_bundle = http_extra_ca_bundle.map(std::path::PathBuf::from);
+        options.http_client_cert = http_client_cert.map(std::path::PathBuf::from);
+        options.http_client_key = http_client_key.map(std::path::PathBuf::from);
+        options.http_client_key_password = http_client_key_password.map(String::from);
+        options.http_insecure = http_insecure;
 
-            let value: holoconf_core::Value = serde_yaml::from_str(&content)
-                .map_err(|e| to_py_err(holoconf_core::Error::parse(e.to_string())))?;
-
-            let mut options = ConfigOptions::default();
-            options.base_path = path_ref.parent().map(|p| p.to_path_buf());
-            options.allow_http = allow_http;
-
-            inner = CoreConfig::with_options(value, options);
-        }
+        // Use load_with_options which supports glob patterns
+        let mut inner = CoreConfig::load_with_options(path, options).map_err(to_py_err)?;
 
         // If schema path provided, load and attach it
         if let Some(schema_path) = schema {
@@ -401,10 +471,59 @@ impl PyConfig {
     ///     path: Path to the YAML file
     ///     schema: Optional path to a JSON Schema file
     ///     allow_http: Enable HTTP resolver (disabled by default for security)
+    ///     http_allowlist: List of URL patterns to allow (glob-style)
+    ///     http_proxy: Proxy URL (e.g., "http://proxy:8080" or "socks5://proxy:1080")
+    ///     http_proxy_from_env: Auto-detect proxy from HTTP_PROXY/HTTPS_PROXY env vars
+    ///     http_ca_bundle: Path to CA bundle PEM file (replaces default roots)
+    ///     http_extra_ca_bundle: Path to extra CA bundle PEM file (adds to default roots)
+    ///     http_client_cert: Path to client certificate (PEM or P12/PFX) for mTLS
+    ///     http_client_key: Path to client private key PEM (not needed for P12/PFX)
+    ///     http_client_key_password: Password for encrypted key or P12/PFX file
+    ///     http_insecure: DANGEROUS - Skip TLS certificate verification
     #[staticmethod]
-    #[pyo3(signature = (path, schema=None, allow_http=false))]
-    fn required(path: &str, schema: Option<&str>, allow_http: bool) -> PyResult<Self> {
-        Self::load(path, schema, allow_http)
+    #[pyo3(signature = (
+        path,
+        schema=None,
+        allow_http=false,
+        http_allowlist=None,
+        http_proxy=None,
+        http_proxy_from_env=false,
+        http_ca_bundle=None,
+        http_extra_ca_bundle=None,
+        http_client_cert=None,
+        http_client_key=None,
+        http_client_key_password=None,
+        http_insecure=false
+    ))]
+    #[allow(clippy::too_many_arguments)]
+    fn required(
+        path: &str,
+        schema: Option<&str>,
+        allow_http: bool,
+        http_allowlist: Option<Vec<String>>,
+        http_proxy: Option<&str>,
+        http_proxy_from_env: bool,
+        http_ca_bundle: Option<&str>,
+        http_extra_ca_bundle: Option<&str>,
+        http_client_cert: Option<&str>,
+        http_client_key: Option<&str>,
+        http_client_key_password: Option<&str>,
+        http_insecure: bool,
+    ) -> PyResult<Self> {
+        Self::load(
+            path,
+            schema,
+            allow_http,
+            http_allowlist,
+            http_proxy,
+            http_proxy_from_env,
+            http_ca_bundle,
+            http_extra_ca_bundle,
+            http_client_cert,
+            http_client_key,
+            http_client_key_password,
+            http_insecure,
+        )
     }
 
     /// Load an optional configuration file

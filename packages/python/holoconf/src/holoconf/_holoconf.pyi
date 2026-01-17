@@ -65,7 +65,20 @@ class Config:
     """
 
     @staticmethod
-    def load(path: str, schema: str | None = None, allow_http: bool = False) -> Config:
+    def load(
+        path: str,
+        schema: str | None = None,
+        allow_http: bool = False,
+        http_allowlist: list[str] | None = None,
+        http_proxy: str | None = None,
+        http_proxy_from_env: bool = False,
+        http_ca_bundle: str | None = None,
+        http_extra_ca_bundle: str | None = None,
+        http_client_cert: str | None = None,
+        http_client_key: str | None = None,
+        http_client_key_password: str | None = None,
+        http_insecure: bool = False,
+    ) -> Config:
         """Load configuration from a YAML file (required - errors if missing).
 
         This is the primary way to load configuration. Use `Config.optional()`
@@ -76,6 +89,15 @@ class Config:
             schema: Optional path to a JSON Schema file. If provided, schema defaults
                    will be used when accessing missing paths.
             allow_http: Enable HTTP resolver (disabled by default for security)
+            http_allowlist: List of URL patterns to allow (glob-style)
+            http_proxy: Proxy URL (e.g., "http://proxy:8080" or "socks5://proxy:1080")
+            http_proxy_from_env: Auto-detect proxy from HTTP_PROXY/HTTPS_PROXY env vars
+            http_ca_bundle: Path to CA bundle PEM file (replaces default roots)
+            http_extra_ca_bundle: Path to extra CA bundle PEM file (adds to default roots)
+            http_client_cert: Path to client certificate (PEM or P12/PFX) for mTLS
+            http_client_key: Path to client private key PEM (not needed for P12/PFX)
+            http_client_key_password: Password for encrypted key or P12/PFX file
+            http_insecure: DANGEROUS - Skip TLS certificate verification
 
         Returns:
             A new Config object
@@ -91,7 +113,20 @@ class Config:
         ...
 
     @staticmethod
-    def required(path: str, schema: str | None = None, allow_http: bool = False) -> Config:
+    def required(
+        path: str,
+        schema: str | None = None,
+        allow_http: bool = False,
+        http_allowlist: list[str] | None = None,
+        http_proxy: str | None = None,
+        http_proxy_from_env: bool = False,
+        http_ca_bundle: str | None = None,
+        http_extra_ca_bundle: str | None = None,
+        http_client_cert: str | None = None,
+        http_client_key: str | None = None,
+        http_client_key_password: str | None = None,
+        http_insecure: bool = False,
+    ) -> Config:
         """Alias for `load()` - load a required config file.
 
         Provided for symmetry with `Config.optional()`.
@@ -100,6 +135,15 @@ class Config:
             path: Path to the YAML file
             schema: Optional path to a JSON Schema file
             allow_http: Enable HTTP resolver (disabled by default for security)
+            http_allowlist: List of URL patterns to allow (glob-style)
+            http_proxy: Proxy URL (e.g., "http://proxy:8080" or "socks5://proxy:1080")
+            http_proxy_from_env: Auto-detect proxy from HTTP_PROXY/HTTPS_PROXY env vars
+            http_ca_bundle: Path to CA bundle PEM file (replaces default roots)
+            http_extra_ca_bundle: Path to extra CA bundle PEM file (adds to default roots)
+            http_client_cert: Path to client certificate (PEM or P12/PFX) for mTLS
+            http_client_key: Path to client private key PEM (not needed for P12/PFX)
+            http_client_key_password: Password for encrypted key or P12/PFX file
+            http_insecure: DANGEROUS - Skip TLS certificate verification
 
         Returns:
             A new Config object
@@ -132,13 +176,35 @@ class Config:
         ...
 
     @staticmethod
-    def loads(yaml: str, base_path: str | None = None, allow_http: bool = False) -> Config:
+    def loads(
+        yaml: str,
+        base_path: str | None = None,
+        allow_http: bool = False,
+        http_allowlist: list[str] | None = None,
+        http_proxy: str | None = None,
+        http_proxy_from_env: bool = False,
+        http_ca_bundle: str | None = None,
+        http_extra_ca_bundle: str | None = None,
+        http_client_cert: str | None = None,
+        http_client_key: str | None = None,
+        http_client_key_password: str | None = None,
+        http_insecure: bool = False,
+    ) -> Config:
         """Load configuration from a YAML string.
 
         Args:
             yaml: YAML content as a string
             base_path: Optional base path for resolving relative file references
             allow_http: Enable HTTP resolver (disabled by default for security)
+            http_allowlist: List of URL patterns to allow (glob-style)
+            http_proxy: Proxy URL (e.g., "http://proxy:8080" or "socks5://proxy:1080")
+            http_proxy_from_env: Auto-detect proxy from HTTP_PROXY/HTTPS_PROXY env vars
+            http_ca_bundle: Path to CA bundle PEM file (replaces default roots)
+            http_extra_ca_bundle: Path to extra CA bundle PEM file (adds to default roots)
+            http_client_cert: Path to client certificate (PEM or P12/PFX) for mTLS
+            http_client_key: Path to client private key PEM (not needed for P12/PFX)
+            http_client_key_password: Password for encrypted key or P12/PFX file
+            http_insecure: DANGEROUS - Skip TLS certificate verification
 
         Returns:
             A new Config object

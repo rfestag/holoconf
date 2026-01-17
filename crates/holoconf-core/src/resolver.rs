@@ -97,6 +97,22 @@ pub struct ResolverContext {
     pub allow_http: bool,
     /// HTTP URL allowlist (glob patterns)
     pub http_allowlist: Vec<String>,
+    /// HTTP proxy URL (e.g., "http://proxy:8080" or "socks5://proxy:1080")
+    pub http_proxy: Option<String>,
+    /// Whether to auto-detect proxy from environment variables (HTTP_PROXY, HTTPS_PROXY, NO_PROXY)
+    pub http_proxy_from_env: bool,
+    /// Path to CA bundle PEM file (replaces default webpki-roots)
+    pub http_ca_bundle: Option<std::path::PathBuf>,
+    /// Path to extra CA bundle PEM file (appends to webpki-roots)
+    pub http_extra_ca_bundle: Option<std::path::PathBuf>,
+    /// Path to client certificate PEM or P12/PFX file (for mTLS)
+    pub http_client_cert: Option<std::path::PathBuf>,
+    /// Path to client private key PEM file (for mTLS, not needed for P12/PFX)
+    pub http_client_key: Option<std::path::PathBuf>,
+    /// Password for encrypted private key or P12/PFX file
+    pub http_client_key_password: Option<String>,
+    /// DANGEROUS: Skip TLS certificate verification (dev only)
+    pub http_insecure: bool,
 }
 
 impl ResolverContext {
@@ -109,6 +125,14 @@ impl ResolverContext {
             resolution_stack: Vec::new(),
             allow_http: false,
             http_allowlist: Vec::new(),
+            http_proxy: None,
+            http_proxy_from_env: false,
+            http_ca_bundle: None,
+            http_extra_ca_bundle: None,
+            http_client_cert: None,
+            http_client_key: None,
+            http_client_key_password: None,
+            http_insecure: false,
         }
     }
 
@@ -121,6 +145,54 @@ impl ResolverContext {
     /// Set HTTP URL allowlist
     pub fn with_http_allowlist(mut self, allowlist: Vec<String>) -> Self {
         self.http_allowlist = allowlist;
+        self
+    }
+
+    /// Set HTTP proxy URL
+    pub fn with_http_proxy(mut self, proxy: impl Into<String>) -> Self {
+        self.http_proxy = Some(proxy.into());
+        self
+    }
+
+    /// Set whether to auto-detect proxy from environment variables
+    pub fn with_http_proxy_from_env(mut self, enabled: bool) -> Self {
+        self.http_proxy_from_env = enabled;
+        self
+    }
+
+    /// Set CA bundle path (replaces webpki-roots)
+    pub fn with_http_ca_bundle(mut self, path: impl Into<std::path::PathBuf>) -> Self {
+        self.http_ca_bundle = Some(path.into());
+        self
+    }
+
+    /// Set extra CA bundle path (appends to webpki-roots)
+    pub fn with_http_extra_ca_bundle(mut self, path: impl Into<std::path::PathBuf>) -> Self {
+        self.http_extra_ca_bundle = Some(path.into());
+        self
+    }
+
+    /// Set client certificate path for mTLS
+    pub fn with_http_client_cert(mut self, path: impl Into<std::path::PathBuf>) -> Self {
+        self.http_client_cert = Some(path.into());
+        self
+    }
+
+    /// Set client private key path for mTLS
+    pub fn with_http_client_key(mut self, path: impl Into<std::path::PathBuf>) -> Self {
+        self.http_client_key = Some(path.into());
+        self
+    }
+
+    /// Set password for encrypted private key or P12/PFX file
+    pub fn with_http_client_key_password(mut self, password: impl Into<String>) -> Self {
+        self.http_client_key_password = Some(password.into());
+        self
+    }
+
+    /// DANGEROUS: Skip TLS certificate verification
+    pub fn with_http_insecure(mut self, insecure: bool) -> Self {
+        self.http_insecure = insecure;
         self
     }
 
@@ -595,6 +667,353 @@ fn url_matches_pattern(url: &str, pattern: &str) -> bool {
     }
 }
 
+// =============================================================================
+// TLS/Proxy Configuration Helpers (HTTP feature)
+// =============================================================================
+
+/// Load certificates from a PEM file (returns owned static-lifetime certs)
+#[cfg(feature = "http")]
+fn load_certs_from_pem(path: &std::path::Path) -> Result<Vec<ureq::tls::Certificate<'static>>> {
+    use ureq::tls::PemItem;
+
+    let pem_content = std::fs::read(path).map_err(|e| {
+        Error::pem_load_error(
+            path.display().to_string(),
+            format!("Failed to open file: {}", e),
+        )
+    })?;
+
+    let certs: Vec<_> = ureq::tls::parse_pem(&pem_content)
+        .filter_map(|item| item.ok())
+        .filter_map(|item| match item {
+            PemItem::Certificate(cert) => Some(cert.to_owned()),
+            _ => None,
+        })
+        .collect();
+
+    if certs.is_empty() {
+        return Err(Error::pem_load_error(
+            path.display().to_string(),
+            "No valid certificates found in PEM file",
+        ));
+    }
+
+    Ok(certs)
+}
+
+/// Load a private key from a PEM file (handles unencrypted keys)
+#[cfg(feature = "http")]
+fn load_private_key_from_pem(path: &std::path::Path) -> Result<ureq::tls::PrivateKey<'static>> {
+    let pem_content = std::fs::read(path).map_err(|e| {
+        Error::pem_load_error(
+            path.display().to_string(),
+            format!("Failed to open file: {}", e),
+        )
+    })?;
+
+    let key = ureq::tls::PrivateKey::from_pem(&pem_content).map_err(|e| {
+        Error::pem_load_error(
+            path.display().to_string(),
+            format!("Failed to parse key: {}", e),
+        )
+    })?;
+
+    Ok(key.to_owned())
+}
+
+/// Load an encrypted private key from a PEM file
+#[cfg(feature = "http")]
+fn load_encrypted_private_key_from_pem(
+    path: &std::path::Path,
+    password: &str,
+) -> Result<ureq::tls::PrivateKey<'static>> {
+    use pkcs8::der::Decode;
+
+    let pem_content = std::fs::read_to_string(path).map_err(|e| {
+        Error::pem_load_error(
+            path.display().to_string(),
+            format!("Failed to read file: {}", e),
+        )
+    })?;
+
+    // Check if this is an encrypted PKCS#8 key
+    if pem_content.contains("-----BEGIN ENCRYPTED PRIVATE KEY-----") {
+        // Extract the base64 content from PEM
+        let der_bytes = pem_to_der(&pem_content, "ENCRYPTED PRIVATE KEY")
+            .map_err(|e| Error::pem_load_error(path.display().to_string(), e))?;
+
+        let encrypted = pkcs8::EncryptedPrivateKeyInfo::from_der(&der_bytes)
+            .map_err(|e| Error::pem_load_error(path.display().to_string(), e.to_string()))?;
+
+        let decrypted = encrypted
+            .decrypt(password)
+            .map_err(|e| Error::key_decryption_error(e.to_string()))?;
+
+        // The decrypted key is in PKCS#8 DER format
+        // Wrap it in PEM format so ureq can parse it
+        let pem_key = der_to_pem(decrypted.as_bytes(), "PRIVATE KEY");
+
+        ureq::tls::PrivateKey::from_pem(pem_key.as_bytes())
+            .map(|k| k.to_owned())
+            .map_err(|e| {
+                Error::pem_load_error(
+                    path.display().to_string(),
+                    format!("Failed to parse decrypted key: {}", e),
+                )
+            })
+    } else {
+        // Not encrypted, try loading as regular key
+        load_private_key_from_pem(path)
+    }
+}
+
+/// Extract DER bytes from PEM format
+#[cfg(feature = "http")]
+fn pem_to_der(pem: &str, label: &str) -> std::result::Result<Vec<u8>, String> {
+    let begin_marker = format!("-----BEGIN {}-----", label);
+    let end_marker = format!("-----END {}-----", label);
+
+    let start = pem
+        .find(&begin_marker)
+        .ok_or_else(|| format!("PEM begin marker not found for {}", label))?;
+    let end = pem
+        .find(&end_marker)
+        .ok_or_else(|| format!("PEM end marker not found for {}", label))?;
+
+    let base64_content: String = pem[start + begin_marker.len()..end]
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
+
+    use base64::Engine;
+    base64::engine::general_purpose::STANDARD
+        .decode(&base64_content)
+        .map_err(|e| format!("Failed to decode base64: {}", e))
+}
+
+/// Convert DER bytes to PEM format
+#[cfg(feature = "http")]
+fn der_to_pem(der: &[u8], label: &str) -> String {
+    use base64::Engine;
+    let base64 = base64::engine::general_purpose::STANDARD.encode(der);
+    // Split into 64-char lines
+    let lines: Vec<&str> = base64
+        .as_bytes()
+        .chunks(64)
+        .map(|chunk| std::str::from_utf8(chunk).unwrap())
+        .collect();
+    format!(
+        "-----BEGIN {}-----\n{}\n-----END {}-----\n",
+        label,
+        lines.join("\n"),
+        label
+    )
+}
+
+/// Detect if a file is P12/PFX format by extension
+#[cfg(feature = "http")]
+fn is_p12_file(path: &std::path::Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case("p12") || ext.eq_ignore_ascii_case("pfx"))
+        .unwrap_or(false)
+}
+
+/// Load client certificate and key from P12/PFX file
+#[cfg(feature = "http")]
+fn load_identity_from_p12(
+    path: &std::path::Path,
+    password: &str,
+) -> Result<(
+    Vec<ureq::tls::Certificate<'static>>,
+    ureq::tls::PrivateKey<'static>,
+)> {
+    let p12_data = std::fs::read(path).map_err(|e| {
+        Error::p12_load_error(
+            path.display().to_string(),
+            format!("Failed to read file: {}", e),
+        )
+    })?;
+
+    let keystore = p12_keystore::KeyStore::from_pkcs12(&p12_data, password)
+        .map_err(|e| Error::p12_load_error(path.display().to_string(), e.to_string()))?;
+
+    // Get the first key entry (most P12 files have one key)
+    // private_key_chain() returns Option<(&str, &PrivateKeyChain)>
+    let (_alias, key_chain) = keystore.private_key_chain().ok_or_else(|| {
+        Error::p12_load_error(
+            path.display().to_string(),
+            "No private key found in P12 file",
+        )
+    })?;
+
+    // Get the private key DER bytes - wrap in PEM for ureq
+    let pem_key = der_to_pem(key_chain.key(), "PRIVATE KEY");
+    let private_key = ureq::tls::PrivateKey::from_pem(pem_key.as_bytes())
+        .map(|k| k.to_owned())
+        .map_err(|e| {
+            Error::p12_load_error(
+                path.display().to_string(),
+                format!("Failed to parse private key: {}", e),
+            )
+        })?;
+
+    // Get certificates from the chain
+    let certs: Vec<_> = key_chain
+        .chain()
+        .iter()
+        .map(|cert| ureq::tls::Certificate::from_der(cert.as_der()).to_owned())
+        .collect();
+
+    if certs.is_empty() {
+        return Err(Error::p12_load_error(
+            path.display().to_string(),
+            "No certificates found in P12 file",
+        ));
+    }
+
+    Ok((certs, private_key))
+}
+
+/// Load client identity (cert + key) for mTLS
+#[cfg(feature = "http")]
+fn load_client_identity(
+    cert_path: &std::path::Path,
+    key_path: Option<&std::path::Path>,
+    password: Option<&str>,
+) -> Result<(
+    Vec<ureq::tls::Certificate<'static>>,
+    ureq::tls::PrivateKey<'static>,
+)> {
+    // If cert is P12/PFX, load both cert and key from it
+    if is_p12_file(cert_path) {
+        let pwd = password.unwrap_or("");
+        return load_identity_from_p12(cert_path, pwd);
+    }
+
+    // Otherwise, load PEM cert and key separately
+    let cert_chain = load_certs_from_pem(cert_path)?;
+
+    let key_path = key_path.ok_or_else(|| {
+        Error::tls_config_error("Client key path required when using PEM certificate (not P12)")
+    })?;
+
+    let private_key = if let Some(pwd) = password {
+        load_encrypted_private_key_from_pem(key_path, pwd)?
+    } else {
+        load_private_key_from_pem(key_path)?
+    };
+
+    Ok((cert_chain, private_key))
+}
+
+/// Build TLS configuration from context and per-request kwargs
+#[cfg(feature = "http")]
+fn build_tls_config(
+    ctx: &ResolverContext,
+    kwargs: &HashMap<String, String>,
+) -> Result<ureq::tls::TlsConfig> {
+    use std::sync::Arc;
+    use ureq::tls::{ClientCert, RootCerts, TlsConfig};
+
+    let mut builder = TlsConfig::builder();
+
+    // Check for insecure mode (per-request kwargs override context)
+    let insecure = kwargs
+        .get("insecure")
+        .map(|v| v == "true")
+        .unwrap_or(ctx.http_insecure);
+
+    if insecure {
+        // DANGEROUS: Skip TLS verification
+        // Log a warning (in production, use proper logging)
+        eprintln!("WARNING: TLS certificate verification is disabled (http_insecure=true)");
+        builder = builder.disable_verification(true);
+    }
+
+    // Load CA bundle if specified (per-request overrides context)
+    let ca_bundle_path = kwargs
+        .get("ca_bundle")
+        .map(std::path::PathBuf::from)
+        .or_else(|| ctx.http_ca_bundle.clone());
+
+    let extra_ca_bundle_path = kwargs
+        .get("extra_ca_bundle")
+        .map(std::path::PathBuf::from)
+        .or_else(|| ctx.http_extra_ca_bundle.clone());
+
+    if let Some(ca_path) = ca_bundle_path {
+        // Replace root certs with custom CA bundle
+        let certs = load_certs_from_pem(&ca_path)?;
+        builder = builder.root_certs(RootCerts::Specific(Arc::new(certs)));
+    } else if let Some(extra_ca_path) = extra_ca_bundle_path {
+        // Add extra certs to webpki roots using new_with_certs
+        let extra_certs = load_certs_from_pem(&extra_ca_path)?;
+        builder = builder.root_certs(RootCerts::new_with_certs(&extra_certs));
+    }
+
+    // Load client certificate for mTLS (per-request overrides context)
+    let client_cert_path = kwargs
+        .get("client_cert")
+        .map(std::path::PathBuf::from)
+        .or_else(|| ctx.http_client_cert.clone());
+
+    if let Some(cert_path) = client_cert_path {
+        let client_key_path = kwargs
+            .get("client_key")
+            .map(std::path::PathBuf::from)
+            .or_else(|| ctx.http_client_key.clone());
+
+        let password = kwargs
+            .get("key_password")
+            .map(|s| s.as_str())
+            .or(ctx.http_client_key_password.as_deref());
+
+        let (certs, key) = load_client_identity(&cert_path, client_key_path.as_deref(), password)?;
+
+        let client_cert = ClientCert::new_with_certs(&certs, key);
+        builder = builder.client_cert(Some(client_cert));
+    }
+
+    Ok(builder.build())
+}
+
+/// Build proxy configuration from context and per-request kwargs
+#[cfg(feature = "http")]
+fn build_proxy_config(
+    ctx: &ResolverContext,
+    kwargs: &HashMap<String, String>,
+) -> Result<Option<ureq::Proxy>> {
+    // Per-request proxy overrides context
+    let proxy_url = kwargs
+        .get("proxy")
+        .cloned()
+        .or_else(|| ctx.http_proxy.clone());
+
+    // If no explicit proxy, check environment if enabled
+    let proxy_url = proxy_url.or_else(|| {
+        if ctx.http_proxy_from_env {
+            // Check standard proxy environment variables
+            std::env::var("HTTPS_PROXY")
+                .or_else(|_| std::env::var("https_proxy"))
+                .or_else(|_| std::env::var("HTTP_PROXY"))
+                .or_else(|_| std::env::var("http_proxy"))
+                .ok()
+        } else {
+            None
+        }
+    });
+
+    if let Some(url) = proxy_url {
+        let proxy = ureq::Proxy::new(&url).map_err(|e| {
+            Error::proxy_config_error(format!("Invalid proxy URL '{}': {}", url, e))
+        })?;
+        Ok(Some(proxy))
+    } else {
+        Ok(None)
+    }
+}
+
 /// Perform HTTP request and parse response
 #[cfg(feature = "http")]
 fn http_fetch(
@@ -610,10 +1029,22 @@ fn http_fetch(
         .and_then(|s| s.parse().ok())
         .unwrap_or(30);
 
-    // Build agent with timeout configuration
-    let config = ureq::Agent::config_builder()
+    // Build TLS configuration
+    let tls_config = build_tls_config(ctx, kwargs)?;
+
+    // Build proxy configuration
+    let proxy = build_proxy_config(ctx, kwargs)?;
+
+    // Build agent with timeout, TLS, and proxy configuration
+    let mut config_builder = ureq::Agent::config_builder()
         .timeout_global(Some(Duration::from_secs(timeout_secs)))
-        .build();
+        .tls_config(tls_config);
+
+    if proxy.is_some() {
+        config_builder = config_builder.proxy(proxy);
+    }
+
+    let config = config_builder.build();
     let agent: ureq::Agent = config.into();
 
     // Build the request

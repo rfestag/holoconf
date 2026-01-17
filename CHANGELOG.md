@@ -33,6 +33,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+#### HTTP Resolver TLS/Proxy Enhancements
+- **Proxy support** - Configure HTTP/SOCKS proxies for HTTP resolver requests
+  - `http_proxy="http://proxy:8080"` or `http_proxy="socks5://proxy:1080"`
+  - `http_proxy_from_env=True` to auto-detect from HTTP_PROXY/HTTPS_PROXY environment variables
+  - Per-request override: `${http:url,proxy=http://proxy:8080}`
+- **Custom CA certificates** - Use internal/corporate CAs or self-signed certificates
+  - `http_ca_bundle="/path/to/ca.pem"` - Replace default root certificates
+  - `http_extra_ca_bundle="/path/to/extra.pem"` - Add to default root certificates
+  - Per-request override: `${http:url,ca_bundle=/path}` or `${http:url,extra_ca_bundle=/path}`
+- **Mutual TLS (mTLS) / Client certificates** - Authenticate with client certificates
+  - `http_client_cert="/path/to/cert.pem"` - Client certificate (PEM or P12/PFX)
+  - `http_client_key="/path/to/key.pem"` - Private key (not needed for P12/PFX)
+  - `http_client_key_password="secret"` - Password for encrypted keys or P12/PFX
+  - Supports: unencrypted PEM, encrypted PKCS#8 PEM, P12/PFX bundles
+  - Per-request override: `${http:url,client_cert=/path,client_key=/path,key_password=secret}`
+- **TLS verification bypass** - For development with self-signed certs (DANGEROUS)
+  - `http_insecure=True` - Skip all TLS certificate verification
+  - Per-request: `${http:url,insecure=true}`
+  - **WARNING**: Never use in production - exposes to MITM attacks
+- **FIPS-compliant TLS** - Uses rustls with aws-lc-rs crypto backend
+
 #### Glob Pattern Support
 - **Glob patterns in `Config.load()` and `Config.optional()`** - Load and merge multiple files matching a pattern
   - `Config.load("config/*.yaml")` - Load all matching files, error if none match
