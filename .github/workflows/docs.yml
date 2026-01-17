@@ -14,8 +14,8 @@ permissions:
   id-token: write
 
 concurrency:
-  group: "pages-${{ github.ref }}"
-  cancel-in-progress: true
+  group: "pages"  # Single group for all docs deployments to avoid gh-pages push races
+  cancel-in-progress: false  # Don't cancel - queue deployments instead
 
 jobs:
   build:

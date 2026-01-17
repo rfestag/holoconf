@@ -490,8 +490,10 @@ endif
 	@echo "→ Updating versions to $(VERSION)..."
 	@sed -i 's/^version = ".*"/version = "$(VERSION)"/' Cargo.toml
 	@sed -i 's/^version = ".*"/version = "$(VERSION)"/' packages/python/holoconf/pyproject.toml
+	@sed -i 's/holoconf-core = { version = "[^"]*"/holoconf-core = { version = "$(shell echo $(VERSION) | sed "s/\.[0-9]*$$//")"/' Cargo.toml
 	@echo "  ✓ Updated Cargo.toml"
 	@echo "  ✓ Updated pyproject.toml"
+	@echo "  ✓ Updated workspace dependency version"
 	@echo ""
 	@echo "→ Updating CHANGELOG.md..."
 	@sed -i 's/## \[Unreleased\]/## [Unreleased]\n\n## [$(VERSION)] - $(shell date +%Y-%m-%d)/' CHANGELOG.md
