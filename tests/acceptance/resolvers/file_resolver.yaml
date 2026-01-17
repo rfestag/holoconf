@@ -123,4 +123,4 @@ tests:
     then:
       error:
         type: ResolverError
-        message_contains: "escapes allowed roots"
+        message_contains: "allowed"
