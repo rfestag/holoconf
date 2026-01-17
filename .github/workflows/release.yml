@@ -71,8 +71,7 @@ jobs:
 
       - name: Keep only abi3 wheel (remove PyPy builds)
         working-directory: packages/python/holoconf
-        run: |
-          rm -f dist/*-pp*.whl
+        run: sudo rm -f dist/*-pp*.whl
 
       - name: Upload wheels
         uses: actions/upload-artifact@v4
@@ -109,8 +108,7 @@ jobs:
 
       - name: Keep only abi3 wheel (remove PyPy builds)
         working-directory: packages/python/holoconf
-        run: |
-          rm -f dist/*-pp*.whl
+        run: sudo rm -f dist/*-pp*.whl
 
       - name: Upload wheels
         uses: actions/upload-artifact@v4

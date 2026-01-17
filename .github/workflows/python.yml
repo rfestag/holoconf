@@ -81,7 +81,7 @@ jobs:
         working-directory: packages/python/holoconf
         run: |
           ls -la dist/
-          rm -f dist/*-pp*.whl
+          sudo rm -f dist/*-pp*.whl
           ls -la dist/
 
       - name: Upload wheels
@@ -120,7 +120,7 @@ jobs:
         working-directory: packages/python/holoconf
         run: |
           ls -la dist/
-          rm -f dist/*-pp*.whl
+          sudo rm -f dist/*-pp*.whl
           ls -la dist/
 
       - name: Upload wheels
