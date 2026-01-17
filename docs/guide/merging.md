@@ -1,8 +1,5 @@
 # Configuration Merging
 
-!!! note "Coming Soon"
-    This page is under construction. See [FEAT-003 Config Merging](../specs/features/FEAT-003-config-merging.md) for the full specification.
-
 ## Overview
 
 HoloConf allows you to merge multiple configuration files, enabling patterns like:

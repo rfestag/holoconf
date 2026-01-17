@@ -1,5 +1,13 @@
 # FEAT-001: Configuration File Loading
 
+## Status
+
+Implemented
+
+## Changelog
+
+- 2026-01-17: Marked as Implemented (v0.2.0)
+
 ## Overview
 
 Load configuration data from YAML or JSON files into a `Config` object that provides dot-notation access to values.

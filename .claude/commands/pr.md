@@ -20,13 +20,6 @@ Push the current branch and create a pull request following the project's PR tem
    ```
    If changes exist, ask whether to commit or stash them
 
-3. **Check if in worktree**:
-   ```bash
-   git rev-parse --git-common-dir
-   git rev-parse --git-dir
-   ```
-   (Different values = in worktree)
-
 ## Steps
 
 1. **Handle uncommitted changes**: If present, ask user whether to commit them or stash them
@@ -70,14 +63,8 @@ Push the current branch and create a pull request following the project's PR tem
    ```
    Use conventional commit format for title: `feat:`, `fix:`, `docs:`, `refactor:`, etc.
 
-8. **Cleanup** (only if in a worktree): Ask if user wants to remove the worktree:
-   ```bash
-   cd /home/ryan/Code/holoconf
-   git worktree remove <current-worktree-path>
-   ```
-
 ## Output
-Report the PR URL and whether cleanup was performed.
+Report the PR URL.
 
 ## Edge Cases
 - **On main branch**: Abort and inform user to create a feature branch first

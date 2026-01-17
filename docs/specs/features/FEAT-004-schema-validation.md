@@ -1,5 +1,13 @@
 # FEAT-004: Schema Validation
 
+## Status
+
+Implemented
+
+## Changelog
+
+- 2026-01-17: Marked as Implemented (v0.2.0)
+
 ## Overview
 
 Validate configuration against a JSON Schema to catch errors early, document the expected structure, and enable type coercion for resolved values.

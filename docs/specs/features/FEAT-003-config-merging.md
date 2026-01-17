@@ -1,5 +1,13 @@
 # FEAT-003: Configuration Merging
 
+## Status
+
+Implemented
+
+## Changelog
+
+- 2026-01-17: Marked as Implemented (v0.2.0)
+
 ## Overview
 
 Load and merge multiple configuration files in a specified order, with later files overriding earlier ones. This enables layered configuration (base → environment → local overrides).

@@ -1,5 +1,13 @@
 # FEAT-005: Serialization and Export
 
+## Status
+
+Implemented
+
+## Changelog
+
+- 2026-01-17: Marked as Implemented (v0.2.0)
+
 ## Overview
 
 Export configuration to YAML, JSON, or dict formats for debugging, auditing, and integration with other tools. Includes resolver-aware redaction to prevent secrets from being exposed.

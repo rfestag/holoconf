@@ -4,7 +4,7 @@ description: Create branch and start working on a GitHub issue
 
 # Fix Issue: $ARGUMENTS
 
-Create a worktree/branch and start working on a GitHub issue.
+Create a branch and start working on a GitHub issue.
 
 ## Pre-checks
 
@@ -14,6 +14,11 @@ Create a worktree/branch and start working on a GitHub issue.
    git status --short
    ```
    If changes exist, ask user to commit or stash first
+3. **Ensure on main branch**:
+   ```bash
+   git branch --show-current
+   ```
+   If not on main, ask user to switch to main or suggest running `/worktree` instead
 
 ## Steps
 
@@ -27,19 +32,13 @@ Create a worktree/branch and start working on a GitHub issue.
    - `enhancement` label → `feat/$ARGUMENTS-<short-description>`
    - Otherwise → `chore/$ARGUMENTS-<short-description>`
 
-3. **Create worktree and branch**:
+3. **Create and switch to branch**:
    ```bash
    git fetch origin main
-   git worktree add /home/ryan/Code/holoconf-$BRANCH_NAME -b $BRANCH_NAME origin/main
-   cd /home/ryan/Code/holoconf-$BRANCH_NAME
+   git checkout -b $BRANCH_NAME origin/main
    ```
 
-4. **Setup development environment** (if needed):
-   ```bash
-   make install-tools
-   ```
-
-5. **Analyze the issue**:
+4. **Analyze the issue**:
    - Understand the problem from description and comments
    - Search codebase for relevant files
    - Determine if this needs:
@@ -47,18 +46,19 @@ Create a worktree/branch and start working on a GitHub issue.
      - ADR (`docs/adr/`)
      - New acceptance tests
 
-6. **Follow TDD workflow**:
+5. **Follow TDD workflow**:
    - Write failing test first
    - Implement fix
    - Verify tests pass
    - Update CHANGELOG.md
 
 ## Output
-- Report worktree location: `/home/ryan/Code/holoconf-$BRANCH_NAME/`
-- Suggest: "Open in new VS Code window (SCM view > Worktrees > Open in New Window)"
+- Report branch created: `$BRANCH_NAME`
+- Show first steps from issue analysis
 - Suggest: "Run `/pr` when ready to create a pull request"
+- **Optional**: "Run `/worktree` to work on this in a separate directory"
 
 ## Edge Cases
 - **Issue not found**: Report error and suggest checking issue number
-- **Branch already exists**: Check for existing worktree with `git worktree list` and offer to switch
-- **Worktree path exists**: Suggest removing stale worktree or using different name
+- **Branch already exists**: Offer to switch to it with `git checkout $BRANCH_NAME`
+- **Not on main**: Suggest switching to main first or using `/worktree` for parallel work
