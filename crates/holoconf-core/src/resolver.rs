@@ -91,6 +91,8 @@ pub struct ResolverContext {
     pub config_root: Option<Arc<Value>>,
     /// The base path for relative file paths
     pub base_path: Option<std::path::PathBuf>,
+    /// Allowed root directories for file resolver (path traversal protection)
+    pub file_roots: std::collections::HashSet<std::path::PathBuf>,
     /// Resolution stack for circular reference detection
     pub resolution_stack: Vec<String>,
     /// Whether HTTP resolver is enabled
@@ -122,6 +124,7 @@ impl ResolverContext {
             config_path: config_path.into(),
             config_root: None,
             base_path: None,
+            file_roots: std::collections::HashSet::new(),
             resolution_stack: Vec::new(),
             allow_http: false,
             http_allowlist: Vec::new(),
@@ -502,6 +505,41 @@ fn file_resolver(
     } else {
         std::path::PathBuf::from(file_path_str)
     };
+
+    // Check if file exists first (for proper "not found" error message)
+    if !file_path.exists() {
+        return Err(Error::file_not_found(file_path_str, Some(ctx.config_path.clone())));
+    }
+
+    // Validate path is within allowed roots (path traversal protection)
+    if !ctx.file_roots.is_empty() {
+        // Canonicalize to get absolute path and resolve symlinks
+        let canonical_path = file_path.canonicalize().map_err(|e| {
+            Error::resolver_custom("file", format!("Failed to resolve file path: {}", e))
+                .with_path(ctx.config_path.clone())
+        })?;
+
+        let is_allowed = ctx.file_roots.iter().any(|root| {
+            // Canonicalize root to handle relative paths
+            root.canonicalize()
+                .map(|canonical_root| canonical_path.starts_with(&canonical_root))
+                .unwrap_or(false)
+        });
+
+        if !is_allowed {
+            let roots: Vec<String> = ctx
+                .file_roots
+                .iter()
+                .filter_map(|r| r.to_str().map(|s| s.to_string()))
+                .collect();
+            return Err(Error::resolver_custom("file", format!(
+                "File path escapes allowed roots: {}. Allowed roots: {:?}. Use file_roots parameter to extend allowed directories.",
+                canonical_path.display(),
+                roots
+            ))
+            .with_path(ctx.config_path.clone()));
+        }
+    }
 
     // Handle binary encoding separately - returns Value::Bytes directly
     if encoding == "binary" {

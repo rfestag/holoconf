@@ -325,6 +325,7 @@ impl PyConfig {
     /// Args:
     ///     yaml: YAML content as a string
     ///     base_path: Optional base path for resolving relative file references
+    ///     file_roots: List of allowed directory paths for file resolver (security)
     ///     allow_http: Enable HTTP resolver (disabled by default for security)
     ///     http_allowlist: List of URL patterns to allow (glob-style)
     ///     http_proxy: Proxy URL (e.g., "http://proxy:8080" or "socks5://proxy:1080")
@@ -339,6 +340,7 @@ impl PyConfig {
     #[pyo3(signature = (
         yaml,
         base_path=None,
+        file_roots=None,
         allow_http=false,
         http_allowlist=None,
         http_proxy=None,
@@ -354,6 +356,7 @@ impl PyConfig {
     fn loads(
         yaml: &str,
         base_path: Option<&str>,
+        file_roots: Option<Vec<String>>,
         allow_http: bool,
         http_allowlist: Option<Vec<String>>,
         http_proxy: Option<&str>,
@@ -367,7 +370,16 @@ impl PyConfig {
     ) -> PyResult<Self> {
         let mut options = ConfigOptions::default();
         if let Some(bp) = base_path {
-            options.base_path = Some(std::path::PathBuf::from(bp));
+            let base_path_buf = std::path::PathBuf::from(bp);
+            options.base_path = Some(base_path_buf.clone());
+            // Auto-add base_path to file_roots for path traversal protection
+            options.file_roots.push(base_path_buf);
+        }
+        // Add additional file_roots from parameter
+        if let Some(roots) = file_roots {
+            for root in roots {
+                options.file_roots.push(std::path::PathBuf::from(root));
+            }
         }
         options.allow_http = allow_http;
         options.http_allowlist = http_allowlist.unwrap_or_default();
@@ -392,6 +404,8 @@ impl PyConfig {
     ///     path: Path to the YAML file
     ///     schema: Optional path to a JSON Schema file. If provided, schema defaults
     ///            will be used when accessing missing paths.
+    ///     file_roots: Additional allowed directory paths for file resolver (the config's
+    ///                parent directory is automatically added)
     ///     allow_http: Enable HTTP resolver (disabled by default for security)
     ///     http_allowlist: List of URL patterns to allow (glob-style)
     ///     http_proxy: Proxy URL (e.g., "http://proxy:8080" or "socks5://proxy:1080")
@@ -413,6 +427,7 @@ impl PyConfig {
     #[pyo3(signature = (
         path,
         schema=None,
+        file_roots=None,
         allow_http=false,
         http_allowlist=None,
         http_proxy=None,
@@ -428,6 +443,7 @@ impl PyConfig {
     fn load(
         path: &str,
         schema: Option<&str>,
+        file_roots: Option<Vec<String>>,
         allow_http: bool,
         http_allowlist: Option<Vec<String>>,
         http_proxy: Option<&str>,
@@ -440,6 +456,12 @@ impl PyConfig {
         http_insecure: bool,
     ) -> PyResult<Self> {
         let mut options = ConfigOptions::default();
+        // Add additional file_roots from parameter (parent dir is auto-added by Rust core)
+        if let Some(roots) = file_roots {
+            for root in roots {
+                options.file_roots.push(std::path::PathBuf::from(root));
+            }
+        }
         options.allow_http = allow_http;
         options.http_allowlist = http_allowlist.unwrap_or_default();
         options.http_proxy = http_proxy.map(String::from);
@@ -470,6 +492,7 @@ impl PyConfig {
     /// Args:
     ///     path: Path to the YAML file
     ///     schema: Optional path to a JSON Schema file
+    ///     file_roots: Additional allowed directory paths for file resolver
     ///     allow_http: Enable HTTP resolver (disabled by default for security)
     ///     http_allowlist: List of URL patterns to allow (glob-style)
     ///     http_proxy: Proxy URL (e.g., "http://proxy:8080" or "socks5://proxy:1080")
@@ -484,6 +507,7 @@ impl PyConfig {
     #[pyo3(signature = (
         path,
         schema=None,
+        file_roots=None,
         allow_http=false,
         http_allowlist=None,
         http_proxy=None,
@@ -499,6 +523,7 @@ impl PyConfig {
     fn required(
         path: &str,
         schema: Option<&str>,
+        file_roots: Option<Vec<String>>,
         allow_http: bool,
         http_allowlist: Option<Vec<String>>,
         http_proxy: Option<&str>,
@@ -513,6 +538,7 @@ impl PyConfig {
         Self::load(
             path,
             schema,
+            file_roots,
             allow_http,
             http_allowlist,
             http_proxy,

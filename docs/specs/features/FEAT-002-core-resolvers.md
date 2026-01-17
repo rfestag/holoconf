@@ -202,12 +202,48 @@ legacy_config: ${file:./old.txt,encoding=latin-1}
 secret_key: ${file:./secret.key,sensitive=true}
 ```
 
-**Security:**
-- Local file access is sandboxed to config directory by default
+**Security (Path Traversal Protection):**
+
+By default, file access is restricted to the config file's parent directory to prevent path traversal attacks:
 
 ```python
-# Expand sandbox to include other directories
-config = Config.load("config.yaml", file_roots=["/etc/myapp", "./config"])
+# Auto-allowed: files in same directory as config
+config = Config.load("/app/config.yaml")
+# Can read: /app/data.txt, /app/subdir/file.txt
+# BLOCKED: /etc/passwd, /other/path/file.txt
+```
+
+The restriction applies to both relative and absolute paths:
+- Relative paths are resolved relative to the config file's directory
+- Absolute paths must be within allowed roots
+- Symlinks are resolved and checked against allowed roots
+
+To access files outside the config directory, explicitly allow additional roots:
+
+```python
+# Allow access to multiple directories
+config = Config.load(
+    "/app/config.yaml",
+    file_roots=["/etc/myapp", "/var/lib/myapp"]
+)
+```
+
+When loading from a string with `loads()`, specify `base_path` to set the sandbox root:
+
+```python
+config = Config.loads(
+    yaml_string,
+    base_path="/app/config",  # Files resolved relative to this
+    file_roots=["/etc/myapp"]  # Additional allowed roots
+)
+```
+
+When merging configs, file_roots are combined (union):
+
+```python
+config1 = Config.load("/app/config.yaml")  # Allows /app
+config2 = Config.load("/etc/config.yaml", file_roots=["/var/lib"])  # Allows /etc, /var/lib
+config1.merge(config2)  # Now allows /app, /etc, /var/lib
 ```
 
 ### 4. HTTP Resolver (`http`)
