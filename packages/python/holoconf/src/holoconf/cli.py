@@ -10,13 +10,14 @@ Usage:
     holoconf get config.yaml database.host
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Optional
 
-from holoconf import Config, HoloconfError, Schema
+from holoconf import Config, HoloconfError, Schema, __version__
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -25,7 +26,7 @@ def create_parser() -> argparse.ArgumentParser:
         prog="holoconf",
         description="Configuration management with resolver support",
     )
-    parser.add_argument("--version", action="version", version="holoconf 0.1.0")
+    parser.add_argument("--version", action="version", version=f"holoconf {__version__}")
 
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -114,11 +115,15 @@ def create_parser() -> argparse.ArgumentParser:
 
 
 def load_config(files: list[Path]) -> Config:
-    """Load configuration from one or more files."""
-    if len(files) == 1:
-        return Config.load(str(files[0]))
-    else:
-        return Config.load_merged([str(f) for f in files])
+    """Load configuration from one or more files.
+
+    When multiple files are provided, they are merged in order with
+    later files overriding earlier ones.
+    """
+    config = Config.load(str(files[0]))
+    for f in files[1:]:
+        config.merge(Config.load(str(f)))
+    return config
 
 
 def cmd_validate(
@@ -170,7 +175,7 @@ def cmd_dump(
     resolve: bool,
     no_redact: bool,
     output_format: str,
-    output_path: Optional[Path],
+    output_path: Path | None,
 ) -> int:
     """Export configuration in various formats."""
     try:
@@ -203,7 +208,7 @@ def cmd_get(
     path: str,
     resolve: bool,
     output_format: str,
-    default: Optional[str],
+    default: str | None,
 ) -> int:
     """Get a specific value from the configuration."""
     try:

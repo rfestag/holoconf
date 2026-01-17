@@ -408,7 +408,7 @@ impl Config {
     pub fn get(&self, path: &str) -> Result<Value> {
         // Check cache first
         {
-            let cache = self.cache.read().unwrap();
+            let cache = self.cache.read().expect("Cache lock poisoned");
             if let Some(cached) = cache.get(path) {
                 return Ok(cached.value.clone());
             }
@@ -432,7 +432,8 @@ impl Config {
                                 let resolved_default = ResolvedValue::new(default_value.clone());
                                 // Cache the default
                                 {
-                                    let mut cache = self.cache.write().unwrap();
+                                    let mut cache =
+                                        self.cache.write().expect("Cache lock poisoned");
                                     cache.insert(path.to_string(), resolved_default);
                                 }
                                 return Ok(default_value);
@@ -443,7 +444,7 @@ impl Config {
 
                 // Cache the result
                 {
-                    let mut cache = self.cache.write().unwrap();
+                    let mut cache = self.cache.write().expect("Cache lock poisoned");
                     cache.insert(path.to_string(), resolved.clone());
                 }
 
@@ -456,7 +457,7 @@ impl Config {
                         let resolved_default = ResolvedValue::new(default_value.clone());
                         // Cache the default
                         {
-                            let mut cache = self.cache.write().unwrap();
+                            let mut cache = self.cache.write().expect("Cache lock poisoned");
                             cache.insert(path.to_string(), resolved_default);
                         }
                         return Ok(default_value);
@@ -604,7 +605,7 @@ impl Config {
 
     /// Clear the resolution cache
     pub fn clear_cache(&self) {
-        let mut cache = self.cache.write().unwrap();
+        let mut cache = self.cache.write().expect("Cache lock poisoned");
         cache.clear();
     }
 
@@ -939,7 +940,7 @@ impl Config {
                     let resolved = self.resolve_interpolation(&parsed, path, resolution_stack)?;
 
                     // Cache the result
-                    let mut cache = self.cache.write().unwrap();
+                    let mut cache = self.cache.write().expect("Cache lock poisoned");
                     cache.insert(path.to_string(), resolved.clone());
 
                     Ok(resolved)
