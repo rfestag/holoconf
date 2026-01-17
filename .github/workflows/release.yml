@@ -69,6 +69,9 @@ jobs:
           working-directory: packages/python/holoconf
           sccache: true
 
+      - name: Remove PyPy wheels (keep only abi3)
+        run: rm -f packages/python/holoconf/dist/*-pp*.whl
+
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
@@ -101,6 +104,9 @@ jobs:
           args: --release --out dist
           working-directory: packages/python/holoconf
           sccache: true
+
+      - name: Remove PyPy wheels (keep only abi3)
+        run: rm -f packages/python/holoconf/dist/*-pp*.whl
 
       - name: Upload wheels
         uses: actions/upload-artifact@v4
