@@ -174,11 +174,11 @@ security-python: $(VENV_PYTHON)
 audit-unsafe:
 	@echo "→ Auditing unsafe code policy..."
 	@echo "→ Verifying #![forbid(unsafe_code)] in holoconf-core..."
-	@grep -q '#!\[forbid(unsafe_code)\]' crates/holoconf-core/src/lib.rs || \
+	@/usr/bin/grep -q '#!\[forbid(unsafe_code)\]' crates/holoconf-core/src/lib.rs || \
 		(echo "  ✗ holoconf-core is missing #![forbid(unsafe_code)]" && exit 1)
 	@echo "  ✓ holoconf-core has #![forbid(unsafe_code)]"
 	@echo "→ Verifying #![forbid(unsafe_code)] in holoconf-cli..."
-	@grep -q '#!\[forbid(unsafe_code)\]' crates/holoconf-cli/src/lib.rs || \
+	@/usr/bin/grep -q '#!\[forbid(unsafe_code)\]' crates/holoconf-cli/src/lib.rs || \
 		(echo "  ✗ holoconf-cli is missing #![forbid(unsafe_code)]" && exit 1)
 	@echo "  ✓ holoconf-cli has #![forbid(unsafe_code)]"
 	@echo "→ Note: holoconf-python uses limited unsafe for PyO3 Send+Sync (see crates/holoconf-python/src/lib.rs)"
