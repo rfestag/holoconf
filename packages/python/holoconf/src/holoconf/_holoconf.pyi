@@ -561,6 +561,30 @@ class Schema:
         """
         ...
 
+    def to_yaml(self) -> str:
+        """Output the schema as YAML.
+
+        Returns:
+            The schema serialized as a YAML string.
+        """
+        ...
+
+    def to_json(self) -> str:
+        """Output the schema as JSON.
+
+        Returns:
+            The schema serialized as a JSON string.
+        """
+        ...
+
+    def to_markdown(self) -> str:
+        """Generate markdown documentation from the schema.
+
+        Returns:
+            Human-readable markdown documentation describing the schema.
+        """
+        ...
+
 class HoloconfError(Exception):
     """Base exception for all holoconf errors.
 

@@ -926,8 +926,7 @@ fn build_tls_config(
 
     if insecure {
         // DANGEROUS: Skip TLS verification
-        // Log a warning (in production, use proper logging)
-        eprintln!("WARNING: TLS certificate verification is disabled (http_insecure=true)");
+        log::warn!("TLS certificate verification is disabled (http_insecure=true)");
         builder = builder.disable_verification(true);
     }
 

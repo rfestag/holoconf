@@ -109,7 +109,13 @@ def discover_plugins() -> list[str]:
 # Auto-discover plugins on import
 discover_plugins()
 
-__version__ = "0.1.0"
+# Read version from package metadata (set in pyproject.toml)
+try:
+    from importlib.metadata import version as _get_version
+
+    __version__ = _get_version("holoconf")
+except Exception:
+    __version__ = "0.0.0"  # Fallback for development installs
 __all__ = [
     "CircularReferenceError",
     "Config",
