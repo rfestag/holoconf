@@ -1,5 +1,7 @@
 # GitHub Workflow
 
+> **Agents**: Use `pr-reviewer` for PR reviews, `security-reviewer` for security audits.
+
 ## Creating Issues
 
 **IMPORTANT:** Always use the correct issue template based on type.

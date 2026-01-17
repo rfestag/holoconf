@@ -1,5 +1,7 @@
 # Rust Patterns
 
+> **Agent**: For deep Rust analysis, use the `rust-expert` agent.
+
 ## Project-Specific Conventions
 
 ### Error Handling

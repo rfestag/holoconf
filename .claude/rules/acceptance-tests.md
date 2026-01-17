@@ -1,5 +1,7 @@
 # Acceptance Test Format
 
+> **Agent**: For test design and coverage analysis, use the `acceptance-test-specialist` agent.
+
 Location: `tests/acceptance/`
 
 ```yaml

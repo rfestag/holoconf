@@ -1,5 +1,7 @@
 # Python Patterns
 
+> **Agent**: For Python and PyO3 analysis, use the `python-expert` agent.
+
 ## Development Setup
 ```bash
 cd packages/python/holoconf

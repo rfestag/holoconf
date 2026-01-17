@@ -2,6 +2,8 @@
 
 **Write tests FIRST, then implement until they pass.**
 
+> **Agents**: Use `acceptance-test-specialist` for test design, `rust-expert` or `python-expert` for implementation.
+
 ## New Features
 1. Spec: `docs/specs/features/FEAT-xxx-name.md`
 2. ADR if architectural: `docs/adr/ADR-xxx-topic.md`

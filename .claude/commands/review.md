@@ -6,6 +6,14 @@ description: Review a pull request
 
 Analyze and review a pull request for code quality, correctness, and project standards.
 
+## Agent Delegation
+
+This review uses specialized agents for thorough analysis:
+- **pr-reviewer**: Overall code review and quality assessment
+- **rust-expert**: Deep Rust analysis (if `crates/` changed)
+- **python-expert**: Python bindings review (if `packages/python/` changed)
+- **security-reviewer**: Security assessment (run in parallel)
+
 ## Steps
 
 1. **Get PR information**:
@@ -23,11 +31,17 @@ Analyze and review a pull request for code quality, correctness, and project sta
    gh pr checks $ARGUMENTS
    ```
 
-4. **Analyze changes by category**:
-   - **Rust core** (`crates/`): Check error handling, thread safety, API consistency
-   - **Python bindings** (`crates/holoconf-python/`, `packages/python/`): Check PyO3 patterns, type stubs
-   - **Tests** (`tests/`): Check coverage, test quality
-   - **Documentation** (`docs/`): Check accuracy, completeness
+4. **Delegate to specialized agents based on changed files**:
+
+   **If Rust files changed** (`crates/`):
+   - Use `rust-expert` agent for memory safety, error handling, API design
+
+   **If Python files changed** (`packages/python/`, `crates/holoconf-python/`):
+   - Use `python-expert` agent for PyO3 patterns, type stubs, Pythonic design
+
+   **Always**:
+   - Use `security-reviewer` agent for vulnerability assessment
+   - Use `pr-reviewer` agent for overall quality and standards
 
 5. **Review checklist**:
    - [ ] Missing tests for new functionality?
@@ -38,13 +52,16 @@ Analyze and review a pull request for code quality, correctness, and project sta
    - [ ] Type stubs updated (if Python API changed)?
    - [ ] Follows project patterns (ADRs, specs)?
 
-6. **Summarize findings**:
-   - List issues with specific `file:line` references
+6. **Summarize findings from all agents**:
+   - Consolidate issues with specific `file:line` references
    - Categorize as: blocking, should-fix, nitpick
    - Highlight positive aspects too
 
 ## Output
+
 Provide a structured review summary with:
 - Overall assessment (approve, request changes, needs discussion)
-- Specific feedback items
+- Findings organized by severity
+- Security assessment summary
+- Specific feedback items with file:line references
 - Questions for the author (if any)
