@@ -52,6 +52,18 @@ database:
     }
     ```
 
+=== "CLI"
+
+    ```bash
+    # Set environment variables and get resolved values
+    export DB_HOST="production-db.example.com"
+    holoconf get database.host config.yaml
+    # Output: production-db.example.com
+
+    # View all resolved env vars
+    holoconf dump config.yaml --resolve
+    ```
+
 ### Self-References
 
 Reference other values within the same configuration.
@@ -148,6 +160,17 @@ raw_data: ${http:https://api.example.com/data,parse=text}
         .allow_http(true)
         .http_allowlist(vec!["https://config.example.com/*"])
         .load("config.yaml")?;
+    ```
+
+=== "CLI"
+
+    ```bash
+    # HTTP resolver must be enabled with --allow-http flag
+    holoconf get feature_flags config.yaml --allow-http
+
+    # With URL allowlist for security
+    holoconf dump config.yaml --resolve --allow-http \
+      --http-allowlist 'https://config.example.com/*'
     ```
 
 #### HTTP Resolver Options

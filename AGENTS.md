@@ -30,7 +30,7 @@ Use these agents for focused expertise. Claude will delegate automatically based
 |-------|---------|-----------|
 | `rust-expert` | Memory safety, performance, idiomatic Rust | Changes to `crates/` |
 | `python-expert` | PyO3 patterns, type stubs, Pythonic APIs | Changes to Python bindings |
-| `typescript-expert` | NAPI-RS patterns, TS types, Node.js APIs | Changes to Node bindings |
+| `typescript-expert` | NAPI-RS patterns, TS types, Node.js APIs | Changes to Node bindings (planned - not yet active) |
 | `doc-writer` | Documentation style, narrative flow, examples | User-facing feature changes |
 | `security-reviewer` | Vulnerability assessment, secrets detection | Security audits, PR reviews |
 | `pr-reviewer` | Code quality, standards compliance | PR reviews |
@@ -71,6 +71,8 @@ These ADRs apply to most changes - consult before implementing:
 | ADR-004 | Config Merging Semantics | Merge behavior changes |
 | ADR-008 | Error Handling Strategy | New error types/handling |
 | ADR-013 | Testing Architecture | Test structure changes |
+| ADR-018 | Pull Request and Merge Process | Creating PRs, git workflow |
+| ADR-019 | Resolver Extension Packages | Creating resolver extensions |
 
 Feature specs: `docs/specs/features/` - check for existing spec before implementing any feature.
 
