@@ -1,67 +1,47 @@
 # Schema Validation
 
-HoloConf supports validating configuration against JSON Schema, helping you catch configuration errors early, enforce structure requirements, and apply default values for missing fields.
+Configuration errors in production are expensive. A typo in a port number. A missing required field. A value that's the wrong type. These bugs slip through because configuration often isn't validated until runtime - when it's too late.
 
-## Overview
+Let's learn how to catch these errors early using JSON Schema validation.
 
-Schemas serve two purposes in HoloConf:
+## Why Validate Configuration?
 
-1. **Validation**: Verify your configuration matches the expected structure and types
-2. **Default Values**: Automatically provide values for missing configuration paths
+Imagine deploying your application to production. Everything seems fine until:
 
-## Loading with Schema
+```python
+# Your code expects an integer
+pool_size = config.get("database.pool_size")
+connection_pool.initialize(pool_size)
+# TypeError: expected int, got str
+```
 
-=== "Python"
+Someone set `pool_size: "10"` (a string) instead of `pool_size: 10` (an integer). The application crashes.
 
-    ```python
-    from holoconf import Config
+Or worse:
 
-    # Load config with schema attached for default values
-    config = Config.load("config.yaml", schema="schema.yaml")
+```python
+db_host = config.get("database.host")
+# KeyError: database.host not found
+```
 
-    # Access a value that might be in config or schema default
-    print(config.database.pool_size)  # Returns schema default if not in config
-    ```
+Someone forgot to set the database host at all.
 
-=== "CLI"
+These errors should be caught before deployment, not discovered in production. That's where schema validation comes in.
 
-    ```bash
-    # Get a value with schema defaults
-    holoconf get config.yaml database.pool_size --schema schema.yaml
+## Loading with a Schema
 
-    # Dump config with schema defaults applied
-    holoconf dump config.yaml --schema schema.yaml --resolve
-    ```
+Let's start with a simple configuration:
 
-## Explicit Validation
+```yaml
+# config.yaml
+app:
+  name: my-application
 
-Attaching a schema for defaults does **not** automatically validate. Use `validate()` to check:
+database:
+  host: localhost
+```
 
-=== "Python"
-
-    ```python
-    from holoconf import Config, Schema, ValidationError
-
-    config = Config.load("config.yaml", schema="schema.yaml")
-
-    try:
-        config.validate()  # Uses attached schema
-        print("Configuration is valid")
-    except ValidationError as e:
-        print(f"Validation failed: {e}")
-
-    # Or validate with a different schema
-    other_schema = Schema.load("other.yaml")
-    config.validate(other_schema)
-    ```
-
-=== "CLI"
-
-    ```bash
-    holoconf validate config.yaml --schema schema.yaml
-    ```
-
-## Example Schema
+And a schema that describes what we expect:
 
 ```json
 {
@@ -82,7 +62,7 @@ Attaching a schema for defaults does **not** automatically validate. Use `valida
       "required": ["host"],
       "properties": {
         "host": { "type": "string" },
-        "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535, "default": 5432 },
         "pool_size": { "type": "integer", "minimum": 1, "default": 10 }
       }
     }
@@ -90,113 +70,491 @@ Attaching a schema for defaults does **not** automatically validate. Use `valida
 }
 ```
 
-## Schema Default Values
-
-When a schema is attached to a config, accessing a missing path returns the schema default instead of raising `PathNotFoundError`:
+Now let's load the configuration with the schema attached:
 
 === "Python"
 
     ```python
-    from holoconf import Config, Schema
+    from holoconf import Config
 
-    config = Config.load("config.yaml", schema="schema.yaml")
+    # Load config with schema attached
+    config = Config.load("config.yaml", schema="schema.json")
 
-    # If pool_size is not in config.yaml but schema has default: 10
-    print(config.database.pool_size)  # Returns 10
+    # The schema provides defaults for missing values
+    debug = config.get("app.debug")
+    print(f"Debug mode: {debug}")
+    # Debug mode: False (from schema default)
 
-    # You can also attach a schema after loading
-    config = Config.load("config.yaml")
-    schema = Schema.load("schema.yaml")
-    config.set_schema(schema)
+    port = config.get("database.port")
+    print(f"Port: {port}")
+    # Port: 5432 (from schema default)
+
+    pool_size = config.get("database.pool_size")
+    print(f"Pool size: {pool_size}")
+    # Pool size: 10 (from schema default)
     ```
 
-### Value Precedence
+=== "CLI"
 
-When accessing a value, the precedence is:
+    ```bash
+    # Get value with schema defaults
+    $ holoconf get config.yaml database.port --schema schema.json
+    5432
 
-1. **Config value**: If the path exists in the config, that value is used
-2. **Resolver default**: If using `${env:VAR,default=value}`, the resolver default
-3. **Schema default**: If the path is missing and schema has a default
+    # Dump config with schema defaults applied
+    $ holoconf dump config.yaml --schema schema.json --resolve
+    app:
+      name: my-application
+      debug: false
+    database:
+      host: localhost
+      port: 5432
+      pool_size: 10
+    ```
 
-```yaml
-# schema.yaml
-type: object
-properties:
-  database:
-    type: object
-    properties:
-      pool_size:
-        type: integer
-        default: 10
-```
+Notice how the schema filled in missing values? You get sensible defaults without cluttering your configuration file.
 
-```yaml
-# config.yaml
-database:
-  pool_size: 20  # Config wins - returns 20
-```
+## Validating Configuration
 
-### Null Handling
-
-If a config value is explicitly `null` and the schema doesn't allow null for that field, the schema default is used:
-
-```yaml
-# schema.yaml
-properties:
-  timeout:
-    type: integer  # null not allowed
-    default: 30
-```
-
-```yaml
-# config.yaml
-timeout: null  # null not allowed by schema
-```
-
-```python
-config.timeout  # Returns 30 (schema default)
-```
-
-If the schema allows null (using `type: ["integer", "null"]`), the null value is preserved.
-
-## Type Coercion
-
-When validation is enabled, HoloConf can automatically coerce values to match the schema:
-
-```yaml
-# config.yaml
-database:
-  port: "5432"  # String in YAML
-```
-
-With schema validation, `database.port` will be coerced to integer `5432` based on the schema definition.
-
-See [ADR-012 Type Coercion](../adr/ADR-012-type-coercion.md) for details on type coercion behavior.
-
-## Validation Errors
-
-Validation errors include detailed information about what failed:
+Here's something important: attaching a schema does **not** automatically validate. The schema only provides defaults. To actually check if your configuration is valid, you need to call `validate()`:
 
 === "Python"
 
     ```python
     from holoconf import Config, ValidationError
 
+    config = Config.load("config.yaml", schema="schema.json")
+
     try:
-        config = Config.from_file("config.yaml")
-        config.validate("schema.json")
+        config.validate()  # Uses the attached schema
+        print("Configuration is valid!")
     except ValidationError as e:
-        print(f"Path: {e.path}")
-        print(f"Message: {e.message}")
-        # Path: database.port
-        # Message: -1 is less than the minimum of 1
+        print(f"Validation failed: {e}")
     ```
 
 === "CLI"
 
     ```bash
     $ holoconf validate config.yaml --schema schema.json
-    Validation error at 'database.port': -1 is less than the minimum of 1
+    Configuration is valid!
     ```
 
-See [ADR-007 Schema Validation](../adr/ADR-007-schema-validation.md) for the design rationale.
+Let's see what happens when validation fails. Create a broken configuration:
+
+```yaml
+# broken.yaml
+app:
+  name: my-application
+
+database:
+  host: localhost
+  port: "invalid"  # Should be an integer, not a string
+```
+
+Now try to validate it:
+
+=== "Python"
+
+    ```python
+    from holoconf import Config, ValidationError
+
+    config = Config.load("broken.yaml", schema="schema.json")
+
+    try:
+        config.validate()
+    except ValidationError as e:
+        print(f"Error at {e.path}: {e.message}")
+        # Error at database.port: "invalid" is not of type 'integer'
+    ```
+
+=== "CLI"
+
+    ```bash
+    $ holoconf validate broken.yaml --schema schema.json
+    Validation error at 'database.port': "invalid" is not of type 'integer'
+    ```
+
+The validation error tells you exactly what's wrong and where. This makes fixing configuration errors much easier!
+
+## Schema Defaults vs Config Values
+
+When you attach a schema, there's a precedence order for values:
+
+1. **Config value** - If the path exists in your config file, that value is used
+2. **Resolver default** - If using `${env:VAR,default=value}`, the resolver's default
+3. **Schema default** - If the path is missing and the schema has a default
+
+Let's see this in action:
+
+```json
+// schema.json
+{
+  "type": "object",
+  "properties": {
+    "database": {
+      "type": "object",
+      "properties": {
+        "port": { "type": "integer", "default": 5432 },
+        "pool_size": { "type": "integer", "default": 10 }
+      }
+    }
+  }
+}
+```
+
+```yaml
+# config.yaml
+database:
+  port: ${env:DB_PORT,default=3306}
+  # pool_size not specified - will use schema default
+```
+
+=== "Python"
+
+    ```python
+    import os
+    from holoconf import Config
+
+    config = Config.load("config.yaml", schema="schema.json")
+
+    # Scenario 1: Environment variable is set
+    os.environ["DB_PORT"] = "5433"
+    port = config.get("database.port")
+    print(f"Port: {port}")
+    # Port: 5433 (from environment variable)
+
+    # Scenario 2: Environment variable not set
+    del os.environ["DB_PORT"]
+    config = Config.load("config.yaml", schema="schema.json")
+    port = config.get("database.port")
+    print(f"Port: {port}")
+    # Port: 3306 (from resolver default, not schema default)
+
+    # pool_size not in config, uses schema default
+    pool_size = config.get("database.pool_size")
+    print(f"Pool size: {pool_size}")
+    # Pool size: 10 (from schema default)
+    ```
+
+This shows how the three levels work together: config values override everything, resolver defaults override schema defaults, and schema defaults fill in the rest.
+
+## Type Coercion
+
+Here's something powerful: when you validate, HoloConf can automatically coerce values to match the schema's types.
+
+```yaml
+# config.yaml
+database:
+  port: "5432"  # String in YAML
+  pool_size: "10"  # String in YAML
+```
+
+Without validation, these are strings. But with a schema that says they should be integers:
+
+=== "Python"
+
+    ```python
+    from holoconf import Config
+
+    config = Config.load("config.yaml", schema="schema.json")
+
+    # Without validation - they're still strings
+    port = config.get("database.port")
+    print(f"Port type: {type(port)}, value: {port}")
+    # Port type: <class 'str'>, value: 5432
+
+    # After validation - they're coerced to integers
+    config.validate()
+    port = config.get("database.port")
+    print(f"Port type: {type(port)}, value: {port}")
+    # Port type: <class 'int'>, value: 5432
+    ```
+
+This is incredibly helpful when loading configuration from sources that don't preserve types (like environment variables, which are always strings).
+
+!!! note "Type Coercion Details"
+    For full details on how type coercion works, see [ADR-012 Type Coercion](../adr/ADR-012-type-coercion.md).
+
+## Null Handling
+
+What about `null` values? The schema determines how these are handled:
+
+```json
+// schema.json
+{
+  "type": "object",
+  "properties": {
+    "timeout": {
+      "type": "integer",  // null not allowed
+      "default": 30
+    },
+    "optional_value": {
+      "type": ["integer", "null"],  // null explicitly allowed
+      "default": 30
+    }
+  }
+}
+```
+
+```yaml
+# config.yaml
+timeout: null
+optional_value: null
+```
+
+=== "Python"
+
+    ```python
+    from holoconf import Config
+
+    config = Config.load("config.yaml", schema="schema.json")
+
+    # timeout is null but schema doesn't allow null - uses default
+    timeout = config.get("timeout")
+    print(f"Timeout: {timeout}")
+    # Timeout: 30 (schema default)
+
+    # optional_value is null and schema allows null - preserved
+    optional = config.get("optional_value")
+    print(f"Optional: {optional}")
+    # Optional: None
+    ```
+
+This gives you fine-grained control: some fields can be `null`, others can't.
+
+## Validation Errors: Catching Problems
+
+Let's create a configuration with multiple problems and see what validation tells us:
+
+```yaml
+# broken-config.yaml
+app:
+  # Missing required 'name' field
+  debug: "yes"  # Should be boolean
+
+database:
+  host: localhost
+  port: -1  # Port must be >= 1
+  pool_size: 0  # Pool size must be >= 1
+```
+
+Now validate:
+
+=== "Python"
+
+    ```python
+    from holoconf import Config, ValidationError
+
+    config = Config.load("broken-config.yaml", schema="schema.json")
+
+    try:
+        config.validate()
+    except ValidationError as e:
+        print(f"Path: {e.path}")
+        print(f"Message: {e.message}")
+        # Path: app.name
+        # Message: 'name' is a required property
+    ```
+
+=== "CLI"
+
+    ```bash
+    $ holoconf validate broken-config.yaml --schema schema.json
+    Validation error at 'app.name': 'name' is a required property
+    ```
+
+Validation stops at the first error, so fix that and run again:
+
+```yaml
+# broken-config.yaml (fixed app.name)
+app:
+  name: my-application
+  debug: "yes"  # Still wrong
+
+database:
+  host: localhost
+  port: -1  # Still wrong
+  pool_size: 0  # Still wrong
+```
+
+=== "CLI"
+
+    ```bash
+    $ holoconf validate broken-config.yaml --schema schema.json
+    Validation error at 'app.debug': "yes" is not of type 'boolean'
+    ```
+
+Fix each error one by one until your configuration is valid.
+
+!!! tip "Validate in CI/CD"
+    Add validation to your CI/CD pipeline:
+
+    ```bash
+    # In your build script
+    holoconf validate config/production.yaml --schema config/schema.json
+    ```
+
+    This catches configuration errors before they reach production!
+
+## When to Validate
+
+You might wonder: should you always validate? Here are some guidelines:
+
+**Always validate:**
+- Production configurations before deployment
+- Configuration changes in CI/CD pipelines
+- User-provided configuration files
+
+**Sometimes validate:**
+- Development configurations (helps catch errors early)
+- Configurations generated from templates
+
+**Rarely validate:**
+- Trusted internal configurations
+- Configuration fragments being merged
+- Performance-critical paths (validation has overhead)
+
+The key is balancing safety and performance. For production deployments, safety wins every time.
+
+## Complete Example
+
+Let's put it all together with a realistic example:
+
+```json
+// schema.json
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["app", "database"],
+  "properties": {
+    "app": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "debug": { "type": "boolean", "default": false },
+        "port": { "type": "integer", "minimum": 1024, "maximum": 65535, "default": 8000 }
+      }
+    },
+    "database": {
+      "type": "object",
+      "required": ["host"],
+      "properties": {
+        "host": { "type": "string", "minLength": 1 },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535, "default": 5432 },
+        "pool_size": { "type": "integer", "minimum": 1, "maximum": 100, "default": 10 },
+        "timeout": { "type": "integer", "minimum": 1, "default": 30 }
+      }
+    },
+    "logging": {
+      "type": "object",
+      "properties": {
+        "level": {
+          "type": "string",
+          "enum": ["debug", "info", "warning", "error"],
+          "default": "info"
+        },
+        "format": {
+          "type": "string",
+          "enum": ["json", "text"],
+          "default": "json"
+        }
+      }
+    }
+  }
+}
+```
+
+```yaml
+# config.yaml
+app:
+  name: my-application
+  debug: ${env:DEBUG,default=false}
+
+database:
+  host: ${env:DB_HOST,default=localhost}
+  port: ${env:DB_PORT,default=5432}
+
+logging:
+  level: ${env:LOG_LEVEL,default=info}
+```
+
+=== "Python"
+
+    ```python
+    from holoconf import Config, ValidationError
+
+    # Load with schema
+    config = Config.load("config.yaml", schema="schema.json")
+
+    # Validate before using
+    try:
+        config.validate()
+        print("Configuration is valid!")
+    except ValidationError as e:
+        print(f"Configuration error at {e.path}: {e.message}")
+        exit(1)
+
+    # Now safe to use
+    app_name = config.get("app.name")
+    db_host = config.get("database.host")
+    pool_size = config.get("database.pool_size")  # From schema default
+
+    print(f"Starting {app_name}")
+    print(f"Connecting to {db_host}")
+    print(f"Pool size: {pool_size}")
+    ```
+
+=== "CLI"
+
+    ```bash
+    # Validate first
+    $ holoconf validate config.yaml --schema schema.json
+    Configuration is valid!
+
+    # Then use it
+    $ holoconf dump config.yaml --schema schema.json --resolve
+    app:
+      name: my-application
+      debug: false
+      port: 8000
+    database:
+      host: localhost
+      port: 5432
+      pool_size: 10
+      timeout: 30
+    logging:
+      level: info
+      format: json
+    ```
+
+!!! tip "Try It Yourself"
+    Create your own schema and configuration:
+
+    1. Start with a simple schema with one or two fields
+    2. Add default values
+    3. Create a config file (intentionally with errors)
+    4. Run validation and fix the errors
+    5. Add more constraints (minimum, maximum, enum)
+    6. See how validation catches violations
+
+## What You've Learned
+
+You now understand:
+
+- Why validation is important (catch errors before production)
+- How to load configuration with a schema attached
+- The difference between attaching a schema and validating
+- Value precedence: config values → resolver defaults → schema defaults
+- Type coercion during validation
+- How to handle null values
+- Reading validation error messages
+- When to validate (always in production!)
+
+Validation gives you confidence that your configuration is correct before it reaches production. Combined with HoloConf's other features, you get configuration that's both flexible and safe.
+
+## Next Steps
+
+- **[ADR-007 Schema Validation](../adr/ADR-007-schema-validation.md)** - Design rationale for validation
+- **[ADR-012 Type Coercion](../adr/ADR-012-type-coercion.md)** - How type coercion works
+- Learn about [JSON Schema](https://json-schema.org/) to write more sophisticated schemas
