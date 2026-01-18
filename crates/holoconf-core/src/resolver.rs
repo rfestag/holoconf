@@ -38,12 +38,28 @@ pub fn register_global(resolver: Arc<dyn Resolver>, force: bool) -> Result<()> {
 }
 
 /// A resolved value with optional sensitivity metadata
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ResolvedValue {
     /// The actual resolved value
     pub value: Value,
     /// Whether this value is sensitive (should be redacted in logs/exports)
     pub sensitive: bool,
+}
+
+impl std::fmt::Debug for ResolvedValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ResolvedValue")
+            .field(
+                "value",
+                if self.sensitive {
+                    &"[REDACTED]"
+                } else {
+                    &self.value
+                },
+            )
+            .field("sensitive", &self.sensitive)
+            .finish()
+    }
 }
 
 impl ResolvedValue {
@@ -113,8 +129,7 @@ pub struct ResolverContext {
     pub http_client_key: Option<std::path::PathBuf>,
     /// Password for encrypted private key or P12/PFX file
     pub http_client_key_password: Option<String>,
-    /// DANGEROUS: Skip TLS certificate verification (dev only)
-    pub http_insecure: bool,
+    // NOTE: http_insecure removed - use insecure=true kwarg on each resolver call
 }
 
 impl ResolverContext {
@@ -135,7 +150,6 @@ impl ResolverContext {
             http_client_cert: None,
             http_client_key: None,
             http_client_key_password: None,
-            http_insecure: false,
         }
     }
 
@@ -193,11 +207,7 @@ impl ResolverContext {
         self
     }
 
-    /// DANGEROUS: Skip TLS certificate verification
-    pub fn with_http_insecure(mut self, insecure: bool) -> Self {
-        self.http_insecure = insecure;
-        self
-    }
+    // DANGEROUS: with_http_insecure removed - use insecure=true kwarg instead
 
     /// Set the config root for self-references
     pub fn with_config_root(mut self, root: Arc<Value>) -> Self {
@@ -669,38 +679,38 @@ fn http_resolver(
 
     let url = &args[0];
 
-    // Check if HTTP is enabled
-    if !ctx.allow_http {
-        return Err(Error {
-            kind: crate::error::ErrorKind::Resolver(crate::error::ResolverErrorKind::HttpDisabled),
-            path: Some(ctx.config_path.clone()),
-            source_location: None,
-            help: Some(format!(
-                "Enable HTTP resolver with Config.load(..., allow_http=True)\nURL: {}",
-                url
-            )),
-            cause: None,
-        });
-    }
-
-    // Check URL against allowlist if configured
-    if !ctx.http_allowlist.is_empty() {
-        let url_allowed = ctx
-            .http_allowlist
-            .iter()
-            .any(|pattern| url_matches_pattern(url, pattern));
-        if !url_allowed {
-            return Err(Error::http_not_in_allowlist(
-                url,
-                &ctx.http_allowlist,
-                Some(ctx.config_path.clone()),
-            ));
-        }
-    }
-
     // Perform the actual HTTP request
     #[cfg(feature = "http")]
     {
+        // Check if HTTP is enabled
+        if !ctx.allow_http {
+            return Err(Error {
+                kind: crate::error::ErrorKind::Resolver(crate::error::ResolverErrorKind::HttpDisabled),
+                path: Some(ctx.config_path.clone()),
+                source_location: None,
+                help: Some(
+                    "HTTP resolver is disabled. The URL specified by this config path cannot be fetched.\n\
+                     Enable with Config.load(..., allow_http=True)".to_string()
+                ),
+                cause: None,
+            });
+        }
+
+        // Check URL against allowlist if configured
+        if !ctx.http_allowlist.is_empty() {
+            let url_allowed = ctx
+                .http_allowlist
+                .iter()
+                .any(|pattern| url_matches_pattern(url, pattern));
+            if !url_allowed {
+                return Err(Error::http_not_in_allowlist(
+                    url,
+                    &ctx.http_allowlist,
+                    Some(ctx.config_path.clone()),
+                ));
+            }
+        }
+
         http_fetch(url, kwargs, ctx)
     }
 
@@ -708,6 +718,7 @@ fn http_resolver(
     {
         // If compiled without HTTP feature, return an error
         let _ = kwargs; // Suppress unused warning
+        let _ = ctx; // Suppress unused warning
         Err(Error::resolver_custom(
             "http",
             "HTTP support not compiled in. Rebuild with --features http",
@@ -720,19 +731,46 @@ fn http_resolver(
 /// Supports glob-style patterns:
 /// - `https://example.com/*` matches any path on example.com
 /// - `https://*.example.com/*` matches any subdomain
+#[cfg(feature = "http")]
 fn url_matches_pattern(url: &str, pattern: &str) -> bool {
-    // Convert glob pattern to regex
-    let regex_pattern = pattern
-        .replace('.', r"\.")
-        .replace('*', ".*")
-        .replace('?', ".");
+    // Security: Parse URL first to prevent bypass via malformed URLs
+    let parsed_url = match url::Url::parse(url) {
+        Ok(u) => u,
+        Err(_) => {
+            // Invalid URL - no match
+            log::warn!("Invalid URL '{}' rejected by allowlist", url);
+            return false;
+        }
+    };
 
-    if let Ok(re) = regex::Regex::new(&format!("^{}$", regex_pattern)) {
-        re.is_match(url)
-    } else {
-        // If pattern is invalid, do exact match
-        url == pattern
+    // Validate pattern doesn't contain dangerous sequences
+    if pattern.contains("**") || pattern.contains(".*.*") {
+        log::warn!(
+            "Invalid allowlist pattern '{}' - contains dangerous sequence",
+            pattern
+        );
+        return false;
     }
+
+    // Use glob crate for proper glob matching
+    let glob_pattern = match glob::Pattern::new(pattern) {
+        Ok(p) => p,
+        Err(_) => {
+            // Invalid pattern - fall back to exact match
+            log::warn!(
+                "Invalid glob pattern '{}' - falling back to exact match",
+                pattern
+            );
+            return url == pattern;
+        }
+    };
+
+    // Match against the full URL string
+    // This allows patterns like:
+    // - "https://api.example.com/*" (all paths on this host)
+    // - "https://*.example.com/api/*" (all subdomains)
+    // - "https://api.example.com/v1/users" (exact match)
+    glob_pattern.matches(parsed_url.as_str())
 }
 
 // =============================================================================
@@ -986,15 +1024,22 @@ fn build_tls_config(
 
     let mut builder = TlsConfig::builder();
 
-    // Check for insecure mode (per-request kwargs override context)
-    let insecure = kwargs
-        .get("insecure")
-        .map(|v| v == "true")
-        .unwrap_or(ctx.http_insecure);
+    // Check for insecure mode (only from per-request kwargs)
+    let insecure = kwargs.get("insecure").map(|v| v == "true").unwrap_or(false);
 
     if insecure {
-        // DANGEROUS: Skip TLS verification
-        log::warn!("TLS certificate verification is disabled (http_insecure=true)");
+        // OBNOXIOUS WARNING: This is a SECURITY RISK
+        eprintln!("\n┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓");
+        eprintln!("┃ ⚠️  WARNING: TLS CERTIFICATE VERIFICATION DISABLED ┃");
+        eprintln!("┃                                                    ┃");
+        eprintln!("┃ You are using insecure=true which disables ALL    ┃");
+        eprintln!("┃ TLS certificate validation. This is DANGEROUS     ┃");
+        eprintln!("┃ and should ONLY be used in development.           ┃");
+        eprintln!("┃                                                    ┃");
+        eprintln!("┃ In production, use proper certificate             ┃");
+        eprintln!("┃ configuration with ca_bundle or extra_ca_bundle.  ┃");
+        eprintln!("┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛\n");
+        log::warn!("TLS certificate verification is disabled (insecure=true)");
         builder = builder.disable_verification(true);
     }
 

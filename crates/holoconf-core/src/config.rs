@@ -54,8 +54,9 @@ pub struct ConfigOptions {
     pub http_client_key: Option<PathBuf>,
     /// Password for encrypted private key or P12/PFX file
     pub http_client_key_password: Option<String>,
-    /// DANGEROUS: Skip TLS certificate verification (dev only)
-    pub http_insecure: bool,
+    // NOTE: http_insecure was removed in v0.3.0 for security reasons.
+    // Use the insecure=true kwarg on individual http/https resolver calls instead.
+    // This adds friction to prevent accidental use in production.
 }
 
 /// The main configuration container
@@ -763,7 +764,7 @@ impl Config {
                 ctx.http_client_cert = self.options.http_client_cert.clone();
                 ctx.http_client_key = self.options.http_client_key.clone();
                 ctx.http_client_key_password = self.options.http_client_key_password.clone();
-                ctx.http_insecure = self.options.http_insecure;
+                // http_insecure removed - use insecure=true kwarg on resolver calls
 
                 // Resolve arguments
                 let resolved_args: Vec<String> = args
