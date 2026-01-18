@@ -746,7 +746,10 @@ fn url_matches_pattern(url: &str, pattern: &str) -> bool {
 
     // Validate pattern doesn't contain dangerous sequences
     if pattern.contains("**") || pattern.contains(".*.*") {
-        log::warn!("Invalid allowlist pattern '{}' - contains dangerous sequence", pattern);
+        log::warn!(
+            "Invalid allowlist pattern '{}' - contains dangerous sequence",
+            pattern
+        );
         return false;
     }
 
@@ -755,7 +758,10 @@ fn url_matches_pattern(url: &str, pattern: &str) -> bool {
         Ok(p) => p,
         Err(_) => {
             // Invalid pattern - fall back to exact match
-            log::warn!("Invalid glob pattern '{}' - falling back to exact match", pattern);
+            log::warn!(
+                "Invalid glob pattern '{}' - falling back to exact match",
+                pattern
+            );
             return url == pattern;
         }
     };
@@ -1020,10 +1026,7 @@ fn build_tls_config(
     let mut builder = TlsConfig::builder();
 
     // Check for insecure mode (only from per-request kwargs)
-    let insecure = kwargs
-        .get("insecure")
-        .map(|v| v == "true")
-        .unwrap_or(false);
+    let insecure = kwargs.get("insecure").map(|v| v == "true").unwrap_or(false);
 
     if insecure {
         // OBNOXIOUS WARNING: This is a SECURITY RISK

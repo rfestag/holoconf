@@ -335,9 +335,7 @@ impl Error {
         };
 
         Self {
-            kind: ErrorKind::Resolver(ResolverErrorKind::HttpNotAllowed {
-                url: url_str,
-            }),
+            kind: ErrorKind::Resolver(ResolverErrorKind::HttpNotAllowed { url: url_str }),
             path: config_path,
             source_location: None,
             help: Some(help_msg),
