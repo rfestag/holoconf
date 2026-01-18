@@ -121,7 +121,11 @@ nav:
   - Guide:
       - Getting Started: guide/getting-started.md
       - Interpolation: guide/interpolation.md
-      - Resolvers: guide/resolvers.md
+      - Resolvers:
+          - Overview: guide/resolvers.md
+          - Core Resolvers: guide/resolvers-core.md
+          - AWS Resolvers: guide/resolvers-aws.md
+          - Custom Resolvers: guide/resolvers-custom.md
       - Merging: guide/merging.md
       - Validation: guide/validation.md
   - API Reference:
