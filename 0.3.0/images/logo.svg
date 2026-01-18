@@ -1,0 +1,46 @@
+<svg viewBox="40 20 120 140" xmlns="http://www.w3.org/2000/svg">
+  <!-- HoloConf Logo - Full color version -->
+
+  <defs>
+    <linearGradient id="blueGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#7da3d1;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#354f7a;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+
+  <!-- Back layer (defaults) - lightest -->
+  <polygon points="100,30 150,80 100,130 50,80"
+           fill="none" stroke="#7da3d1" stroke-width="4" opacity="0.4"
+           transform="translate(0, 20)"/>
+
+  <!-- Middle layer (file config) -->
+  <polygon points="100,30 150,80 100,130 50,80"
+           fill="none" stroke="#526fa0" stroke-width="4" opacity="0.7"
+           transform="translate(0, 10)"/>
+
+  <!-- Front layer (overrides) - boldest -->
+  <polygon points="100,30 150,80 100,130 50,80"
+           fill="none" stroke="#354f7a" stroke-width="5"/>
+
+  <!-- Lines from edge midpoints perpendicular to center -->
+  <g stroke="#526fa0" stroke-width="2" opacity="0.6">
+    <!-- Vertical line from top vertex through center -->
+    <line x1="100" y1="30" x2="100" y2="130"/>
+
+    <!-- From top-left edge midpoint to center -->
+    <line x1="75" y1="55" x2="100" y2="80"/>
+
+    <!-- From top-right edge midpoint to center -->
+    <line x1="125" y1="55" x2="100" y2="80"/>
+
+    <!-- From bottom-left edge midpoint to center -->
+    <line x1="75" y1="105" x2="100" y2="80"/>
+
+    <!-- From bottom-right edge midpoint to center -->
+    <line x1="125" y1="105" x2="100" y2="80"/>
+  </g>
+
+  <!-- Center dot representing resolved config -->
+  <circle cx="100" cy="80" r="8" fill="url(#blueGrad)"/>
+  <circle cx="100" cy="80" r="4" fill="#e8f0f7"/>
+</svg>
