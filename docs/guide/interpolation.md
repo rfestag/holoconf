@@ -14,6 +14,7 @@ database:
 ```
 
 The syntax is straightforward: `${resolver:argument}` where:
+
 - `resolver` is the type of value to fetch (like `env` for environment variables)
 - `argument` is what to fetch (like the variable name `DB_HOST`)
 
@@ -29,7 +30,7 @@ Let's try using this:
     os.environ["DB_HOST"] = "production.example.com"
     config = Config.load("config.yaml")
 
-    host = config.get("database.host")
+    host = config.database.host
     print(f"Host: {host}")
     # Host: production.example.com
     ```
@@ -67,7 +68,7 @@ But what happens if the environment variable isn't set? Let's find out:
     config = Config.load("config.yaml")
 
     try:
-        host = config.get("database.host")
+        host = config.database.host
     except ResolverError as e:
         print(f"Error: {e}")
         # Error: Environment variable DB_HOST is not set
@@ -109,7 +110,7 @@ Now the configuration works whether or not the environment variables are set:
 
     # Without environment variables
     config = Config.load("config.yaml")
-    host = config.get("database.host")
+    host = config.database.host
     print(f"Host: {host}")
     # Host: localhost
 
@@ -117,7 +118,7 @@ Now the configuration works whether or not the environment variables are set:
     import os
     os.environ["DB_HOST"] = "prod-db.example.com"
     config = Config.load("config.yaml")
-    host = config.get("database.host")
+    host = config.database.host
     print(f"Host: {host}")
     # Host: prod-db.example.com
     ```
@@ -177,21 +178,21 @@ Let's see how this behaves in different scenarios:
 
     # Scenario 1: Neither variable set - uses final default
     config = Config.load("config.yaml")
-    url = config.get("api.url")
+    url = config.api.url
     print(f"URL: {url}")
     # URL: http://localhost:8000
 
     # Scenario 2: Only secondary set - uses secondary
     os.environ["SECONDARY_URL"] = "http://backup.example.com"
     config = Config.load("config.yaml")
-    url = config.get("api.url")
+    url = config.api.url
     print(f"URL: {url}")
     # URL: http://backup.example.com
 
     # Scenario 3: Primary set - uses primary (ignores secondary and default)
     os.environ["PRIMARY_URL"] = "http://primary.example.com"
     config = Config.load("config.yaml")
-    url = config.get("api.url")
+    url = config.api.url
     print(f"URL: {url}")
     # URL: http://primary.example.com
     ```
@@ -263,7 +264,7 @@ When you dump the configuration, sensitive values are automatically redacted:
     #   secret: '[REDACTED]'
 
     # But you can still access the actual values when needed
-    key = config.get("api.key")
+    key = config.api.key
     print(f"Key length: {len(key)}")
     # Key length: 21
     ```
@@ -295,6 +296,7 @@ database:
 ```
 
 This gives you:
+
 - A working default for development
 - Automatic redaction in dumps
 - Production can override via environment variable
@@ -317,7 +319,7 @@ The backslash tells HoloConf not to interpret this as interpolation:
     from holoconf import Config
 
     config = Config.load("config.yaml")
-    example = config.get("documentation.example")
+    example = config.documentation.example
     print(example)
     # Use ${env:VAR_NAME} to reference environment variables
     ```

@@ -10,7 +10,7 @@ Imagine deploying your application to production. Everything seems fine until:
 
 ```python
 # Your code expects an integer
-pool_size = config.get("database.pool_size")
+pool_size = config.database.pool_size
 connection_pool.initialize(pool_size)
 # TypeError: expected int, got str
 ```
@@ -20,8 +20,8 @@ Someone set `pool_size: "10"` (a string) instead of `pool_size: 10` (an integer)
 Or worse:
 
 ```python
-db_host = config.get("database.host")
-# KeyError: database.host not found
+db_host = config.database.host
+# AttributeError: 'dict' object has no attribute 'host'
 ```
 
 Someone forgot to set the database host at all.
@@ -81,15 +81,15 @@ Now let's load the configuration with the schema attached:
     config = Config.load("config.yaml", schema="schema.json")
 
     # The schema provides defaults for missing values
-    debug = config.get("app.debug")
+    debug = config.app.debug
     print(f"Debug mode: {debug}")
     # Debug mode: False (from schema default)
 
-    port = config.get("database.port")
+    port = config.database.port
     print(f"Port: {port}")
     # Port: 5432 (from schema default)
 
-    pool_size = config.get("database.pool_size")
+    pool_size = config.database.pool_size
     print(f"Pool size: {pool_size}")
     # Pool size: 10 (from schema default)
     ```
@@ -219,19 +219,19 @@ database:
 
     # Scenario 1: Environment variable is set
     os.environ["DB_PORT"] = "5433"
-    port = config.get("database.port")
+    port = config.database.port
     print(f"Port: {port}")
     # Port: 5433 (from environment variable)
 
     # Scenario 2: Environment variable not set
     del os.environ["DB_PORT"]
     config = Config.load("config.yaml", schema="schema.json")
-    port = config.get("database.port")
+    port = config.database.port
     print(f"Port: {port}")
     # Port: 3306 (from resolver default, not schema default)
 
     # pool_size not in config, uses schema default
-    pool_size = config.get("database.pool_size")
+    pool_size = config.database.pool_size
     print(f"Pool size: {pool_size}")
     # Pool size: 10 (from schema default)
     ```
@@ -259,13 +259,13 @@ Without validation, these are strings. But with a schema that says they should b
     config = Config.load("config.yaml", schema="schema.json")
 
     # Without validation - they're still strings
-    port = config.get("database.port")
+    port = config.database.port
     print(f"Port type: {type(port)}, value: {port}")
     # Port type: <class 'str'>, value: 5432
 
     # After validation - they're coerced to integers
     config.validate()
-    port = config.get("database.port")
+    port = config.database.port
     print(f"Port type: {type(port)}, value: {port}")
     # Port type: <class 'int'>, value: 5432
     ```
@@ -310,12 +310,12 @@ optional_value: null
     config = Config.load("config.yaml", schema="schema.json")
 
     # timeout is null but schema doesn't allow null - uses default
-    timeout = config.get("timeout")
+    timeout = config.timeout
     print(f"Timeout: {timeout}")
     # Timeout: 30 (schema default)
 
     # optional_value is null and schema allows null - preserved
-    optional = config.get("optional_value")
+    optional = config.optional_value
     print(f"Optional: {optional}")
     # Optional: None
     ```
@@ -496,9 +496,9 @@ logging:
         exit(1)
 
     # Now safe to use
-    app_name = config.get("app.name")
-    db_host = config.get("database.host")
-    pool_size = config.get("database.pool_size")  # From schema default
+    app_name = config.app.name
+    db_host = config.database.host
+    pool_size = config.database.pool_size  # From schema default
 
     print(f"Starting {app_name}")
     print(f"Connecting to {db_host}")

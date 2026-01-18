@@ -1,0 +1,811 @@
+# Core Resolvers
+
+HoloConf ships with four essential resolvers that cover the most common configuration needs. Let's explore each one and see how they solve real-world problems.
+
+## Environment Variables
+
+The most common use case for dynamic configuration is reading from environment variables. This lets you change settings between development, staging, and production without editing files.
+
+Let's start with a simple example:
+
+```yaml
+database:
+  host: ${env:DB_HOST}
+  port: ${env:DB_PORT}
+```
+
+Now try to use it:
+
+=== "Python"
+
+    ```python
+    from holoconf import Config
+
+    config = Config.load("config.yaml")
+    host = config.database.host
+    # Error: ResolverError: Environment variable DB_HOST is not set
+    ```
+
+=== "Rust"
+
+    ```rust
+    use holoconf::Config;
+
+    let config = Config::load("config.yaml")?;
+    let host: String = config.get("database.host")?;
+    // Error: Environment variable DB_HOST is not set
+    ```
+
+=== "CLI"
+
+    ```bash
+    $ holoconf get config.yaml database.host
+    Error: Environment variable DB_HOST is not set
+    ```
+
+The error is helpful - it prevents us from accidentally using undefined values. But we want our configuration to work during development without setting every variable. Let's add defaults:
+
+```yaml
+database:
+  host: ${env:DB_HOST,default=localhost}
+  port: ${env:DB_PORT,default=5432}
+```
+
+Now it works both ways:
+
+=== "Python"
+
+    ```python
+    import os
+    from holoconf import Config
+
+    # Without environment variables - uses defaults
+    config = Config.load("config.yaml")
+    host = config.database.host
+    print(f"Host: {host}")
+    # Host: localhost
+
+    # With environment variables - uses env values
+    os.environ["DB_HOST"] = "prod-db.example.com"
+    config = Config.load("config.yaml")
+    host = config.database.host
+    print(f"Host: {host}")
+    # Host: prod-db.example.com
+    ```
+
+=== "Rust"
+
+    ```rust
+    use holoconf::Config;
+    use std::env;
+
+    // Without environment variables
+    let config = Config::load("config.yaml")?;
+    let host: String = config.get("database.host")?;
+    println!("Host: {}", host);
+    // Host: localhost
+
+    // With environment variables
+    env::set_var("DB_HOST", "prod-db.example.com");
+    let config = Config::load("config.yaml")?;
+    let host: String = config.get("database.host")?;
+    println!("Host: {}", host);
+    // Host: prod-db.example.com
+    ```
+
+=== "CLI"
+
+    ```bash
+    # Without environment variable
+    $ holoconf get config.yaml database.host
+    localhost
+
+    # With environment variable
+    $ DB_HOST=prod-db.example.com holoconf get config.yaml database.host
+    prod-db.example.com
+    ```
+
+Perfect! Now your configuration works in development (using defaults) and production (using environment variables).
+
+## Self-References: Avoiding Duplication
+
+As your configuration grows, you'll find yourself repeating values. Self-references let you define a value once and reuse it everywhere.
+
+Let's say you have shared defaults:
+
+```yaml
+defaults:
+  timeout: 30
+  host: localhost
+
+database:
+  host: ${defaults.host}
+  timeout: ${defaults.timeout}
+  port: 5432
+
+api:
+  host: ${defaults.host}
+  timeout: ${defaults.timeout}
+  port: 8000
+```
+
+Now when you access these values, they resolve to the shared defaults:
+
+=== "Python"
+
+    ```python
+    from holoconf import Config
+
+    config = Config.load("config.yaml")
+
+    db_host = config.database.host
+    api_host = config.api.host
+    print(f"Database: {db_host}, API: {api_host}")
+    # Database: localhost, API: localhost
+
+    # Both reference the same value
+    db_timeout = config.database.timeout
+    api_timeout = config.api.timeout
+    print(f"Timeouts: {db_timeout}, {api_timeout}")
+    # Timeouts: 30, 30
+    ```
+
+=== "Rust"
+
+    ```rust
+    use holoconf::Config;
+
+    let config = Config::load("config.yaml")?;
+
+    let db_host: String = config.get("database.host")?;
+    let api_host: String = config.get("api.host")?;
+    println!("Database: {}, API: {}", db_host, api_host);
+    // Database: localhost, API: localhost
+    ```
+
+=== "CLI"
+
+    ```bash
+    $ holoconf get config.yaml database.host
+    localhost
+
+    $ holoconf get config.yaml api.host
+    localhost
+    ```
+
+### Relative References
+
+But what if you want to reference a value that's nearby in the configuration tree? Absolute paths like `${defaults.host}` work, but they're verbose. Use relative paths instead:
+
+```yaml
+database:
+  host: localhost
+  port: 5432
+  # Reference sibling 'host' using dot prefix
+  connection_string: "postgres://${.host}:${.port}/mydb"
+
+services:
+  database:
+    host: prod-db.example.com
+
+  api:
+    # Reference parent's sibling using double-dot
+    db_host: ${..database.host}
+```
+
+Let's see what these resolve to:
+
+=== "Python"
+
+    ```python
+    from holoconf import Config
+
+    config = Config.load("config.yaml")
+
+    # Sibling reference
+    conn_str = config.database.connection_string
+    print(f"Connection: {conn_str}")
+    # Connection: postgres://localhost:5432/mydb
+
+    # Parent's sibling reference
+    api_db = config.services.api.db_host
+    print(f"API uses DB: {api_db}")
+    # API uses DB: prod-db.example.com
+    ```
+
+=== "Rust"
+
+    ```rust
+    use holoconf::Config;
+
+    let config = Config::load("config.yaml")?;
+
+    let conn_str: String = config.get("database.connection_string")?;
+    println!("Connection: {}", conn_str);
+    // Connection: postgres://localhost:5432/mydb
+    ```
+
+=== "CLI"
+
+    ```bash
+    $ holoconf get config.yaml database.connection_string
+    postgres://localhost:5432/mydb
+
+    $ holoconf get config.yaml services.api.db_host
+    prod-db.example.com
+    ```
+
+!!! tip "When to Use Relative vs Absolute References"
+    - Use `${.sibling}` for values in the same section (like building connection strings)
+    - Use `${..parent.sibling}` for nearby values (like services referencing shared settings)
+    - Use `${absolute.path}` for shared defaults used across the entire config
+
+### Preventing Circular References
+
+What happens if you create a circular reference?
+
+```yaml
+a:
+  value: ${b.value}
+
+b:
+  value: ${a.value}
+```
+
+HoloConf detects this and gives you a clear error:
+
+=== "Python"
+
+    ```python
+    from holoconf import Config, CircularReferenceError
+
+    config = Config.load("config.yaml")
+
+    try:
+        value = config.a.value
+    except CircularReferenceError as e:
+        print(f"Error: {e}")
+        # Error: Circular reference detected: a.value -> b.value -> a.value
+    ```
+
+=== "Rust"
+
+    ```rust
+    use holoconf::{Config, Error};
+
+    let config = Config::load("config.yaml")?;
+    match config.get::<String>("a.value") {
+        Err(Error::CircularReference { path, .. }) => {
+            println!("Circular reference at: {}", path);
+        }
+        _ => {}
+    }
+    ```
+
+=== "CLI"
+
+    ```bash
+    $ holoconf get config.yaml a.value
+    Error: Circular reference detected: a.value -> b.value -> a.value
+    ```
+
+The error shows you the exact reference chain, making it easy to fix.
+
+## File Includes: Splitting Large Configurations
+
+Sometimes configuration is too large for a single value. Maybe you have a multi-line certificate, a JSON blob, or a YAML snippet. The `file` resolver lets you include content from external files.
+
+Let's say you have a private key in a separate file:
+
+```
+config/
+├── app.yaml
+└── secrets/
+    └── private-key.pem
+```
+
+```yaml
+# app.yaml
+ssl:
+  certificate: ${file:secrets/cert.pem}
+  private_key: ${file:secrets/private-key.pem}
+```
+
+When you access these values, the file content is included:
+
+=== "Python"
+
+    ```python
+    from holoconf import Config
+
+    config = Config.load("config/app.yaml")
+
+    # Returns the file content as a string
+    private_key = config.ssl.private_key
+    print(f"Key length: {len(private_key)} bytes")
+    # Key length: 1704 bytes
+    ```
+
+=== "Rust"
+
+    ```rust
+    use holoconf::Config;
+
+    let config = Config::load("config/app.yaml")?;
+    let private_key: String = config.get("ssl.private_key")?;
+    println!("Key length: {} bytes", private_key.len());
+    ```
+
+=== "CLI"
+
+    ```bash
+    $ holoconf get config/app.yaml ssl.private_key
+    -----BEGIN PRIVATE KEY-----
+    MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC...
+    ...
+    ```
+
+### Including Structured Data
+
+But what if the file contains YAML or JSON? HoloConf automatically parses it:
+
+```yaml
+# users.yaml (separate file)
+- name: alice
+  role: admin
+- name: bob
+  role: user
+```
+
+```yaml
+# app.yaml
+users: ${file:users.yaml}
+admin_name: ${file:users.yaml[0].name}
+```
+
+=== "Python"
+
+    ```python
+    from holoconf import Config
+
+    config = Config.load("app.yaml")
+
+    # Returns parsed YAML as a list
+    users = config.users
+    print(f"Users: {users}")
+    # Users: [{'name': 'alice', 'role': 'admin'}, {'name': 'bob', 'role': 'user'}]
+
+    # Can reference into the structure
+    admin = config.admin_name
+    print(f"Admin: {admin}")
+    # Admin: alice
+    ```
+
+=== "Rust"
+
+    ```rust
+    use holoconf::Config;
+
+    let config = Config::load("app.yaml")?;
+    let admin: String = config.get("admin_name")?;
+    println!("Admin: {}", admin);
+    // Admin: alice
+    ```
+
+=== "CLI"
+
+    ```bash
+    $ holoconf get app.yaml admin_name
+    alice
+    ```
+
+### Relative File Paths
+
+File paths are relative to the configuration file, not your current directory:
+
+```
+project/
+├── config/
+│   ├── app.yaml
+│   └── database.yaml
+└── secrets/
+    └── db-password.txt
+```
+
+```yaml
+# config/app.yaml
+database: ${file:database.yaml}
+password: ${file:../secrets/db-password.txt}
+```
+
+The paths `database.yaml` and `../secrets/db-password.txt` are resolved relative to `config/app.yaml`, not where you run your program.
+
+### Handling Missing Files
+
+What if the file doesn't exist?
+
+=== "Python"
+
+    ```python
+    from holoconf import Config, ResolverError
+
+    # config.yaml contains: cert: ${file:missing.pem}
+    config = Config.load("config.yaml")
+
+    try:
+        cert = config.cert
+    except ResolverError as e:
+        print(f"Error: {e}")
+        # Error: File not found: missing.pem
+    ```
+
+=== "Rust"
+
+    ```rust
+    let config = Config::load("config.yaml")?;
+    match config.get::<String>("cert") {
+        Err(Error::ResolverError { message, .. }) => {
+            println!("Error: {}", message);
+        }
+        _ => {}
+    }
+    ```
+
+=== "CLI"
+
+    ```bash
+    $ holoconf get config.yaml cert
+    Error: File not found: missing.pem
+    ```
+
+You can provide a default instead:
+
+```yaml
+cert: ${file:cert.pem,default=selfsigned-cert-content}
+```
+
+## HTTP/HTTPS: Remote Configuration
+
+For centralized configuration management, you can fetch values from HTTP endpoints. This is useful for:
+
+- Fetching config from a configuration server
+- Loading shared defaults from a central location
+- Integrating with REST APIs
+
+Let's start with a simple example:
+
+```yaml
+feature_flags: ${https:https://config.example.com/flags.json}
+```
+
+But wait - HTTP fetching is disabled by default for security. You need to explicitly enable it:
+
+=== "Python"
+
+    ```python
+    from holoconf import Config
+
+    # This will error
+    config = Config.load("config.yaml")
+    flags = config.feature_flags
+    # Error: HTTP resolvers are disabled. Pass allow_http=True to enable.
+    ```
+
+Let's enable HTTP fetching:
+
+=== "Python"
+
+    ```python
+    from holoconf import Config
+
+    config = Config.load("config.yaml", allow_http=True)
+
+    # Now it works - fetches from the URL
+    flags = config.feature_flags
+    print(f"Flags: {flags}")
+    # Flags: {'feature_a': True, 'feature_b': False}
+    ```
+
+=== "Rust"
+
+    ```rust
+    use holoconf::{Config, ConfigOptions};
+
+    let options = ConfigOptions::default().allow_http(true);
+    let config = Config::load_with_options("config.yaml", options)?;
+
+    let flags: serde_json::Value = config.get("feature_flags")?;
+    println!("Flags: {:?}", flags);
+    ```
+
+=== "CLI"
+
+    ```bash
+    # Enable HTTP with --allow-http flag
+    $ holoconf get config.yaml feature_flags --allow-http
+    feature_a: true
+    feature_b: false
+    ```
+
+!!! warning "Security: HTTP Disabled by Default"
+    HTTP fetching is disabled by default because:
+
+    - It can leak sensitive configuration paths to network logs
+    - It introduces network dependencies during config loading
+    - It may expose your infrastructure to SSRF attacks
+
+    Only enable it when you specifically need remote configuration.
+
+### Handling Network Errors
+
+What happens if the HTTP request fails?
+
+```yaml
+data: ${https:https://api.example.com/config}
+```
+
+=== "Python"
+
+    ```python
+    from holoconf import Config, ResolverError
+
+    config = Config.load("config.yaml", allow_http=True)
+
+    try:
+        data = config.data
+    except ResolverError as e:
+        print(f"Error: {e}")
+        # Error: HTTP request failed: connection timeout
+    ```
+
+=== "Rust"
+
+    ```rust
+    match config.get::<String>("data") {
+        Err(Error::ResolverError { message, .. }) => {
+            println!("HTTP error: {}", message);
+        }
+        _ => {}
+    }
+    ```
+
+=== "CLI"
+
+    ```bash
+    $ holoconf get config.yaml data --allow-http
+    Error: HTTP request failed: connection timeout
+    ```
+
+You can provide a fallback:
+
+```yaml
+data: ${https:https://api.example.com/config,default={}}
+```
+
+Now if the HTTP request fails, it uses the empty object instead of erroring.
+
+### Custom Request Timeouts
+
+The default timeout is 30 seconds. For slower endpoints, increase it:
+
+=== "Python"
+
+    ```python
+    from holoconf import Config
+
+    # Set HTTP timeout to 60 seconds
+    config = Config.load(
+        "config.yaml",
+        allow_http=True,
+        http_timeout=60
+    )
+
+    data = config.data  # Waits up to 60 seconds
+    ```
+
+=== "Rust"
+
+    ```rust
+    use holoconf::{Config, ConfigOptions};
+    use std::time::Duration;
+
+    let options = ConfigOptions::default()
+        .allow_http(true)
+        .http_timeout(Duration::from_secs(60));
+
+    let config = Config::load_with_options("config.yaml", options)?;
+    ```
+
+=== "CLI"
+
+    ```bash
+    # Set timeout to 60 seconds
+    $ holoconf get config.yaml data --allow-http --http-timeout 60
+    ```
+
+### Working with Internal Certificate Authorities
+
+Many organizations use internal certificate authorities for HTTPS services. Let's see how to configure HoloConf to trust these.
+
+First, let's try fetching from an internal service:
+
+```yaml
+config:
+  data: ${https:https://internal.corp.com/config.json}
+```
+
+=== "Python"
+
+    ```python
+    config = Config.load("config.yaml", allow_http=True)
+    data = config.data
+    # Error: SSL certificate verification failed
+    ```
+
+The error occurs because your organization's CA isn't in the default trust store. We can fix this by providing your CA certificate:
+
+=== "Python"
+
+    ```python
+    from holoconf import Config
+
+    config = Config.load(
+        "config.yaml",
+        allow_http=True,
+        http_ca_bundle="/etc/ssl/certs/internal-ca.pem"
+    )
+
+    data = config.data  # Now it works!
+    ```
+
+=== "Rust"
+
+    ```rust
+    use holoconf::{Config, ConfigOptions};
+
+    let options = ConfigOptions::default()
+        .allow_http(true)
+        .http_ca_bundle("/etc/ssl/certs/internal-ca.pem");
+
+    let config = Config::load_with_options("config.yaml", options)?;
+    ```
+
+=== "CLI"
+
+    ```bash
+    $ holoconf get config.yaml data --allow-http --http-ca-bundle /etc/ssl/certs/internal-ca.pem
+    ```
+
+This **replaces** the default CA bundle with your custom one. But what if you need to trust BOTH public CAs (for external APIs) AND your internal CA? Use `http_extra_ca_bundle` instead:
+
+=== "Python"
+
+    ```python
+    from holoconf import Config
+
+    config = Config.load(
+        "config.yaml",
+        allow_http=True,
+        http_extra_ca_bundle="/etc/ssl/certs/internal-ca.pem"  # Added to defaults
+    )
+
+    data = config.data  # Now trusts both public and internal CAs
+    ```
+
+=== "Rust"
+
+    ```rust
+    let options = ConfigOptions::default()
+        .allow_http(true)
+        .http_extra_ca_bundle("/etc/ssl/certs/internal-ca.pem");
+
+    let config = Config::load_with_options("config.yaml", options)?;
+    ```
+
+=== "CLI"
+
+    ```bash
+    $ holoconf get config.yaml data --allow-http --http-extra-ca-bundle /etc/ssl/certs/internal-ca.pem
+    ```
+
+This **adds** your CA to the existing trust store, so you can fetch from both internal and external HTTPS endpoints.
+
+### Authentication Headers
+
+Some configuration endpoints require authentication. Add custom headers:
+
+=== "Python"
+
+    ```python
+    from holoconf import Config
+
+    config = Config.load(
+        "config.yaml",
+        allow_http=True,
+        http_headers={
+            "Authorization": "Bearer YOUR_TOKEN_HERE",
+            "X-Custom-Header": "value"
+        }
+    )
+
+    data = config.data  # Includes auth headers in request
+    ```
+
+=== "Rust"
+
+    ```rust
+    use holoconf::{Config, ConfigOptions};
+    use std::collections::HashMap;
+
+    let mut headers = HashMap::new();
+    headers.insert("Authorization".to_string(), "Bearer YOUR_TOKEN_HERE".to_string());
+
+    let options = ConfigOptions::default()
+        .allow_http(true)
+        .http_headers(headers);
+
+    let config = Config::load_with_options("config.yaml", options)?;
+    ```
+
+=== "CLI"
+
+    ```bash
+    # CLI doesn't support custom headers - use environment variables in the URL instead
+    $ holoconf get config.yaml data --allow-http
+    ```
+
+!!! tip "Caching HTTP Responses"
+    HTTP values are fetched every time you access them. For frequently accessed values:
+
+    ```python
+    # Fetch once and cache
+    flags = config.feature_flags
+
+    # Use cached value
+    if flags['feature_a']:
+        # ...
+    ```
+
+    This avoids repeated network requests.
+
+## Quick Reference
+
+Here's a summary of all core resolvers:
+
+| Resolver | Syntax | Description | Example |
+|----------|--------|-------------|---------|
+| `env` | `${env:VAR}` | Environment variable | `${env:DB_HOST,default=localhost}` |
+| Self-reference | `${path}` | Absolute reference | `${defaults.timeout}` |
+| Self-reference | `${.key}` | Sibling reference | `${.host}` |
+| Self-reference | `${..parent.key}` | Parent's sibling | `${..shared.timeout}` |
+| `file` | `${file:path}` | File content | `${file:secrets/key.pem}` |
+| `http` | `${http:url}` | HTTP GET | `${http:http://api.example.com/config}` |
+| `https` | `${https:url}` | HTTPS GET | `${https:https://api.example.com/config}` |
+
+All resolvers support:
+
+- `default=value` - Fallback if resolver fails
+- `sensitive=true` - Mark value for redaction
+
+## What You've Learned
+
+You now understand:
+
+- Using `${env:VAR}` to read environment variables
+- Providing defaults with `default=value`
+- Referencing other config values with absolute and relative paths
+- Preventing circular references
+- Including file content with `${file:path}`
+- Fetching remote config with `${http:url}` and `${https:url}`
+- Configuring HTTP timeouts, CA bundles, and auth headers
+- Security implications of HTTP resolvers
+
+## Next Steps
+
+- **[AWS Resolvers](resolvers-aws.md)** - Integrate with AWS SSM, CloudFormation, and S3
+- **[Custom Resolvers](resolvers-custom.md)** - Write your own resolvers for custom data sources
+
+## See Also
+
+- [ADR-002 Resolver Architecture](../adr/ADR-002-resolver-architecture.md) - Technical design
+- [FEAT-002 Core Resolvers](../specs/features/FEAT-002-core-resolvers.md) - Full specification

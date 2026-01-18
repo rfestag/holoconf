@@ -76,9 +76,9 @@ Now let's load and read this configuration:
     # Load from file
     config = Config.load("config.yaml")
 
-    # Access values using dot notation
-    app_name = config.get("app.name")
-    db_host = config.get("database.host")
+    # Access values using dot notation (recommended)
+    app_name = config.app.name
+    db_host = config.database.host
 
     print(f"App: {app_name}")
     print(f"Database: {db_host}")
@@ -122,6 +122,31 @@ Now let's load and read this configuration:
 
 This works, but it has a problem: the database host is hardcoded to `localhost`. Let's fix that.
 
+### Three Ways to Access Values
+
+By the way, Python supports three different ways to access values. Here they are for reference:
+
+=== "Python"
+
+    ```python
+    from holoconf import Config
+
+    config = Config.load("config.yaml")
+
+    # Dot notation (recommended - most Pythonic)
+    host = config.database.host
+
+    # Dict-like access (alternative)
+    host = config["database"]["host"]
+
+    # Explicit get() method (alternative)
+    host = config.get("database.host")
+
+    # All three return the same value!
+    ```
+
+We'll use dot notation throughout the guide because it's the most readable and Pythonic.
+
 ## Adding Environment Variables
 
 We want the database host to come from an environment variable so we can change it in production without editing the file. Let's update our configuration:
@@ -143,7 +168,7 @@ Now let's try to use it:
     from holoconf import Config
 
     config = Config.load("config.yaml")
-    db_host = config.get("database.host")
+    db_host = config.database.host
     # Error: ResolverError: Environment variable DB_HOST is not set
     ```
 
@@ -185,7 +210,7 @@ Now try it without setting the environment variable:
     from holoconf import Config
 
     config = Config.load("config.yaml")
-    db_host = config.get("database.host")
+    db_host = config.database.host
     print(f"Database: {db_host}")
     # Database: localhost
     ```
@@ -216,7 +241,7 @@ Perfect! Now let's set the environment variable and see it override the default:
 
     os.environ["DB_HOST"] = "prod-db.example.com"
     config = Config.load("config.yaml")
-    db_host = config.get("database.host")
+    db_host = config.database.host
     print(f"Database: {db_host}")
     # Database: prod-db.example.com
     ```
@@ -276,7 +301,7 @@ The `sensitive=true` flag tells HoloConf to redact this value when dumping the c
     #   password: '[REDACTED]'
 
     # You can still access the actual value
-    password = config.get("database.password")
+    password = config.database.password
     print(f"Password: {password}")
     # Password: dev-password
     ```
@@ -330,12 +355,12 @@ You can access nested values with dot notation:
     config = Config.load("config.yaml")
 
     # Get a specific nested value
-    log_level = config.get("logging.level")
+    log_level = config.logging.level
     print(f"Log level: {log_level}")
     # Log level: info
 
     # Get an entire subsection as a dict
-    db_config = config.get("database")
+    db_config = config.database
     print(db_config)
     # {'host': 'localhost', 'port': 5432, 'password': 'dev-password'}
     ```
