@@ -207,8 +207,7 @@ impl ResolverContext {
         self
     }
 
-    /// DANGEROUS: Skip TLS certificate verification
-    // with_http_insecure removed - use insecure=true kwarg instead
+    // DANGEROUS: with_http_insecure removed - use insecure=true kwarg instead
 
     /// Set the config root for self-references
     pub fn with_config_root(mut self, root: Arc<Value>) -> Self {
