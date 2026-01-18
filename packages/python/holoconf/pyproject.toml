@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "holoconf"
-version = "0.2.0"
+version = "0.3.0"
 description = "Cross-language configuration library with resolver support"
 readme = "README.md"
 requires-python = ">=3.8"

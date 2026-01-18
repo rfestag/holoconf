@@ -9,7 +9,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/rfestag/holoconf"
@@ -17,7 +17,7 @@ rust-version = "1.88"
 
 [workspace.dependencies]
 # Internal crates
-holoconf-core = { version = "0.2", path = "crates/holoconf-core" }
+holoconf-core = { version = "0.3", path = "crates/holoconf-core" }
 
 # Core dependencies
 serde = { version = "1.0", features = ["derive"] }
