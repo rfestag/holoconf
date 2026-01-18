@@ -1,56 +1,28 @@
 # Configuration Merging
 
-## Overview
+Real applications rarely use a single configuration file. You need different settings for development, staging, and production. Your team might have shared defaults, but individual developers need their own local overrides. This is where configuration merging shines.
 
-HoloConf allows you to merge multiple configuration files, enabling patterns like:
+Let's learn how to split your configuration intelligently and merge it back together.
 
-- Base configuration with environment-specific overrides
-- Shared defaults with local customizations
-- Modular configuration split across multiple files
+## Why Split Configuration?
 
-## Basic Merging
+Imagine you're working on a web application. You have:
+- Base settings that everyone shares (app name, API endpoints structure)
+- Production settings (production database, external services)
+- Your local development overrides (point database at localhost, enable debug mode)
 
-=== "Python"
+You could put everything in one big file with lots of conditional logic. But that gets messy fast. Instead, let's split it across multiple files and merge them together.
 
-    ```python
-    from holoconf import Config
+## Your First Merge: Base and Environment
 
-    # Load base configuration, then merge overrides
-    base = Config.load("config/base.yaml")
-    production = Config.load("config/production.yaml")
-    base.merge(production)
-
-    # Now 'base' contains the merged result
-    ```
-
-=== "Rust"
-
-    ```rust
-    use holoconf::Config;
-
-    fn main() -> Result<(), holoconf::Error> {
-        let mut config = Config::load("config/base.yaml")?;
-        let production = Config::load("config/production.yaml")?;
-        config.merge(production);
-
-        Ok(())
-    }
-    ```
-
-## Merge Behavior
-
-When merging configurations:
-
-| Type | Behavior |
-|------|----------|
-| Scalars (string, int, bool) | Later value replaces earlier |
-| Objects/Maps | Deep merge (keys are merged recursively) |
-| Arrays | Later array replaces earlier (no concatenation) |
-
-### Example
+Let's start with two files. First, create `config/base.yaml` with shared defaults:
 
 ```yaml
-# base.yaml
+# config/base.yaml
+app:
+  name: my-application
+  debug: false
+
 database:
   host: localhost
   port: 5432
@@ -58,10 +30,13 @@ database:
 
 logging:
   level: info
+  format: json
 ```
 
+Now create `config/production.yaml` with production-specific overrides:
+
 ```yaml
-# production.yaml
+# config/production.yaml
 database:
   host: prod-db.example.com
   pool_size: 50
@@ -70,21 +45,116 @@ logging:
   level: warning
 ```
 
-Result after merging:
+Notice production only includes what's different. Let's merge them:
+
+=== "Python"
+
+    ```python
+    from holoconf import Config
+
+    # Load base configuration
+    config = Config.load("config/base.yaml")
+
+    # Load production overrides
+    production = Config.load("config/production.yaml")
+
+    # Merge production into base
+    config.merge(production)
+
+    # Now config contains the merged result
+    db_host = config.get("database.host")
+    print(f"Database: {db_host}")
+    # Database: prod-db.example.com
+
+    db_port = config.get("database.port")
+    print(f"Port: {db_port}")
+    # Port: 5432 (from base.yaml)
+
+    pool_size = config.get("database.pool_size")
+    print(f"Pool size: {pool_size}")
+    # Pool size: 50 (overridden by production.yaml)
+    ```
+
+=== "Rust"
+
+    ```rust
+    use holoconf::Config;
+
+    // Load base configuration
+    let mut config = Config::load("config/base.yaml")?;
+
+    // Load production overrides
+    let production = Config::load("config/production.yaml")?;
+
+    // Merge production into base
+    config.merge(production);
+
+    let db_host: String = config.get("database.host")?;
+    println!("Database: {}", db_host);
+    // Database: prod-db.example.com
+    ```
+
+=== "CLI"
+
+    ```bash
+    # The CLI doesn't support merge directly, but you can use glob patterns
+    # (we'll cover this later)
+    ```
+
+Let's understand what happened:
+- `database.host` was overridden to `prod-db.example.com`
+- `database.port` kept its value from base (`5432`) because production didn't override it
+- `database.pool_size` was overridden to `50`
+- `logging.level` was overridden to `warning`
+- Everything else (`app.name`, `app.debug`, `logging.format`) stayed from base
+
+## How Merging Works
+
+When you merge configurations, HoloConf uses these rules:
+
+| Type | Behavior |
+|------|----------|
+| Scalars (string, int, bool) | Later value replaces earlier |
+| Objects/Maps | Deep merge (keys merged recursively) |
+| Arrays | Later array replaces earlier (no concatenation) |
+
+This means merging is "deep" for nested objects but "shallow" for arrays. Let's see an example:
 
 ```yaml
-database:
-  host: prod-db.example.com  # overridden
-  port: 5432                  # from base
-  pool_size: 50               # overridden
-
-logging:
-  level: warning              # overridden
+# base.yaml
+features:
+  auth:
+    enabled: true
+    providers: [github, google]
+  search:
+    enabled: true
 ```
 
-## Common Patterns
+```yaml
+# override.yaml
+features:
+  auth:
+    providers: [local]  # This replaces the entire array
+  analytics:
+    enabled: true
+```
 
-### Environment-based Configuration
+After merging:
+
+```yaml
+features:
+  auth:
+    enabled: true           # Kept from base
+    providers: [local]      # Replaced by override
+  search:
+    enabled: true           # Kept from base
+  analytics:
+    enabled: true           # Added by override
+```
+
+## Environment-Based Configuration
+
+Now let's build a pattern you'll use all the time: environment-based configuration. Your directory structure:
 
 ```
 config/
@@ -94,17 +164,27 @@ config/
 └── production.yaml
 ```
 
+Load the right config based on environment:
+
 === "Python"
 
     ```python
     import os
     from holoconf import Config
 
+    # Get environment from environment variable
     env = os.environ.get("APP_ENV", "development")
 
+    # Load base config
     config = Config.load("config/base.yaml")
+
+    # Merge environment-specific config
     env_config = Config.load(f"config/{env}.yaml")
     config.merge(env_config)
+
+    # Now use the merged config
+    db_host = config.get("database.host")
+    print(f"Running in {env} with database {db_host}")
     ```
 
 === "Rust"
@@ -113,35 +193,58 @@ config/
     use holoconf::Config;
     use std::env;
 
-    fn main() -> Result<(), holoconf::Error> {
-        let env = env::var("APP_ENV").unwrap_or_else(|_| "development".into());
+    // Get environment from environment variable
+    let env_name = env::var("APP_ENV")
+        .unwrap_or_else(|_| "development".into());
 
-        let mut config = Config::load("config/base.yaml")?;
-        let env_config = Config::load(&format!("config/{}.yaml", env))?;
-        config.merge(env_config);
+    // Load base config
+    let mut config = Config::load("config/base.yaml")?;
 
-        Ok(())
-    }
+    // Merge environment-specific config
+    let env_config = Config::load(&format!("config/{}.yaml", env_name))?;
+    config.merge(env_config);
+
+    let db_host: String = config.get("database.host")?;
+    println!("Running in {} with database {}", env_name, db_host);
     ```
 
-## Optional Files
+This pattern gives you:
+- Shared defaults in `base.yaml`
+- Environment-specific overrides in `development.yaml`, `production.yaml`, etc.
+- One simple switch (`APP_ENV`) to control which config is loaded
 
-Sometimes you want to load configuration files that may or may not exist. For example, a `local.yaml` file that developers can create for local overrides but isn't committed to version control.
+## Optional Files: Local Overrides
 
-Use `Config.optional()` to load files that might not exist:
+What about files that might not exist? For example, you want developers to be able to create a `local.yaml` file for their personal overrides, but you don't want to commit it to git.
+
+If you try to load a missing file with `Config.load()`, you get an error:
 
 === "Python"
 
     ```python
     from holoconf import Config
 
-    # Config.optional() returns empty config if file doesn't exist
-    config = Config.load("config/base.yaml")  # Required - errors if missing
-    local = Config.optional("config/local.yaml")  # Optional - empty if missing
+    config = Config.load("config/base.yaml")
+
+    # This will error if local.yaml doesn't exist
+    local = Config.load("config/local.yaml")  # Error!
+    config.merge(local)
+    ```
+
+Instead, use `Config.optional()`:
+
+=== "Python"
+
+    ```python
+    from holoconf import Config
+
+    config = Config.load("config/base.yaml")
+
+    # This returns an empty config if the file doesn't exist
+    local = Config.optional("config/local.yaml")
     config.merge(local)
 
-    # Symmetry with Config.required() (alias for load)
-    config = Config.required("config/base.yaml")  # Same as Config.load()
+    # Now the merge works whether or not local.yaml exists!
     ```
 
 === "Rust"
@@ -149,85 +252,59 @@ Use `Config.optional()` to load files that might not exist:
     ```rust
     use holoconf::Config;
 
-    fn main() -> Result<(), holoconf::Error> {
-        // Config::optional() returns empty config if file doesn't exist
-        let mut config = Config::load("config/base.yaml")?;  // Required
-        let local = Config::optional("config/local.yaml")?;  // Optional
-        config.merge(local);
+    let mut config = Config::load("config/base.yaml")?;
 
-        // Config::required() is an alias for load()
-        let config = Config::required("config/base.yaml")?;
-
-        Ok(())
-    }
+    // Returns empty config if file doesn't exist
+    let local = Config::optional("config/local.yaml")?;
+    config.merge(local);
     ```
 
-### Behavior
+Now developers can create `config/local.yaml` with their personal settings:
 
-- **`Config.load(path)`** / **`Config.required(path)`**: Must exist. Returns an error if the file is not found.
-- **`Config.optional(path)`**: Returns an empty Config if the file doesn't exist. Loads normally if present.
+```yaml
+# config/local.yaml (not committed to git)
+app:
+  debug: true
 
-### Common Pattern: Local Overrides
+database:
+  host: localhost
 
-A typical setup with optional local overrides:
-
-```
-config/
-├── base.yaml           # Committed, shared defaults
-├── production.yaml     # Committed, production settings
-└── local.yaml          # .gitignored, developer-specific overrides
+logging:
+  level: debug
 ```
 
-=== "Python"
+And add it to `.gitignore`:
+
+```
+# .gitignore
+config/local.yaml
+```
+
+!!! tip "Common Pattern: Three-Layer Configuration"
+    A robust pattern uses three layers:
+
+    1. **Base** - Shared defaults (committed)
+    2. **Environment** - Environment-specific (committed)
+    3. **Local** - Developer overrides (gitignored, optional)
 
     ```python
-    from holoconf import Config
-    import os
-
-    env = os.environ.get("APP_ENV", "development")
-
-    # Load and merge in order: base → environment → local overrides
     config = Config.load("config/base.yaml")
     env_config = Config.load(f"config/{env}.yaml")
     config.merge(env_config)
-
-    # Local overrides are optional
     local = Config.optional("config/local.yaml")
     config.merge(local)
     ```
 
-=== "Rust"
+## Glob Patterns: Automatic Merging
 
-    ```rust
-    use holoconf::Config;
-    use std::env;
-
-    fn main() -> Result<(), holoconf::Error> {
-        let env = env::var("APP_ENV").unwrap_or_else(|_| "development".into());
-
-        // Load and merge in order
-        let mut config = Config::load("config/base.yaml")?;
-        let env_config = Config::load(&format!("config/{}.yaml", env))?;
-        config.merge(env_config);
-
-        // Local overrides are optional
-        let local = Config::optional("config/local.yaml")?;
-        config.merge(local);
-
-        Ok(())
-    }
-    ```
-
-## Glob Patterns
-
-When loading configurations from multiple files, you can use glob patterns to automatically match and merge files:
+Sometimes you have many config files and you want to merge them all automatically. Use glob patterns:
 
 === "Python"
 
     ```python
     from holoconf import Config
 
-    # Load all YAML files in config/ directory
+    # Load and merge all YAML files in config/ directory
     config = Config.load("config/*.yaml")
 
     # Load recursively from nested directories
@@ -239,18 +316,21 @@ When loading configurations from multiple files, you can use glob patterns to au
     ```rust
     use holoconf::Config;
 
-    fn main() -> Result<(), holoconf::Error> {
-        // Load all YAML files in config/ directory
-        let config = Config::load("config/*.yaml")?;
+    // Load all YAML files in config/ directory
+    let config = Config::load("config/*.yaml")?;
 
-        // Load recursively from nested directories
-        let config = Config::load("config/**/*.yaml")?;
-
-        Ok(())
-    }
+    // Load recursively from nested directories
+    let config = Config::load("config/**/*.yaml")?;
     ```
 
-### Supported Patterns
+=== "CLI"
+
+    ```bash
+    # Glob patterns work in the CLI too!
+    holoconf dump "config/*.yaml" --resolve
+    ```
+
+Supported patterns:
 
 | Pattern | Matches |
 |---------|---------|
@@ -262,26 +342,63 @@ When loading configurations from multiple files, you can use glob patterns to au
 
 ### Merge Order
 
-Files matching a glob pattern are **sorted alphabetically** before merging. This means:
-
-- `00-base.yaml` is loaded before `10-override.yaml`
-- `a.yaml` is loaded before `b.yaml`
-- `config/base.yaml` is loaded before `config/sub/override.yaml`
-
-Use numeric prefixes to control the merge order:
+Files matching a glob are **sorted alphabetically** before merging:
 
 ```
 config/
-├── 00-base.yaml       # Loaded first (base settings)
+├── 00-base.yaml       # Loaded first
 ├── 10-database.yaml   # Loaded second
 ├── 20-logging.yaml    # Loaded third
 └── 99-local.yaml      # Loaded last (highest priority)
 ```
 
-### Required vs Optional Globs
+This lets you control merge order with numeric prefixes. The file loaded last wins for any conflicting values.
 
-- **`Config.load("pattern")`**: At least one file must match. Returns an error if no files match.
-- **`Config.optional("pattern")`**: Returns an empty config if no files match.
+Let's see this in action:
+
+```yaml
+# 00-base.yaml
+app:
+  name: myapp
+  timeout: 30
+```
+
+```yaml
+# 10-database.yaml
+database:
+  host: localhost
+  port: 5432
+```
+
+```yaml
+# 99-local.yaml
+app:
+  timeout: 60  # Overrides 00-base.yaml
+```
+
+=== "Python"
+
+    ```python
+    from holoconf import Config
+
+    config = Config.load("config/*.yaml")
+
+    # Files merged in order: 00-base, 10-database, 99-local
+    timeout = config.get("app.timeout")
+    print(f"Timeout: {timeout}")
+    # Timeout: 60 (from 99-local.yaml)
+    ```
+
+!!! tip "Numeric Prefixes"
+    Use numeric prefixes to make merge order explicit:
+
+    - `00-` Base configuration
+    - `10-`, `20-`, `30-` Feature-specific configs
+    - `99-` Local overrides (highest priority)
+
+### Optional Globs
+
+What if no files match your pattern? By default, `Config.load()` errors:
 
 === "Python"
 
@@ -290,9 +407,22 @@ config/
 
     # Error if no files match
     config = Config.load("config/*.yaml")
+    # Error: No files matched pattern config/*.yaml
+    ```
 
-    # Empty config if no files match
+Use `Config.optional()` to return an empty config instead:
+
+=== "Python"
+
+    ```python
+    from holoconf import Config
+
+    # Returns empty config if no files match
     overrides = Config.optional("overrides/*.yaml")
+
+    # Safe to merge even if no overrides exist
+    config = Config.load("config/base.yaml")
+    config.merge(overrides)
     ```
 
 === "Rust"
@@ -300,15 +430,106 @@ config/
     ```rust
     use holoconf::Config;
 
-    fn main() -> Result<(), holoconf::Error> {
-        // Error if no files match
-        let config = Config::load("config/*.yaml")?;
+    // Returns empty config if no files match
+    let overrides = Config::optional("overrides/*.yaml")?;
 
-        // Empty config if no files match
-        let overrides = Config::optional("overrides/*.yaml")?;
-
-        Ok(())
-    }
+    let mut config = Config::load("config/base.yaml")?;
+    config.merge(overrides);
     ```
 
-See [ADR-004 Config Merging](../adr/ADR-004-config-merging.md) for the design rationale.
+## Putting It All Together
+
+Here's a complete example using everything we've learned:
+
+```
+config/
+├── 00-base.yaml           # Base defaults
+├── 10-database.yaml       # Database config
+├── 20-logging.yaml        # Logging config
+├── environments/
+│   ├── development.yaml
+│   ├── staging.yaml
+│   └── production.yaml
+└── local.yaml             # .gitignored, optional
+```
+
+=== "Python"
+
+    ```python
+    import os
+    from holoconf import Config
+
+    # Get environment
+    env = os.environ.get("APP_ENV", "development")
+
+    # Step 1: Load and merge base configs
+    config = Config.load("config/0*.yaml")  # All files starting with 0, 1, 2
+
+    # Step 2: Merge environment-specific config
+    env_config = Config.load(f"config/environments/{env}.yaml")
+    config.merge(env_config)
+
+    # Step 3: Merge optional local overrides
+    local = Config.optional("config/local.yaml")
+    config.merge(local)
+
+    # Now use the fully merged config
+    print(f"Running in {env} environment")
+    print(f"Database: {config.get('database.host')}")
+    print(f"Log level: {config.get('logging.level')}")
+    ```
+
+=== "Rust"
+
+    ```rust
+    use holoconf::Config;
+    use std::env;
+
+    let env_name = env::var("APP_ENV")
+        .unwrap_or_else(|_| "development".into());
+
+    // Load and merge base configs
+    let mut config = Config::load("config/0*.yaml")?;
+
+    // Merge environment-specific
+    let env_config = Config::load(&format!("config/environments/{}.yaml", env_name))?;
+    config.merge(env_config);
+
+    // Merge optional local
+    let local = Config::optional("config/local.yaml")?;
+    config.merge(local);
+
+    println!("Running in {} environment", env_name);
+    ```
+
+This gives you maximum flexibility:
+- Shared defaults in numbered files
+- Environment-specific overrides
+- Personal local overrides
+- All merged automatically
+
+!!! tip "Try It Yourself"
+    Set up a multi-file configuration:
+
+    1. Create `config/00-base.yaml` with basic settings
+    2. Create `config/10-database.yaml` with database config
+    3. Create `config/environments/development.yaml` with dev settings
+    4. Create `config/local.yaml` with your personal overrides
+    5. Load and merge them all!
+
+## What You've Learned
+
+You now understand:
+
+- How to merge two configurations together
+- Deep merge behavior for objects vs shallow for arrays
+- Environment-based configuration patterns
+- Optional files for local overrides
+- Glob patterns for automatic merging
+- Controlling merge order with numeric prefixes
+- Building robust multi-layer configuration systems
+
+## Next Steps
+
+- **[Validation](validation.md)** - Validate your merged configuration with JSON Schema
+- **[ADR-004 Config Merging](../adr/ADR-004-config-merging.md)** - Design rationale for merge behavior

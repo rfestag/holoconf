@@ -1,26 +1,61 @@
 # Resolvers
 
-## Overview
+Configuration often needs to pull values from different sources: environment variables, other files, HTTP endpoints, or even other parts of the configuration itself. Resolvers are how HoloConf makes this happen.
 
-Resolvers are the mechanism HoloConf uses to dynamically compute configuration values. Each resolver handles a specific type of value source.
+Let's explore each resolver type, starting simple and building up to more advanced use cases.
 
-All resolvers support two framework-level keyword arguments:
+## Environment Variables: The Basics
 
-- **`default=value`** - Fallback value if resolution fails
-- **`sensitive=true`** - Mark value as sensitive for redaction
-
-## Built-in Resolvers
-
-### Environment Variables (`env`)
-
-Reads values from environment variables.
+We've already seen environment variables in the previous guides, but let's make sure we understand them completely. The `env` resolver reads values from environment variables:
 
 ```yaml
 database:
   host: ${env:DB_HOST}
-  port: ${env:DB_PORT,default=5432}
-  password: ${env:DB_PASSWORD,sensitive=true}
 ```
+
+Let's see what happens when we try to use this:
+
+=== "Python"
+
+    ```python
+    from holoconf import Config, ResolverError
+
+    # Without setting the environment variable
+    config = Config.load("config.yaml")
+
+    try:
+        host = config.get("database.host")
+    except ResolverError as e:
+        print(f"Error: {e}")
+        # Error: Environment variable DB_HOST is not set
+    ```
+
+=== "Rust"
+
+    ```rust
+    use holoconf::Config;
+
+    let config = Config::load("config.yaml")?;
+    let host: String = config.get("database.host")?;
+    // Error: ResolverError: Environment variable DB_HOST is not set
+    ```
+
+=== "CLI"
+
+    ```bash
+    $ holoconf get config.yaml database.host
+    Error: Environment variable DB_HOST is not set
+    ```
+
+The error is good - it prevents us from using incorrect values. But now let's add a default so it works during development:
+
+```yaml
+database:
+  host: ${env:DB_HOST,default=localhost}
+  port: ${env:DB_PORT,default=5432}
+```
+
+Now it works everywhere:
 
 === "Python"
 
@@ -28,11 +63,18 @@ database:
     import os
     from holoconf import Config
 
-    os.environ["DB_HOST"] = "production-db.example.com"
-    config = Config.from_file("config.yaml")
+    # Without environment variables - uses defaults
+    config = Config.load("config.yaml")
+    host = config.get("database.host")
+    print(f"Host: {host}")
+    # Host: localhost
 
-    host = config.get("database.host")  # "production-db.example.com"
-    port = config.get("database.port")  # "5432" (default, since DB_PORT not set)
+    # With environment variables - overrides defaults
+    os.environ["DB_HOST"] = "prod-db.example.com"
+    config = Config.load("config.yaml")
+    host = config.get("database.host")
+    print(f"Host: {host}")
+    # Host: prod-db.example.com
     ```
 
 === "Rust"
@@ -41,100 +83,293 @@ database:
     use holoconf::Config;
     use std::env;
 
-    fn main() -> Result<(), holoconf::Error> {
-        env::set_var("DB_HOST", "production-db.example.com");
-        let config = Config::from_file("config.yaml")?;
+    // Without environment variables
+    let config = Config::load("config.yaml")?;
+    let host: String = config.get("database.host")?;
+    println!("Host: {}", host);
+    // Host: localhost
 
-        let host: String = config.get("database.host")?;
-        let port: String = config.get("database.port")?;
-
-        Ok(())
-    }
+    // With environment variables
+    env::set_var("DB_HOST", "prod-db.example.com");
+    let config = Config::load("config.yaml")?;
+    let host: String = config.get("database.host")?;
+    println!("Host: {}", host);
+    // Host: prod-db.example.com
     ```
 
 === "CLI"
 
     ```bash
-    # Set environment variables and get resolved values
-    export DB_HOST="production-db.example.com"
-    holoconf get database.host config.yaml
-    # Output: production-db.example.com
+    # Uses default
+    $ holoconf get config.yaml database.host
+    localhost
 
-    # View all resolved env vars
-    holoconf dump config.yaml --resolve
+    # Overrides with environment variable
+    $ DB_HOST=prod-db.example.com holoconf get config.yaml database.host
+    prod-db.example.com
     ```
 
-### Self-References
-
-Reference other values within the same configuration.
-
-```yaml
-base_url: https://api.example.com
-
-endpoints:
-  users: ${base_url}/users
-  orders: ${base_url}/orders
-```
-
-#### Relative References
-
-Use `.` for sibling references and `..` to go up levels:
+Finally, let's add a password and mark it as sensitive so it never appears in logs:
 
 ```yaml
 database:
-  host: localhost
-  port: 5432
-  connection:
-    # Reference sibling 'host' (same level)
-    url: postgres://${.host}:${.port}/mydb
-    # Reference parent's sibling
-    timeout: ${..defaults.timeout}
+  host: ${env:DB_HOST,default=localhost}
+  port: ${env:DB_PORT,default=5432}
+  password: ${env:DB_PASSWORD,default=dev-password,sensitive=true}
 ```
-
-### File Include (`file`)
-
-Include content from other files.
-
-```yaml
-# main.yaml
-app:
-  name: my-app
-  secrets: ${file:./secrets.yaml}
-  # With default if file doesn't exist
-  optional_config: ${file:./local.yaml,default={}}
-```
-
-!!! info "Security - Path Traversal Protection"
-    File access is restricted to the config file's parent directory by default. Attempts to read files outside this directory (like `/etc/passwd`) will be blocked. To allow additional directories, use the `file_roots` parameter.
 
 === "Python"
 
     ```python
+    from holoconf import Config
+
+    config = Config.load("config.yaml")
+
+    # The password is accessible
+    password = config.get("database.password")
+    print(f"Password length: {len(password)}")
+    # Password length: 12
+
+    # But it's redacted in dumps
+    print(config.to_yaml(redact=True))
+    # database:
+    #   host: localhost
+    #   port: 5432
+    #   password: '[REDACTED]'
+    ```
+
+=== "CLI"
+
+    ```bash
+    # Can access it directly
+    $ holoconf get config.yaml database.password
+    dev-password
+
+    # But it's redacted in dumps
+    $ holoconf dump config.yaml --resolve
+    database:
+      host: localhost
+      port: 5432
+      password: '[REDACTED]'
+    ```
+
+!!! tip "Environment Variable Best Practices"
+    - Always provide defaults for non-sensitive values (like hosts and ports)
+    - Always mark sensitive values with `sensitive=true`
+    - Use uppercase names for environment variables (convention)
+    - Don't provide defaults for production secrets - let them fail if not configured
+
+## Self-References: Reusing Values
+
+Sometimes you want to reference other values in your configuration. This helps you avoid repetition and keep related values in sync.
+
+### Absolute References
+
+Reference any value in your configuration using its full path:
+
+```yaml
+api:
+  base_url: https://api.example.com
+
+endpoints:
+  users: ${api.base_url}/users
+  orders: ${api.base_url}/orders
+  products: ${api.base_url}/products
+```
+
+Let's see this in action:
+
+=== "Python"
+
+    ```python
+    from holoconf import Config
+
+    config = Config.load("config.yaml")
+
+    users_endpoint = config.get("endpoints.users")
+    print(f"Users: {users_endpoint}")
+    # Users: https://api.example.com/users
+
+    orders_endpoint = config.get("endpoints.orders")
+    print(f"Orders: {orders_endpoint}")
+    # Orders: https://api.example.com/orders
+    ```
+
+=== "Rust"
+
+    ```rust
+    use holoconf::Config;
+
+    let config = Config::load("config.yaml")?;
+
+    let users: String = config.get("endpoints.users")?;
+    println!("Users: {}", users);
+    // Users: https://api.example.com/users
+    ```
+
+=== "CLI"
+
+    ```bash
+    $ holoconf get config.yaml endpoints.users
+    https://api.example.com/users
+    ```
+
+Now when you need to change the base URL, you only update it in one place!
+
+### Relative References
+
+Use `.` to reference sibling values (same level) and `..` to go up levels:
+
+```yaml
+defaults:
+  timeout: 30
+  retries: 3
+
+database:
+  host: localhost
+  port: 5432
+  connection:
+    # Reference siblings (same level as 'connection')
+    url: postgres://${..host}:${..port}/mydb
+    # Reference from defaults (parent's sibling)
+    timeout: ${...defaults.timeout}
+    retries: ${...defaults.retries}
+```
+
+Let's break down what's happening:
+- `${..host}` means "go up one level (from `connection` to `database`) and get `host`"
+- `${...defaults.timeout}` means "go up to root and get `defaults.timeout`"
+
+=== "Python"
+
+    ```python
+    from holoconf import Config
+
+    config = Config.load("config.yaml")
+
+    url = config.get("database.connection.url")
+    print(f"URL: {url}")
+    # URL: postgres://localhost:5432/mydb
+
+    timeout = config.get("database.connection.timeout")
+    print(f"Timeout: {timeout}")
+    # Timeout: 30
+    ```
+
+=== "Rust"
+
+    ```rust
+    use holoconf::Config;
+
+    let config = Config::load("config.yaml")?;
+
+    let url: String = config.get("database.connection.url")?;
+    println!("URL: {}", url);
+    // URL: postgres://localhost:5432/mydb
+    ```
+
+=== "CLI"
+
+    ```bash
+    $ holoconf get config.yaml database.connection.url
+    postgres://localhost:5432/mydb
+    ```
+
+!!! tip "When to Use Self-References"
+    Self-references are perfect for:
+
+    - Building URLs from base URLs and paths
+    - Constructing connection strings from individual components
+    - Sharing common values (like timeouts) across multiple sections
+    - Avoiding duplication in your configuration
+
+## File Includes: Splitting Configuration
+
+As your configuration grows, you might want to split it across multiple files. The `file` resolver lets you include content from other files:
+
+```yaml
+# main.yaml
+app:
+  name: my-application
+  secrets: ${file:./secrets.yaml}
+  database: ${file:./database.yaml}
+```
+
+Let's create those files and see it work:
+
+=== "Python"
+
+    ```python
+    from holoconf import Config
+
+    # Assuming secrets.yaml contains: api_key: secret-123
+    # And database.yaml contains: host: localhost, port: 5432
+
+    config = Config.load("main.yaml")
+
+    api_key = config.get("app.secrets.api_key")
+    print(f"API Key: {api_key}")
+    # API Key: secret-123
+
+    db_host = config.get("app.database.host")
+    print(f"Database: {db_host}")
+    # Database: localhost
+    ```
+
+=== "Rust"
+
+    ```rust
+    use holoconf::Config;
+
+    let config = Config::load("main.yaml")?;
+
+    let api_key: String = config.get("app.secrets.api_key")?;
+    println!("API Key: {}", api_key);
+    // API Key: secret-123
+    ```
+
+=== "CLI"
+
+    ```bash
+    $ holoconf get main.yaml app.secrets.api_key
+    secret-123
+    ```
+
+!!! warning "Security: Path Traversal Protection"
+    By default, file access is restricted to the configuration file's directory. Attempts to read files outside this directory (like `${file:/etc/passwd}`) will be blocked. This prevents malicious configuration files from accessing sensitive system files.
+
+### Security: Allowed Directories
+
+HoloConf automatically allows reading files from the same directory as your config file. If you need to read files from other directories, you must explicitly allow them:
+
+=== "Python"
+
+    ```python
+    from holoconf import Config
+
     # Auto-allowed: files in same directory as config
     config = Config.load("/app/config.yaml")
-    # ✓ Can read: /app/data.txt, /app/subdir/file.txt
-    # ✗ Blocked: /etc/passwd, /other/path/file.txt
+    # ✓ Can read: /app/data.yaml, /app/subdir/file.yaml
+    # ✗ Blocked: /etc/passwd, /other/path/file.yaml
 
     # Allow additional directories
     config = Config.load(
         "/app/config.yaml",
         file_roots=["/etc/myapp", "/var/lib/myapp"]
     )
-    # ✓ Can read: /app/*, /etc/myapp/*, /var/lib/myapp/*
+    # ✓ Can now read: /app/*, /etc/myapp/*, /var/lib/myapp/*
     ```
 
 === "Rust"
 
     ```rust
-    // Auto-allowed: files in same directory as config
-    let config = Config::load("/app/config.yaml")?;
-    // ✓ Can read: /app/data.txt, /app/subdir/file.txt
-    // ✗ Blocked: /etc/passwd, /other/path/file.txt
-
-    // Allow additional directories
-    use holoconf::ConfigOptions;
+    use holoconf::{Config, ConfigOptions};
     use std::path::PathBuf;
 
+    // Auto-allowed: files in same directory
+    let config = Config::load("/app/config.yaml")?;
+
+    // Allow additional directories
     let mut options = ConfigOptions::default();
     options.file_roots = vec![
         PathBuf::from("/etc/myapp"),
@@ -146,42 +381,58 @@ app:
 === "CLI"
 
     ```bash
-    # File access limited to config directory
+    # File access limited to config directory by default
     holoconf get app.secrets /app/config.yaml
     # ✓ Reads /app/secrets.yaml
     # ✗ Would block /etc/passwd reference
     ```
 
-#### File Resolver Options
+### Optional Files
+
+What if you want to include a file that might not exist (like local developer overrides)? Use a default:
+
+```yaml
+app:
+  name: my-application
+  # If local.yaml doesn't exist, use empty object
+  local_config: ${file:./local.yaml,default={}}
+```
+
+### Parse Modes
+
+By default, HoloConf detects the file format from the extension. You can override this:
 
 | Option | Description | Example |
 |--------|-------------|---------|
+| `parse=auto` | Auto-detect from extension (default) | `${file:config.yaml}` |
 | `parse=yaml` | Parse as YAML | `${file:data.txt,parse=yaml}` |
 | `parse=json` | Parse as JSON | `${file:data.txt,parse=json}` |
-| `parse=text` | Read as plain text | `${file:data.json,parse=text}` |
-| `parse=auto` | Auto-detect from extension (default) | `${file:config.yaml}` |
+| `parse=text` | Read as plain text | `${file:template.yaml,parse=text}` |
 | `encoding=utf-8` | UTF-8 encoding (default) | `${file:data.txt}` |
 | `encoding=base64` | Base64 encode contents | `${file:cert.pem,encoding=base64}` |
-| `encoding=binary` | Return raw bytes | `${file:image.png,encoding=binary}` |
 
-### HTTP (`http`)
+## HTTP Fetching: Remote Configuration
 
-!!! warning "Security"
-    HTTP resolver is disabled by default for security. Enable it explicitly in your configuration options.
+Sometimes configuration lives on a remote server - feature flags from a service, shared settings from a central configuration server, or secrets from a vault. The `http` resolver can fetch these.
 
-Fetch configuration from HTTP endpoints.
+!!! danger "Security: HTTP Resolver Disabled by Default"
+    The HTTP resolver is **disabled by default** for security. You must explicitly enable it when loading your configuration.
 
-```yaml
-feature_flags: ${http:https://config.example.com/flags.json}
-# With fallback if request fails
-remote_config: ${http:https://api.example.com/config,default={}}
-# With authentication header
-private_config: ${http:https://api.example.com/config,header=Authorization:Bearer token}
-# With explicit parse mode
-raw_data: ${http:https://api.example.com/data,parse=text}
-```
+### Enabling HTTP Resolver
 
-#### Enabling HTTP Resolver
+First, let's see what happens if we try to use HTTP without enabling it:
+
+=== "Python"
+
+    ```python
+    from holoconf import Config
+
+    # config.yaml contains: feature_flags: ${http:https://config.example.com/flags.json}
+    config = Config.load("config.yaml")
+    # Error: HTTP resolver is disabled. Enable with allow_http=True
+    ```
+
+Now let's enable it properly:
 
 === "Python"
 
@@ -189,14 +440,50 @@ raw_data: ${http:https://api.example.com/data,parse=text}
     from holoconf import Config
 
     # Enable HTTP resolver
-    config = Config.from_file("config.yaml", allow_http=True)
+    config = Config.load("config.yaml", allow_http=True)
 
-    # With URL allowlist for additional security
-    config = Config.from_file(
+    # Now it works!
+    flags = config.get("feature_flags")
+    ```
+
+=== "Rust"
+
+    ```rust
+    use holoconf::Config;
+
+    let config = Config::builder()
+        .allow_http(true)
+        .load("config.yaml")?;
+    ```
+
+=== "CLI"
+
+    ```bash
+    # Must use --allow-http flag
+    holoconf get feature_flags config.yaml --allow-http
+    ```
+
+### URL Allowlist
+
+For additional security, restrict which URLs can be fetched:
+
+=== "Python"
+
+    ```python
+    from holoconf import Config
+
+    # Only allow specific URLs
+    config = Config.load(
         "config.yaml",
         allow_http=True,
-        http_allowlist=["https://config.example.com/*", "https://*.internal.com/*"]
+        http_allowlist=[
+            "https://config.example.com/*",
+            "https://*.internal.com/*"
+        ]
     )
+    # ✓ Can fetch: https://config.example.com/anything
+    # ✓ Can fetch: https://api.internal.com/config
+    # ✗ Blocked: https://evil.com/malicious
     ```
 
 === "Rust"
@@ -213,29 +500,11 @@ raw_data: ${http:https://api.example.com/data,parse=text}
 === "CLI"
 
     ```bash
-    # HTTP resolver must be enabled with --allow-http flag
-    holoconf get feature_flags config.yaml --allow-http
-
-    # With URL allowlist for security
     holoconf dump config.yaml --resolve --allow-http \
       --http-allowlist 'https://config.example.com/*'
     ```
 
-#### HTTP Resolver Options
-
-| Option | Description | Example |
-|--------|-------------|---------|
-| `parse=auto` | Auto-detect from Content-Type or URL extension (default) | `${http:https://example.com/config}` |
-| `parse=yaml` | Parse response as YAML | `${http:https://example.com/config,parse=yaml}` |
-| `parse=json` | Parse response as JSON | `${http:https://example.com/config,parse=json}` |
-| `parse=text` | Return response as text | `${http:https://example.com/data,parse=text}` |
-| `parse=binary` | Return response as raw bytes | `${http:https://example.com/cert,parse=binary}` |
-| `timeout=30` | Request timeout in seconds (default: 30) | `${http:https://example.com/config,timeout=60}` |
-| `header=Name:Value` | Add custom HTTP header | `${http:https://api.com/config,header=Authorization:Bearer token}` |
-
-#### URL Allowlist Patterns
-
-The URL allowlist supports glob-style patterns:
+Allowlist patterns support glob-style wildcards:
 
 | Pattern | Matches |
 |---------|---------|
@@ -243,24 +512,46 @@ The URL allowlist supports glob-style patterns:
 | `https://*.example.com/*` | Any subdomain of example.com |
 | `https://api.example.com/config/*` | Specific path prefix |
 
-#### Security Best Practices
+### HTTP Resolver Options
 
-1. **Keep HTTP disabled by default** - Only enable when needed
-2. **Use URL allowlist** - Restrict which URLs can be fetched
-3. **Use HTTPS** - Always use HTTPS for sensitive configuration
-4. **Set appropriate timeouts** - Prevent hanging on slow responses
-5. **Use authentication** - Add authorization headers for private endpoints
+```yaml
+# Basic usage
+feature_flags: ${http:https://config.example.com/flags.json}
 
-#### Proxy Configuration
+# With fallback if request fails
+remote_config: ${http:https://api.example.com/config,default={}}
 
-Configure HTTP/SOCKS proxy for requests:
+# With authentication header
+private_config: ${http:https://api.example.com/config,header=Authorization:Bearer token123}
+
+# With timeout (in seconds)
+slow_endpoint: ${http:https://slow.example.com/data,timeout=60}
+
+# Parse as text instead of JSON/YAML
+raw_data: ${http:https://api.example.com/data,parse=text}
+```
+
+All available options:
+
+| Option | Description | Example |
+|--------|-------------|---------|
+| `parse=auto` | Auto-detect from Content-Type or URL (default) | `${http:https://example.com/config}` |
+| `parse=yaml` | Parse response as YAML | `${http:https://example.com/config,parse=yaml}` |
+| `parse=json` | Parse response as JSON | `${http:https://example.com/config,parse=json}` |
+| `parse=text` | Return response as text | `${http:https://example.com/data,parse=text}` |
+| `timeout=30` | Request timeout in seconds (default: 30) | `${http:https://example.com/config,timeout=60}` |
+| `header=Name:Value` | Add custom HTTP header | `${http:https://api.com/config,header=Authorization:Bearer token}` |
+
+### Proxy Configuration
+
+If your network requires a proxy:
 
 === "Python"
 
     ```python
     from holoconf import Config
 
-    # Explicit proxy
+    # Explicit HTTP proxy
     config = Config.load(
         "config.yaml",
         allow_http=True,
@@ -282,29 +573,29 @@ Configure HTTP/SOCKS proxy for requests:
     )
     ```
 
-Per-request proxy override in YAML:
+Per-request proxy override:
 
 ```yaml
 value: ${http:https://api.example.com/config,proxy=http://proxy:8080}
 ```
 
-#### Custom CA Certificates
+### Custom CA Certificates
 
-For internal/corporate CAs or self-signed certificates:
+For internal or corporate CAs, or self-signed certificates in development:
 
 === "Python"
 
     ```python
     from holoconf import Config
 
-    # Replace default roots with custom CA bundle
+    # Replace default CA bundle with custom bundle
     config = Config.load(
         "config.yaml",
         allow_http=True,
         http_ca_bundle="/etc/ssl/certs/internal-ca.pem"
     )
 
-    # Add extra CA to default roots
+    # Add extra CA to default roots (doesn't replace them)
     config = Config.load(
         "config.yaml",
         allow_http=True,
@@ -312,17 +603,17 @@ For internal/corporate CAs or self-signed certificates:
     )
     ```
 
-Per-request CA override in YAML:
+Per-request CA override:
 
 ```yaml
-# Replace CA bundle
-value: ${http:https://internal.corp/config,ca_bundle=/path/to/ca.pem}
+# Replace CA bundle for this request
+internal: ${http:https://internal.corp/config,ca_bundle=/path/to/ca.pem}
 
-# Add extra CA
-value: ${http:https://api.example.com/config,extra_ca_bundle=/path/to/extra.pem}
+# Add extra CA for this request
+secure: ${http:https://api.example.com/config,extra_ca_bundle=/path/to/extra.pem}
 ```
 
-#### Mutual TLS (mTLS) / Client Certificates
+### Mutual TLS (Client Certificates)
 
 For services requiring client certificate authentication:
 
@@ -357,79 +648,91 @@ For services requiring client certificate authentication:
     )
     ```
 
-Per-request mTLS in YAML:
+Per-request client certificate:
 
 ```yaml
 # PEM files
-value: ${http:https://secure.corp/config,client_cert=/path/cert.pem,client_key=/path/key.pem}
+secure: ${http:https://secure.corp/config,client_cert=/path/cert.pem,client_key=/path/key.pem}
 
 # With encrypted key
-value: ${http:https://secure.corp/config,client_cert=/path/cert.pem,client_key=/path/key.pem,key_password=secret}
+secure: ${http:https://secure.corp/config,client_cert=/path/cert.pem,client_key=/path/key.pem,key_password=secret}
 
 # P12/PFX bundle
-value: ${http:https://secure.corp/config,client_cert=/path/identity.p12,key_password=secret}
+secure: ${http:https://secure.corp/config,client_cert=/path/identity.p12,key_password=secret}
 ```
 
-#### Disabling TLS Verification
+### Disabling TLS Verification (Development Only)
 
-!!! danger "http_insecure is dangerous"
-    Setting `http_insecure=true` disables ALL TLS certificate verification.
-    This exposes your application to man-in-the-middle attacks.
+!!! danger "CRITICAL SECURITY WARNING"
+    Disabling TLS verification exposes you to man-in-the-middle attacks where an attacker can intercept and modify your configuration data.
 
-    **Never use in production.** Only for local development with self-signed certs.
+    **NEVER use this in production.** Only use for local development with self-signed certificates.
+
+    **As of v0.3.0**, the global `http_insecure=True` parameter has been removed for security. You can only disable verification per-request, and HoloConf will display a prominent warning.
+
+Per-request insecure mode (shows obnoxious warning):
+
+```yaml
+# DANGEROUS: Skip TLS verification for this request
+# This will print a warning to stderr every time it's resolved
+dev_config: ${http:https://dev.local/config,insecure=true}
+```
+
+**Better alternative** - Use proper CA configuration instead:
 
 === "Python"
 
     ```python
     from holoconf import Config
 
-    # DANGEROUS: For development only
+    # RECOMMENDED: Add your development CA certificate
     config = Config.load(
         "config.yaml",
         allow_http=True,
-        http_insecure=True  # DO NOT USE IN PRODUCTION
+        http_extra_ca_bundle="/path/to/dev-ca.pem"
     )
     ```
 
-Per-request insecure mode in YAML:
+This approach:
+- Maintains security (validates certificates)
+- Works with your self-signed certs
+- Doesn't trigger warnings
+- Can be safely used in all environments
 
-```yaml
-# DANGEROUS: Skip TLS verification
-value: ${http:https://dev.local/config,insecure=true}
-```
+!!! warning "Migration from v0.2.x"
+    If you were using `http_insecure=True` globally in v0.2.x:
 
-## Lazy Resolution
+    **Old (v0.2.x, removed):**
+    ```python
+    config = Config.load("config.yaml", http_insecure=True)  # ✗ No longer exists
+    ```
 
-Resolvers are invoked **lazily** - values are only resolved when accessed, not when the configuration is loaded. This means:
+    **New (v0.3.0+) - Per-request:**
+    ```yaml
+    # Shows warning on every access
+    value: ${http:https://dev.local/config,insecure=true}
+    ```
 
-- Environment variables are read at access time
-- Files are read at access time
-- HTTP requests are made at access time
-- Default values are only resolved if the primary resolver fails
+    **Better (v0.3.0+) - Use CA bundle:**
+    ```python
+    config = Config.load(
+        "config.yaml",
+        allow_http=True,
+        http_extra_ca_bundle="/path/to/dev-ca.pem"  # ✓ Secure and quiet
+    )
+    ```
 
-See [ADR-005 Resolver Timing](../adr/ADR-005-resolver-timing.md) for the design rationale.
+### HTTP Security Best Practices
 
-## Sensitive Values
+1. **Keep HTTP disabled by default** - Only enable with `allow_http=True` when needed
+2. **Use URL allowlist** - Restrict which URLs can be fetched
+3. **Always use HTTPS** - Never use `http://` for sensitive configuration
+4. **Set appropriate timeouts** - Prevent hanging on slow responses
+5. **Use authentication** - Add authorization headers for private endpoints
+6. **Prefer CA bundles over insecure mode** - For self-signed certs, add your CA rather than disabling verification
+7. **Use per-request options sparingly** - Global configuration is usually safer and easier to audit
 
-Mark values as sensitive to prevent them from appearing in logs or dumps:
-
-```yaml
-api:
-  key: ${env:API_KEY,sensitive=true}
-  secret: ${env:API_SECRET,default=dev-secret,sensitive=true}
-```
-
-When dumping configuration with `redact=True`:
-
-```python
-config = Config.from_file("config.yaml")
-print(config.to_yaml(redact=True))
-# api:
-#   key: '[REDACTED]'
-#   secret: '[REDACTED]'
-```
-
-## AWS Resolvers (`holoconf-aws`)
+## AWS Resolvers
 
 The `holoconf-aws` package provides resolvers for AWS services. Install separately:
 
@@ -437,11 +740,11 @@ The `holoconf-aws` package provides resolvers for AWS services. Install separate
 pip install holoconf-aws
 ```
 
-Resolvers are automatically registered when holoconf is imported.
+Resolvers are automatically registered when imported.
 
-### SSM Parameter Store (`ssm`)
+### SSM Parameter Store
 
-Fetch values from AWS Systems Manager Parameter Store.
+Fetch values from AWS Systems Manager Parameter Store:
 
 ```yaml
 database:
@@ -459,9 +762,9 @@ database:
 | SecureString | Automatically marked as sensitive |
 | StringList | Returned as a Python list |
 
-### CloudFormation Outputs (`cfn`)
+### CloudFormation Outputs
 
-Fetch outputs from CloudFormation stacks.
+Fetch outputs from CloudFormation stacks:
 
 ```yaml
 infrastructure:
@@ -471,9 +774,9 @@ infrastructure:
   vpc_id: ${cfn:shared-infra/VpcId,region=us-west-2}
 ```
 
-### S3 Objects (`s3`)
+### S3 Objects
 
-Fetch and parse objects from S3.
+Fetch and parse objects from S3:
 
 ```yaml
 # Auto-parsed based on file extension
@@ -485,32 +788,13 @@ raw_text: ${s3:my-bucket/docs/README.md,parse=text}
 binary_data: ${s3:my-bucket/certs/cert.pem,parse=binary}
 ```
 
-#### S3 Parse Modes
-
-| Mode | Description |
-|------|-------------|
-| `auto` (default) | Detect by file extension or Content-Type |
-| `yaml` | Parse as YAML |
-| `json` | Parse as JSON |
-| `text` | Return raw text |
-| `binary` | Return raw bytes (`Value::Bytes`) |
-
-### AWS Authentication
-
-All AWS resolvers use the standard AWS credential chain:
-
-1. Environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`)
-2. Shared credential file (`~/.aws/credentials`)
-3. AWS config file (`~/.aws/config`)
-4. IAM role (EC2/ECS/Lambda)
-
 ## Custom Resolvers
 
-You can register custom resolvers in Python to integrate with any data source.
+You can create your own resolvers in Python to integrate with any data source.
 
-### Function Resolvers
+### Simple Function Resolver
 
-The simplest form is a function that takes a key and optional keyword arguments:
+The easiest way is a function that takes a key and optional keyword arguments:
 
 ```python
 import holoconf
@@ -532,10 +816,11 @@ database:
 
 ### Async Resolvers
 
-Async functions work automatically - HoloConf will await them:
+Async functions work automatically:
 
 ```python
 import holoconf
+import aiohttp
 
 async def fetch_secret(key, **kwargs):
     """Async resolver that fetches secrets from a remote service."""
@@ -548,7 +833,7 @@ holoconf.register_resolver("secret", fetch_secret)
 
 ### Returning Sensitive Values
 
-For values that should be redacted in output, return a `ResolvedValue`:
+For values that should be redacted in output:
 
 ```python
 from holoconf import register_resolver, ResolvedValue
@@ -566,17 +851,6 @@ register_resolver("vault", vault_resolver)
 api:
   key: ${vault:secret/data/api-key}  # Will show as [REDACTED]
 ```
-
-### Return Types
-
-Resolvers can return various types:
-
-| Return Type | Result |
-|------------|--------|
-| `str`, `int`, `float`, `bool` | Scalar value |
-| `list` | List/array value |
-| `dict` | Dictionary/mapping value |
-| `ResolvedValue(value, sensitive=True)` | Value marked for redaction |
 
 ### Error Handling
 
@@ -597,27 +871,41 @@ register_resolver("cache", my_resolver)
 value: ${cache:my-key,default=fallback}
 ```
 
-### Callable Classes
+## Lazy Resolution
 
-For resolvers that need initialization or state, use a callable class:
+Here's something important to understand: resolvers are invoked **lazily** - values are only resolved when you access them, not when the configuration is loaded.
 
-```python
-from holoconf import register_resolver, ResolvedValue
+This means:
+- Environment variables are read when you call `config.get()`, not when you call `Config.load()`
+- Files are read when you access the value
+- HTTP requests are made when you access the value
+- Default values are only resolved if the primary resolver fails
 
-class VaultResolver:
-    def __init__(self, vault_addr):
-        self.client = hvac.Client(url=vault_addr)
+Why does this matter? It makes HoloConf faster and more flexible. If you never access a value, its resolver never runs.
 
-    def __call__(self, path, **kwargs):
-        secret = self.client.secrets.kv.read_secret_version(path=path)
-        return ResolvedValue(secret["data"]["data"], sensitive=True)
+!!! tip "Try It Yourself"
+    Create a configuration with different resolvers:
 
-register_resolver("vault", VaultResolver("https://vault.example.com"))
-```
+    - Mix environment variables, file includes, and self-references
+    - Try optional files with defaults
+    - Build URLs using self-references
+    - Set up an HTTP endpoint (if available) and fetch configuration from it
 
-## See Also
+## What You've Learned
 
-- [ADR-002 Resolver Architecture](../adr/ADR-002-resolver-architecture.md) - Design rationale
-- [FEAT-002 Core Resolvers](../specs/features/FEAT-002-core-resolvers.md) - Full specification
-- [FEAT-007 AWS Resolvers](../specs/features/FEAT-007-aws-resolvers.md) - AWS resolver specification
-- [Interpolation](interpolation.md) - Interpolation syntax details
+You now understand:
+
+- How to use environment variables with defaults and sensitivity markers
+- Absolute and relative self-references for reusing values
+- File includes with security restrictions
+- HTTP fetching with security controls
+- AWS resolvers for SSM, CloudFormation, and S3
+- Creating custom resolvers
+- Lazy resolution behavior
+
+## Next Steps
+
+- **[Merging](merging.md)** - Combine multiple configuration files for environment-specific settings
+- **[Validation](validation.md)** - Use JSON Schema to catch configuration errors
+- **[ADR-002 Resolver Architecture](../adr/ADR-002-resolver-architecture.md)** - Design rationale for resolvers
+- **[FEAT-002 Core Resolvers](../specs/features/FEAT-002-core-resolvers.md)** - Full resolver specification

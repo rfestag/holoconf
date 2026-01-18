@@ -1,8 +1,25 @@
 # Getting Started
 
-This guide walks you through installing HoloConf and creating your first configuration.
+Let's build your first hierarchical configuration from scratch. By the end of this guide, you'll understand why HoloConf exists and how to use it to make your configuration flexible and secure.
+
+## Why Hierarchical Configuration?
+
+Imagine you're building an application. You hardcode the database host as `localhost` during development. Everything works great. Then you deploy to production and... nothing works. You forgot to change the database host.
+
+So you use environment variables instead. Now your configuration is scattered across environment variable declarations, deployment scripts, and documentation. New team members struggle to understand what variables are needed.
+
+HoloConf solves this by letting you write configuration files that:
+
+- Show all possible settings in one place (self-documenting)
+- Pull values from environment variables when needed (deployment flexibility)
+- Provide sensible defaults (works everywhere)
+- Mark sensitive values for redaction (security)
+
+Let's see how this works in practice.
 
 ## Installation
+
+First, let's install HoloConf:
 
 === "Python"
 
@@ -36,32 +53,20 @@ This guide walks you through installing HoloConf and creating your first configu
     cargo install holoconf-cli
     ```
 
-## Your First Configuration
+## Your First Configuration: Static Values
 
-Create a file named `config.yaml`:
+Let's start with the simplest possible configuration - just static values. Create a file named `config.yaml`:
 
 ```yaml
 app:
   name: my-application
-  debug: false
 
 database:
-  host: ${env:DB_HOST,default=localhost}
-  port: ${env:DB_PORT,default=5432}
-  name: ${env:DB_NAME,default=myapp}
-
-logging:
-  level: ${env:LOG_LEVEL,default=info}
-  format: json
+  host: localhost
+  port: 5432
 ```
 
-This configuration demonstrates several HoloConf features:
-
-- **Nested structure** - Values organized hierarchically
-- **Environment variables** - `${env:VAR_NAME}` resolves to environment variable values
-- **Default values** - `${env:VAR_NAME,default=value}` provides fallbacks when variables aren't set
-
-## Loading Configuration
+Now let's load and read this configuration:
 
 === "Python"
 
@@ -69,7 +74,7 @@ This configuration demonstrates several HoloConf features:
     from holoconf import Config
 
     # Load from file
-    config = Config.from_file("config.yaml")
+    config = Config.load("config.yaml")
 
     # Access values using dot notation
     app_name = config.get("app.name")
@@ -77,6 +82,8 @@ This configuration demonstrates several HoloConf features:
 
     print(f"App: {app_name}")
     print(f"Database: {db_host}")
+    # App: my-application
+    # Database: localhost
     ```
 
 === "Rust"
@@ -86,7 +93,7 @@ This configuration demonstrates several HoloConf features:
 
     fn main() -> Result<(), holoconf::Error> {
         // Load from file
-        let config = Config::from_file("config.yaml")?;
+        let config = Config::load("config.yaml")?;
 
         // Access values using dot notation
         let app_name: String = config.get("app.name")?;
@@ -94,6 +101,8 @@ This configuration demonstrates several HoloConf features:
 
         println!("App: {}", app_name);
         println!("Database: {}", db_host);
+        // App: my-application
+        // Database: localhost
 
         Ok(())
     }
@@ -106,9 +115,253 @@ This configuration demonstrates several HoloConf features:
     $ holoconf get config.yaml app.name
     my-application
 
-    # Get database host (resolves environment variable)
+    # Get database host
+    $ holoconf get config.yaml database.host
+    localhost
+    ```
+
+This works, but it has a problem: the database host is hardcoded to `localhost`. Let's fix that.
+
+## Adding Environment Variables
+
+We want the database host to come from an environment variable so we can change it in production without editing the file. Let's update our configuration:
+
+```yaml
+app:
+  name: my-application
+
+database:
+  host: ${env:DB_HOST}
+  port: 5432
+```
+
+Now let's try to use it:
+
+=== "Python"
+
+    ```python
+    from holoconf import Config
+
+    config = Config.load("config.yaml")
+    db_host = config.get("database.host")
+    # Error: ResolverError: Environment variable DB_HOST is not set
+    ```
+
+=== "Rust"
+
+    ```rust
+    let config = Config::load("config.yaml")?;
+    let db_host: String = config.get("database.host")?;
+    // Error: ResolverError: Environment variable DB_HOST is not set
+    ```
+
+=== "CLI"
+
+    ```bash
+    $ holoconf get config.yaml database.host
+    Error: Environment variable DB_HOST is not set
+    ```
+
+Oops! We got an error because we haven't set the `DB_HOST` environment variable. This is actually good - it means we won't accidentally use a wrong value. But it also means our configuration doesn't work in development without setting the variable every time.
+
+## Adding Defaults
+
+Let's add a default value that will be used when the environment variable isn't set:
+
+```yaml
+app:
+  name: my-application
+
+database:
+  host: ${env:DB_HOST,default=localhost}
+  port: 5432
+```
+
+Now try it without setting the environment variable:
+
+=== "Python"
+
+    ```python
+    from holoconf import Config
+
+    config = Config.load("config.yaml")
+    db_host = config.get("database.host")
+    print(f"Database: {db_host}")
+    # Database: localhost
+    ```
+
+=== "Rust"
+
+    ```rust
+    let config = Config::load("config.yaml")?;
+    let db_host: String = config.get("database.host")?;
+    println!("Database: {}", db_host);
+    // Database: localhost
+    ```
+
+=== "CLI"
+
+    ```bash
+    $ holoconf get config.yaml database.host
+    localhost
+    ```
+
+Perfect! Now let's set the environment variable and see it override the default:
+
+=== "Python"
+
+    ```python
+    import os
+    from holoconf import Config
+
+    os.environ["DB_HOST"] = "prod-db.example.com"
+    config = Config.load("config.yaml")
+    db_host = config.get("database.host")
+    print(f"Database: {db_host}")
+    # Database: prod-db.example.com
+    ```
+
+=== "Rust"
+
+    ```rust
+    use std::env;
+
+    env::set_var("DB_HOST", "prod-db.example.com");
+    let config = Config::load("config.yaml")?;
+    let db_host: String = config.get("database.host")?;
+    println!("Database: {}", db_host);
+    // Database: prod-db.example.com
+    ```
+
+=== "CLI"
+
+    ```bash
     $ DB_HOST=prod-db.example.com holoconf get config.yaml database.host
     prod-db.example.com
+    ```
+
+!!! tip "Best Practice: Always Provide Defaults"
+    For environment variables, always provide a default that works for local development. This makes your configuration self-contained and easier for new developers to use. Production can override with real environment variables.
+
+## Marking Sensitive Values
+
+Now let's add a database password. This should come from an environment variable and should never be shown in logs or dumps. Let's add it to our configuration:
+
+```yaml
+app:
+  name: my-application
+
+database:
+  host: ${env:DB_HOST,default=localhost}
+  port: 5432
+  password: ${env:DB_PASSWORD,default=dev-password,sensitive=true}
+```
+
+The `sensitive=true` flag tells HoloConf to redact this value when dumping the configuration:
+
+=== "Python"
+
+    ```python
+    from holoconf import Config
+
+    config = Config.load("config.yaml")
+
+    # Dump with redaction (default behavior)
+    print(config.to_yaml(redact=True))
+    # app:
+    #   name: my-application
+    # database:
+    #   host: localhost
+    #   port: 5432
+    #   password: '[REDACTED]'
+
+    # You can still access the actual value
+    password = config.get("database.password")
+    print(f"Password: {password}")
+    # Password: dev-password
+    ```
+
+=== "CLI"
+
+    ```bash
+    # Dump with sensitive values redacted (default)
+    $ holoconf dump config.yaml --resolve
+    app:
+      name: my-application
+    database:
+      host: localhost
+      port: 5432
+      password: '[REDACTED]'
+
+    # Get the actual value (use carefully!)
+    $ holoconf get config.yaml database.password
+    dev-password
+    ```
+
+!!! warning "Security Best Practice"
+    Always mark secrets and passwords as `sensitive=true`. This prevents them from accidentally appearing in logs, error messages, or debug output.
+
+## Working with Nested Values
+
+HoloConf makes it easy to work with deeply nested configuration. Let's expand our example:
+
+```yaml
+app:
+  name: my-application
+  debug: false
+
+database:
+  host: ${env:DB_HOST,default=localhost}
+  port: 5432
+  password: ${env:DB_PASSWORD,default=dev-password,sensitive=true}
+
+logging:
+  level: ${env:LOG_LEVEL,default=info}
+  format: json
+```
+
+You can access nested values with dot notation:
+
+=== "Python"
+
+    ```python
+    from holoconf import Config
+
+    config = Config.load("config.yaml")
+
+    # Get a specific nested value
+    log_level = config.get("logging.level")
+    print(f"Log level: {log_level}")
+    # Log level: info
+
+    # Get an entire subsection as a dict
+    db_config = config.get("database")
+    print(db_config)
+    # {'host': 'localhost', 'port': 5432, 'password': 'dev-password'}
+    ```
+
+=== "Rust"
+
+    ```rust
+    use holoconf::Config;
+
+    let config = Config::load("config.yaml")?;
+
+    // Get a specific nested value
+    let log_level: String = config.get("logging.level")?;
+    println!("Log level: {}", log_level);
+    // Log level: info
+
+    // Get an entire subsection
+    let db_config = config.get_section("database")?;
+    ```
+
+=== "CLI"
+
+    ```bash
+    # Get a specific nested value
+    $ holoconf get config.yaml logging.level
+    info
 
     # Dump entire resolved configuration
     $ holoconf dump config.yaml --resolve
@@ -117,81 +370,29 @@ This configuration demonstrates several HoloConf features:
       debug: false
     database:
       host: localhost
-      port: "5432"
-      name: myapp
+      port: 5432
+      password: '[REDACTED]'
     logging:
       level: info
       format: json
     ```
 
-## Working with Nested Values
+## Handling Errors
 
-HoloConf supports deep nesting and provides convenient access patterns:
-
-=== "Python"
-
-    ```python
-    from holoconf import Config
-
-    config = Config.from_file("config.yaml")
-
-    # Get nested values with dot notation
-    log_level = config.get("logging.level")
-
-    # Get a subsection as a dict
-    db_config = config.get("database")
-    print(db_config)
-    # {'host': 'localhost', 'port': '5432', 'name': 'myapp'}
-
-    # Check if a path exists
-    if config.get("app.debug"):
-        print("Debug mode enabled")
-    ```
-
-=== "Rust"
-
-    ```rust
-    use holoconf::Config;
-
-    fn main() -> Result<(), holoconf::Error> {
-        let config = Config::from_file("config.yaml")?;
-
-        // Get nested values with dot notation
-        let log_level: String = config.get("logging.level")?;
-
-        // Get a subsection
-        let db_config = config.get_section("database")?;
-
-        // Check if a path exists
-        if config.get::<bool>("app.debug")? {
-            println!("Debug mode enabled");
-        }
-
-        Ok(())
-    }
-    ```
-
-## Error Handling
-
-HoloConf provides descriptive errors to help you debug configuration issues:
+What happens when you try to access a value that doesn't exist? HoloConf gives you clear error messages:
 
 === "Python"
 
     ```python
-    from holoconf import Config, PathNotFoundError, ResolverError
+    from holoconf import Config, PathNotFoundError
 
-    config = Config.from_file("config.yaml")
+    config = Config.load("config.yaml")
 
     try:
         value = config.get("nonexistent.path")
     except PathNotFoundError as e:
-        print(f"Path not found: {e}")
-
-    try:
-        # If REQUIRED_VAR is not set and has no default
-        value = config.get("some.required.value")
-    except ResolverError as e:
-        print(f"Failed to resolve: {e}")
+        print(f"Oops: {e}")
+        # Oops: Path not found: nonexistent.path
     ```
 
 === "Rust"
@@ -199,24 +400,43 @@ HoloConf provides descriptive errors to help you debug configuration issues:
     ```rust
     use holoconf::{Config, Error};
 
-    fn main() {
-        let config = Config::from_file("config.yaml").unwrap();
+    let config = Config::load("config.yaml")?;
 
-        match config.get::<String>("nonexistent.path") {
-            Ok(value) => println!("Value: {}", value),
-            Err(Error::PathNotFound { path, .. }) => {
-                println!("Path not found: {}", path);
-            }
-            Err(e) => println!("Other error: {}", e),
+    match config.get::<String>("nonexistent.path") {
+        Ok(value) => println!("Value: {}", value),
+        Err(Error::PathNotFound { path, .. }) => {
+            println!("Oops: Path not found: {}", path);
         }
+        Err(e) => println!("Other error: {}", e),
     }
     ```
 
+!!! tip "Try It Yourself"
+    Create your own `config.yaml` file with a few values. Try:
+
+    - Adding more environment variables with defaults
+    - Marking different values as sensitive
+    - Nesting configuration deeper (3-4 levels)
+    - Accessing values that don't exist to see error messages
+
+## What You've Learned
+
+You now know how to:
+
+- Create a configuration file with static values
+- Use environment variables with `${env:VAR_NAME}`
+- Provide defaults with `${env:VAR_NAME,default=value}`
+- Mark sensitive values with `sensitive=true`
+- Access nested values with dot notation
+- Handle missing values gracefully
+
+This covers the basics of HoloConf. But there's much more you can do! Let's explore some more powerful features.
+
 ## Next Steps
 
-Now that you have the basics, explore these topics:
+Now that you understand the basics, let's dive deeper:
 
-- [Interpolation](interpolation.md) - Variable substitution syntax and escaping
-- [Resolvers](resolvers.md) - Environment, file, HTTP, and self-reference resolvers
-- [Merging](merging.md) - Combine multiple configuration files
-- [Validation](validation.md) - Validate configuration with JSON Schema
+- **[Interpolation](interpolation.md)** - Learn about all the ways to create dynamic values, including nested defaults and escaping special characters
+- **[Resolvers](resolvers.md)** - Explore file includes, HTTP fetching, self-references, and custom resolvers
+- **[Merging](merging.md)** - Combine multiple configuration files for environment-specific settings
+- **[Validation](validation.md)** - Use JSON Schema to catch configuration errors before they reach production
