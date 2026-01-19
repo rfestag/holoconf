@@ -137,9 +137,7 @@ This works, but the configuration is completely static. Let's make it dynamic!
 
 Real configurations need to reference other values and pull data from external sources. HoloConf uses **interpolation** with the `${...}` syntax to make this easy.
 
-Let's update our configuration to:
-- Pull the database host from an environment variable
-- Reference that host value to build a connection URL
+Let's update our configuration to show different types of interpolation:
 
 ```yaml
 app:
@@ -148,12 +146,14 @@ app:
 database:
   host: ${env:DB_HOST}
   port: 5432
-  url: postgres://${.host}:${.port}/mydb  # References .host and .port
+  name: ${app.name}                          # Absolute reference to app.name
+  url: postgres://${.host}:${.port}/${.name}  # Relative references (.host, .port, .name)
 ```
 
-Notice two things here:
+Notice three things here:
 - `${env:DB_HOST}` - Gets a value from an **external source** (environment variable)
-- `${.host}` - References a **sibling value** in the same config (keeps things DRY)
+- `${app.name}` - **Absolute reference** to a value elsewhere in the config
+- `${.host}` - **Relative reference** to a sibling value (keeps things DRY)
 
 Now let's use it:
 
@@ -171,8 +171,11 @@ Now let's use it:
     print(config.database.host)
     # prod-db.example.com
 
+    print(config.database.name)
+    # my-application
+
     print(config.database.url)
-    # postgres://prod-db.example.com:5432/mydb
+    # postgres://prod-db.example.com:5432/my-application
     ```
 
 === "Rust"
@@ -188,9 +191,13 @@ Now let's use it:
     println!("{}", host);
     // prod-db.example.com
 
+    let db_name: String = config.get("database.name")?;
+    println!("{}", db_name);
+    // my-application
+
     let url: String = config.get("database.url")?;
     println!("{}", url);
-    // postgres://prod-db.example.com:5432/mydb
+    // postgres://prod-db.example.com:5432/my-application
     ```
 
 === "CLI"
@@ -198,7 +205,7 @@ Now let's use it:
     ```bash
     $ export DB_HOST="prod-db.example.com"
     $ holoconf get config.yaml database.url
-    postgres://prod-db.example.com:5432/mydb
+    postgres://prod-db.example.com:5432/my-application
     ```
 
 HoloConf supports many types of interpolation:
