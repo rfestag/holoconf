@@ -826,6 +826,56 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#using-certificate-variables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Using Certificate Variables
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Using Certificate Variables">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pem-certificates-from-environment-variables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PEM Certificates from Environment Variables
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ca-bundle-from-file-resolver" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CA Bundle from File Resolver
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#p12pfx-binary-certificates-python" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        P12/PFX Binary Certificates (Python)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#authentication-headers" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2405,6 +2455,56 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#using-certificate-variables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Using Certificate Variables
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Using Certificate Variables">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pem-certificates-from-environment-variables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PEM Certificates from Environment Variables
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ca-bundle-from-file-resolver" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CA Bundle from File Resolver
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#p12pfx-binary-certificates-python" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        P12/PFX Binary Certificates (Python)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#authentication-headers" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3123,42 +3223,125 @@
 </div>
 </div>
 <p>This <strong>adds</strong> your CA to the existing trust store, so you can fetch from both internal and external HTTPS endpoints.</p>
-<h3 id="authentication-headers">Authentication Headers<a class="headerlink" href="#authentication-headers" title="Permanent link">&para;</a></h3>
-<p>Some configuration endpoints require authentication. Add custom headers:</p>
-<div class="tabbed-set tabbed-alternate" data-tabs="16:3"><input checked="checked" id="python_15" name="__tabbed_16" type="radio" /><input id="rust_13" name="__tabbed_16" type="radio" /><input id="cli_13" name="__tabbed_16" type="radio" /><div class="tabbed-labels"><label for="python_15">Python</label><label for="rust_13">Rust</label><label for="cli_13">CLI</label></div>
+<h3 id="using-certificate-variables">Using Certificate Variables<a class="headerlink" href="#using-certificate-variables" title="Permanent link">&para;</a></h3>
+<p>Instead of storing certificates as files, you can load them from environment variables or other resolvers. This is useful for:</p>
+<ul>
+<li>Containerized environments where secrets are injected as environment variables</li>
+<li>Secret management systems that provide certificates dynamically</li>
+<li>CI/CD pipelines where certificates are stored in secure vaults</li>
+</ul>
+<h4 id="pem-certificates-from-environment-variables">PEM Certificates from Environment Variables<a class="headerlink" href="#pem-certificates-from-environment-variables" title="Permanent link">&para;</a></h4>
+<p>Let's load client certificates for mTLS from environment variables:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-59-1"><a id="__codelineno-59-1" name="__codelineno-59-1" href="#__codelineno-59-1"></a><span class="c1"># config.yaml</span>
+</span><span id="__span-59-2"><a id="__codelineno-59-2" name="__codelineno-59-2" href="#__codelineno-59-2"></a><span class="nt">secure_api</span><span class="p">:</span>
+</span><span id="__span-59-3"><a id="__codelineno-59-3" name="__codelineno-59-3" href="#__codelineno-59-3"></a><span class="w">  </span><span class="nt">data</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${https:api.corp.com/config,client_cert=${env:CLIENT_CERT_PEM},client_key=${env:CLIENT_KEY_PEM}}</span>
+</span></code></pre></div>
+<div class="tabbed-set tabbed-alternate" data-tabs="16:2"><input checked="checked" id="python_15" name="__tabbed_16" type="radio" /><input id="rust_13" name="__tabbed_16" type="radio" /><div class="tabbed-labels"><label for="python_15">Python</label><label for="rust_13">Rust</label></div>
 <div class="tabbed-content">
 <div class="tabbed-block">
-<div class="language-python highlight"><pre><span></span><code><span id="__span-59-1"><a id="__codelineno-59-1" name="__codelineno-59-1" href="#__codelineno-59-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">holoconf</span><span class="w"> </span><span class="kn">import</span> <span class="n">Config</span>
-</span><span id="__span-59-2"><a id="__codelineno-59-2" name="__codelineno-59-2" href="#__codelineno-59-2"></a>
-</span><span id="__span-59-3"><a id="__codelineno-59-3" name="__codelineno-59-3" href="#__codelineno-59-3"></a><span class="n">config</span> <span class="o">=</span> <span class="n">Config</span><span class="o">.</span><span class="n">load</span><span class="p">(</span>
-</span><span id="__span-59-4"><a id="__codelineno-59-4" name="__codelineno-59-4" href="#__codelineno-59-4"></a>    <span class="s2">&quot;config.yaml&quot;</span><span class="p">,</span>
-</span><span id="__span-59-5"><a id="__codelineno-59-5" name="__codelineno-59-5" href="#__codelineno-59-5"></a>    <span class="n">allow_http</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
-</span><span id="__span-59-6"><a id="__codelineno-59-6" name="__codelineno-59-6" href="#__codelineno-59-6"></a>    <span class="n">http_headers</span><span class="o">=</span><span class="p">{</span>
-</span><span id="__span-59-7"><a id="__codelineno-59-7" name="__codelineno-59-7" href="#__codelineno-59-7"></a>        <span class="s2">&quot;Authorization&quot;</span><span class="p">:</span> <span class="s2">&quot;Bearer YOUR_TOKEN_HERE&quot;</span><span class="p">,</span>
-</span><span id="__span-59-8"><a id="__codelineno-59-8" name="__codelineno-59-8" href="#__codelineno-59-8"></a>        <span class="s2">&quot;X-Custom-Header&quot;</span><span class="p">:</span> <span class="s2">&quot;value&quot;</span>
-</span><span id="__span-59-9"><a id="__codelineno-59-9" name="__codelineno-59-9" href="#__codelineno-59-9"></a>    <span class="p">}</span>
-</span><span id="__span-59-10"><a id="__codelineno-59-10" name="__codelineno-59-10" href="#__codelineno-59-10"></a><span class="p">)</span>
-</span><span id="__span-59-11"><a id="__codelineno-59-11" name="__codelineno-59-11" href="#__codelineno-59-11"></a>
-</span><span id="__span-59-12"><a id="__codelineno-59-12" name="__codelineno-59-12" href="#__codelineno-59-12"></a><span class="n">data</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">data</span>  <span class="c1"># Includes auth headers in request</span>
-</span></code></pre></div>
-</div>
-<div class="tabbed-block">
-<div class="language-rust highlight"><pre><span></span><code><span id="__span-60-1"><a id="__codelineno-60-1" name="__codelineno-60-1" href="#__codelineno-60-1"></a><span class="k">use</span><span class="w"> </span><span class="n">holoconf</span><span class="p">::{</span><span class="n">Config</span><span class="p">,</span><span class="w"> </span><span class="n">ConfigOptions</span><span class="p">};</span>
-</span><span id="__span-60-2"><a id="__codelineno-60-2" name="__codelineno-60-2" href="#__codelineno-60-2"></a><span class="k">use</span><span class="w"> </span><span class="n">std</span><span class="p">::</span><span class="n">collections</span><span class="p">::</span><span class="n">HashMap</span><span class="p">;</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-60-1"><a id="__codelineno-60-1" name="__codelineno-60-1" href="#__codelineno-60-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+</span><span id="__span-60-2"><a id="__codelineno-60-2" name="__codelineno-60-2" href="#__codelineno-60-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">holoconf</span><span class="w"> </span><span class="kn">import</span> <span class="n">Config</span>
 </span><span id="__span-60-3"><a id="__codelineno-60-3" name="__codelineno-60-3" href="#__codelineno-60-3"></a>
-</span><span id="__span-60-4"><a id="__codelineno-60-4" name="__codelineno-60-4" href="#__codelineno-60-4"></a><span class="kd">let</span><span class="w"> </span><span class="k">mut</span><span class="w"> </span><span class="n">headers</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">HashMap</span><span class="p">::</span><span class="n">new</span><span class="p">();</span>
-</span><span id="__span-60-5"><a id="__codelineno-60-5" name="__codelineno-60-5" href="#__codelineno-60-5"></a><span class="n">headers</span><span class="p">.</span><span class="n">insert</span><span class="p">(</span><span class="s">&quot;Authorization&quot;</span><span class="p">.</span><span class="n">to_string</span><span class="p">(),</span><span class="w"> </span><span class="s">&quot;Bearer YOUR_TOKEN_HERE&quot;</span><span class="p">.</span><span class="n">to_string</span><span class="p">());</span>
-</span><span id="__span-60-6"><a id="__codelineno-60-6" name="__codelineno-60-6" href="#__codelineno-60-6"></a>
-</span><span id="__span-60-7"><a id="__codelineno-60-7" name="__codelineno-60-7" href="#__codelineno-60-7"></a><span class="kd">let</span><span class="w"> </span><span class="n">options</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ConfigOptions</span><span class="p">::</span><span class="n">default</span><span class="p">()</span>
-</span><span id="__span-60-8"><a id="__codelineno-60-8" name="__codelineno-60-8" href="#__codelineno-60-8"></a><span class="w">    </span><span class="p">.</span><span class="n">allow_http</span><span class="p">(</span><span class="kc">true</span><span class="p">)</span>
-</span><span id="__span-60-9"><a id="__codelineno-60-9" name="__codelineno-60-9" href="#__codelineno-60-9"></a><span class="w">    </span><span class="p">.</span><span class="n">http_headers</span><span class="p">(</span><span class="n">headers</span><span class="p">);</span>
-</span><span id="__span-60-10"><a id="__codelineno-60-10" name="__codelineno-60-10" href="#__codelineno-60-10"></a>
-</span><span id="__span-60-11"><a id="__codelineno-60-11" name="__codelineno-60-11" href="#__codelineno-60-11"></a><span class="kd">let</span><span class="w"> </span><span class="n">config</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Config</span><span class="p">::</span><span class="n">load_with_options</span><span class="p">(</span><span class="s">&quot;config.yaml&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">options</span><span class="p">)</span><span class="o">?</span><span class="p">;</span>
+</span><span id="__span-60-4"><a id="__codelineno-60-4" name="__codelineno-60-4" href="#__codelineno-60-4"></a><span class="c1"># Set certificates in environment (in practice, these come from your secret management system)</span>
+</span><span id="__span-60-5"><a id="__codelineno-60-5" name="__codelineno-60-5" href="#__codelineno-60-5"></a><span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s2">&quot;CLIENT_CERT_PEM&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;-----BEGIN CERTIFICATE-----</span>
+</span><span id="__span-60-6"><a id="__codelineno-60-6" name="__codelineno-60-6" href="#__codelineno-60-6"></a><span class="s2">MIICijCCAXICCQC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789</span>
+</span><span id="__span-60-7"><a id="__codelineno-60-7" name="__codelineno-60-7" href="#__codelineno-60-7"></a><span class="s2">...</span>
+</span><span id="__span-60-8"><a id="__codelineno-60-8" name="__codelineno-60-8" href="#__codelineno-60-8"></a><span class="s2">-----END CERTIFICATE-----&quot;&quot;&quot;</span>
+</span><span id="__span-60-9"><a id="__codelineno-60-9" name="__codelineno-60-9" href="#__codelineno-60-9"></a>
+</span><span id="__span-60-10"><a id="__codelineno-60-10" name="__codelineno-60-10" href="#__codelineno-60-10"></a><span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s2">&quot;CLIENT_KEY_PEM&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;-----BEGIN PRIVATE KEY-----</span>
+</span><span id="__span-60-11"><a id="__codelineno-60-11" name="__codelineno-60-11" href="#__codelineno-60-11"></a><span class="s2">MIICdgIBADANBgkqhkiG9w0BAQEFAASCAmAwggJcAgEAAoGBAK1234567890</span>
+</span><span id="__span-60-12"><a id="__codelineno-60-12" name="__codelineno-60-12" href="#__codelineno-60-12"></a><span class="s2">...</span>
+</span><span id="__span-60-13"><a id="__codelineno-60-13" name="__codelineno-60-13" href="#__codelineno-60-13"></a><span class="s2">-----END PRIVATE KEY-----&quot;&quot;&quot;</span>
+</span><span id="__span-60-14"><a id="__codelineno-60-14" name="__codelineno-60-14" href="#__codelineno-60-14"></a>
+</span><span id="__span-60-15"><a id="__codelineno-60-15" name="__codelineno-60-15" href="#__codelineno-60-15"></a><span class="n">config</span> <span class="o">=</span> <span class="n">Config</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="s2">&quot;config.yaml&quot;</span><span class="p">,</span> <span class="n">allow_http</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</span><span id="__span-60-16"><a id="__codelineno-60-16" name="__codelineno-60-16" href="#__codelineno-60-16"></a><span class="n">data</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">secure_api</span><span class="o">.</span><span class="n">data</span>  <span class="c1"># Uses certificates from environment</span>
 </span></code></pre></div>
 </div>
 <div class="tabbed-block">
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-61-1"><a id="__codelineno-61-1" name="__codelineno-61-1" href="#__codelineno-61-1"></a><span class="c1"># CLI doesn&#39;t support custom headers - use environment variables in the URL instead</span>
-</span><span id="__span-61-2"><a id="__codelineno-61-2" name="__codelineno-61-2" href="#__codelineno-61-2"></a>$<span class="w"> </span>holoconf<span class="w"> </span>get<span class="w"> </span>config.yaml<span class="w"> </span>data<span class="w"> </span>--allow-http
+<div class="language-rust highlight"><pre><span></span><code><span id="__span-61-1"><a id="__codelineno-61-1" name="__codelineno-61-1" href="#__codelineno-61-1"></a><span class="k">use</span><span class="w"> </span><span class="n">holoconf</span><span class="p">::</span><span class="n">Config</span><span class="p">;</span>
+</span><span id="__span-61-2"><a id="__codelineno-61-2" name="__codelineno-61-2" href="#__codelineno-61-2"></a><span class="k">use</span><span class="w"> </span><span class="n">std</span><span class="p">::</span><span class="n">env</span><span class="p">;</span>
+</span><span id="__span-61-3"><a id="__codelineno-61-3" name="__codelineno-61-3" href="#__codelineno-61-3"></a>
+</span><span id="__span-61-4"><a id="__codelineno-61-4" name="__codelineno-61-4" href="#__codelineno-61-4"></a><span class="c1">// Set certificates in environment</span>
+</span><span id="__span-61-5"><a id="__codelineno-61-5" name="__codelineno-61-5" href="#__codelineno-61-5"></a><span class="n">env</span><span class="p">::</span><span class="n">set_var</span><span class="p">(</span><span class="s">&quot;CLIENT_CERT_PEM&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;-----BEGIN CERTIFICATE-----</span><span class="se">\n</span><span class="s">...&quot;</span><span class="p">);</span>
+</span><span id="__span-61-6"><a id="__codelineno-61-6" name="__codelineno-61-6" href="#__codelineno-61-6"></a><span class="n">env</span><span class="p">::</span><span class="n">set_var</span><span class="p">(</span><span class="s">&quot;CLIENT_KEY_PEM&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;-----BEGIN PRIVATE KEY-----</span><span class="se">\n</span><span class="s">...&quot;</span><span class="p">);</span>
+</span><span id="__span-61-7"><a id="__codelineno-61-7" name="__codelineno-61-7" href="#__codelineno-61-7"></a>
+</span><span id="__span-61-8"><a id="__codelineno-61-8" name="__codelineno-61-8" href="#__codelineno-61-8"></a><span class="kd">let</span><span class="w"> </span><span class="n">config</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Config</span><span class="p">::</span><span class="n">load</span><span class="p">(</span><span class="s">&quot;config.yaml&quot;</span><span class="p">)</span><span class="o">?</span><span class="p">;</span>
+</span><span id="__span-61-9"><a id="__codelineno-61-9" name="__codelineno-61-9" href="#__codelineno-61-9"></a><span class="kd">let</span><span class="w"> </span><span class="n">data</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">config</span><span class="p">.</span><span class="n">get</span><span class="p">(</span><span class="s">&quot;secure_api.data&quot;</span><span class="p">)</span><span class="o">?</span><span class="p">;</span>
+</span></code></pre></div>
+</div>
+</div>
+</div>
+<h4 id="ca-bundle-from-file-resolver">CA Bundle from File Resolver<a class="headerlink" href="#ca-bundle-from-file-resolver" title="Permanent link">&para;</a></h4>
+<p>You can also load CA bundles using the file resolver with <code>parse=text</code>:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-62-1"><a id="__codelineno-62-1" name="__codelineno-62-1" href="#__codelineno-62-1"></a><span class="c1"># config.yaml</span>
+</span><span id="__span-62-2"><a id="__codelineno-62-2" name="__codelineno-62-2" href="#__codelineno-62-2"></a><span class="nt">internal_api</span><span class="p">:</span>
+</span><span id="__span-62-3"><a id="__codelineno-62-3" name="__codelineno-62-3" href="#__codelineno-62-3"></a><span class="w">  </span><span class="nt">data</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${https:internal.corp.com/config,ca_bundle=${file:./certs/ca-bundle.pem,parse=text}}</span>
+</span></code></pre></div>
+<p>This reads the CA bundle file and passes its PEM content directly to the HTTPS resolver.</p>
+<h4 id="p12pfx-binary-certificates-python">P12/PFX Binary Certificates (Python)<a class="headerlink" href="#p12pfx-binary-certificates-python" title="Permanent link">&para;</a></h4>
+<p>For P12/PFX certificates (which contain both certificate and key), use <code>parse=binary</code>:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-63-1"><a id="__codelineno-63-1" name="__codelineno-63-1" href="#__codelineno-63-1"></a><span class="c1"># config.yaml</span>
+</span><span id="__span-63-2"><a id="__codelineno-63-2" name="__codelineno-63-2" href="#__codelineno-63-2"></a><span class="nt">secure_data</span><span class="p">:</span>
+</span><span id="__span-63-3"><a id="__codelineno-63-3" name="__codelineno-63-3" href="#__codelineno-63-3"></a><span class="w">  </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${https:secure.example.com/data,client_cert=${file:./certs/identity.p12,parse=binary},key_password=${env:P12_PASSWORD}}</span>
+</span></code></pre></div>
+<div class="tabbed-set tabbed-alternate" data-tabs="17:1"><input checked="checked" id="python_16" name="__tabbed_17" type="radio" /><div class="tabbed-labels"><label for="python_16">Python</label></div>
+<div class="tabbed-content">
+<div class="tabbed-block">
+<div class="language-python highlight"><pre><span></span><code><span id="__span-64-1"><a id="__codelineno-64-1" name="__codelineno-64-1" href="#__codelineno-64-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+</span><span id="__span-64-2"><a id="__codelineno-64-2" name="__codelineno-64-2" href="#__codelineno-64-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">holoconf</span><span class="w"> </span><span class="kn">import</span> <span class="n">Config</span>
+</span><span id="__span-64-3"><a id="__codelineno-64-3" name="__codelineno-64-3" href="#__codelineno-64-3"></a>
+</span><span id="__span-64-4"><a id="__codelineno-64-4" name="__codelineno-64-4" href="#__codelineno-64-4"></a><span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s2">&quot;P12_PASSWORD&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;secret&quot;</span>
+</span><span id="__span-64-5"><a id="__codelineno-64-5" name="__codelineno-64-5" href="#__codelineno-64-5"></a>
+</span><span id="__span-64-6"><a id="__codelineno-64-6" name="__codelineno-64-6" href="#__codelineno-64-6"></a><span class="n">config</span> <span class="o">=</span> <span class="n">Config</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="s2">&quot;config.yaml&quot;</span><span class="p">,</span> <span class="n">allow_http</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</span><span id="__span-64-7"><a id="__codelineno-64-7" name="__codelineno-64-7" href="#__codelineno-64-7"></a><span class="n">value</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">secure_data</span><span class="o">.</span><span class="n">value</span>  <span class="c1"># Uses P12 certificate</span>
+</span></code></pre></div>
+</div>
+</div>
+</div>
+<p><strong>Auto-Detection</strong>: HoloConf automatically detects whether you're providing:
+- A <strong>file path</strong> (string without <code>-----BEGIN</code> marker)
+- <strong>PEM content</strong> (string containing <code>-----BEGIN CERTIFICATE-----</code> or <code>-----BEGIN PRIVATE KEY-----</code>)
+- <strong>P12 binary</strong> (bytes type in Python, detected by <code>.p12</code>/<code>.pfx</code> extension for paths)</p>
+<p>This means you can mix and match:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-65-1"><a id="__codelineno-65-1" name="__codelineno-65-1" href="#__codelineno-65-1"></a><span class="c1"># Mixed mode: cert from environment, key from file path</span>
+</span><span id="__span-65-2"><a id="__codelineno-65-2" name="__codelineno-65-2" href="#__codelineno-65-2"></a><span class="nt">api_config</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${https:api.example.com/config,client_cert=${env:CERT_PEM},client_key=/etc/ssl/private/key.pem}</span>
+</span></code></pre></div>
+<h3 id="authentication-headers">Authentication Headers<a class="headerlink" href="#authentication-headers" title="Permanent link">&para;</a></h3>
+<p>Some configuration endpoints require authentication. Add custom headers:</p>
+<div class="tabbed-set tabbed-alternate" data-tabs="18:3"><input checked="checked" id="python_17" name="__tabbed_18" type="radio" /><input id="rust_14" name="__tabbed_18" type="radio" /><input id="cli_13" name="__tabbed_18" type="radio" /><div class="tabbed-labels"><label for="python_17">Python</label><label for="rust_14">Rust</label><label for="cli_13">CLI</label></div>
+<div class="tabbed-content">
+<div class="tabbed-block">
+<div class="language-python highlight"><pre><span></span><code><span id="__span-66-1"><a id="__codelineno-66-1" name="__codelineno-66-1" href="#__codelineno-66-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">holoconf</span><span class="w"> </span><span class="kn">import</span> <span class="n">Config</span>
+</span><span id="__span-66-2"><a id="__codelineno-66-2" name="__codelineno-66-2" href="#__codelineno-66-2"></a>
+</span><span id="__span-66-3"><a id="__codelineno-66-3" name="__codelineno-66-3" href="#__codelineno-66-3"></a><span class="n">config</span> <span class="o">=</span> <span class="n">Config</span><span class="o">.</span><span class="n">load</span><span class="p">(</span>
+</span><span id="__span-66-4"><a id="__codelineno-66-4" name="__codelineno-66-4" href="#__codelineno-66-4"></a>    <span class="s2">&quot;config.yaml&quot;</span><span class="p">,</span>
+</span><span id="__span-66-5"><a id="__codelineno-66-5" name="__codelineno-66-5" href="#__codelineno-66-5"></a>    <span class="n">allow_http</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+</span><span id="__span-66-6"><a id="__codelineno-66-6" name="__codelineno-66-6" href="#__codelineno-66-6"></a>    <span class="n">http_headers</span><span class="o">=</span><span class="p">{</span>
+</span><span id="__span-66-7"><a id="__codelineno-66-7" name="__codelineno-66-7" href="#__codelineno-66-7"></a>        <span class="s2">&quot;Authorization&quot;</span><span class="p">:</span> <span class="s2">&quot;Bearer YOUR_TOKEN_HERE&quot;</span><span class="p">,</span>
+</span><span id="__span-66-8"><a id="__codelineno-66-8" name="__codelineno-66-8" href="#__codelineno-66-8"></a>        <span class="s2">&quot;X-Custom-Header&quot;</span><span class="p">:</span> <span class="s2">&quot;value&quot;</span>
+</span><span id="__span-66-9"><a id="__codelineno-66-9" name="__codelineno-66-9" href="#__codelineno-66-9"></a>    <span class="p">}</span>
+</span><span id="__span-66-10"><a id="__codelineno-66-10" name="__codelineno-66-10" href="#__codelineno-66-10"></a><span class="p">)</span>
+</span><span id="__span-66-11"><a id="__codelineno-66-11" name="__codelineno-66-11" href="#__codelineno-66-11"></a>
+</span><span id="__span-66-12"><a id="__codelineno-66-12" name="__codelineno-66-12" href="#__codelineno-66-12"></a><span class="n">data</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">data</span>  <span class="c1"># Includes auth headers in request</span>
+</span></code></pre></div>
+</div>
+<div class="tabbed-block">
+<div class="language-rust highlight"><pre><span></span><code><span id="__span-67-1"><a id="__codelineno-67-1" name="__codelineno-67-1" href="#__codelineno-67-1"></a><span class="k">use</span><span class="w"> </span><span class="n">holoconf</span><span class="p">::{</span><span class="n">Config</span><span class="p">,</span><span class="w"> </span><span class="n">ConfigOptions</span><span class="p">};</span>
+</span><span id="__span-67-2"><a id="__codelineno-67-2" name="__codelineno-67-2" href="#__codelineno-67-2"></a><span class="k">use</span><span class="w"> </span><span class="n">std</span><span class="p">::</span><span class="n">collections</span><span class="p">::</span><span class="n">HashMap</span><span class="p">;</span>
+</span><span id="__span-67-3"><a id="__codelineno-67-3" name="__codelineno-67-3" href="#__codelineno-67-3"></a>
+</span><span id="__span-67-4"><a id="__codelineno-67-4" name="__codelineno-67-4" href="#__codelineno-67-4"></a><span class="kd">let</span><span class="w"> </span><span class="k">mut</span><span class="w"> </span><span class="n">headers</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">HashMap</span><span class="p">::</span><span class="n">new</span><span class="p">();</span>
+</span><span id="__span-67-5"><a id="__codelineno-67-5" name="__codelineno-67-5" href="#__codelineno-67-5"></a><span class="n">headers</span><span class="p">.</span><span class="n">insert</span><span class="p">(</span><span class="s">&quot;Authorization&quot;</span><span class="p">.</span><span class="n">to_string</span><span class="p">(),</span><span class="w"> </span><span class="s">&quot;Bearer YOUR_TOKEN_HERE&quot;</span><span class="p">.</span><span class="n">to_string</span><span class="p">());</span>
+</span><span id="__span-67-6"><a id="__codelineno-67-6" name="__codelineno-67-6" href="#__codelineno-67-6"></a>
+</span><span id="__span-67-7"><a id="__codelineno-67-7" name="__codelineno-67-7" href="#__codelineno-67-7"></a><span class="kd">let</span><span class="w"> </span><span class="n">options</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ConfigOptions</span><span class="p">::</span><span class="n">default</span><span class="p">()</span>
+</span><span id="__span-67-8"><a id="__codelineno-67-8" name="__codelineno-67-8" href="#__codelineno-67-8"></a><span class="w">    </span><span class="p">.</span><span class="n">allow_http</span><span class="p">(</span><span class="kc">true</span><span class="p">)</span>
+</span><span id="__span-67-9"><a id="__codelineno-67-9" name="__codelineno-67-9" href="#__codelineno-67-9"></a><span class="w">    </span><span class="p">.</span><span class="n">http_headers</span><span class="p">(</span><span class="n">headers</span><span class="p">);</span>
+</span><span id="__span-67-10"><a id="__codelineno-67-10" name="__codelineno-67-10" href="#__codelineno-67-10"></a>
+</span><span id="__span-67-11"><a id="__codelineno-67-11" name="__codelineno-67-11" href="#__codelineno-67-11"></a><span class="kd">let</span><span class="w"> </span><span class="n">config</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Config</span><span class="p">::</span><span class="n">load_with_options</span><span class="p">(</span><span class="s">&quot;config.yaml&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">options</span><span class="p">)</span><span class="o">?</span><span class="p">;</span>
+</span></code></pre></div>
+</div>
+<div class="tabbed-block">
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-68-1"><a id="__codelineno-68-1" name="__codelineno-68-1" href="#__codelineno-68-1"></a><span class="c1"># CLI doesn&#39;t support custom headers - use environment variables in the URL instead</span>
+</span><span id="__span-68-2"><a id="__codelineno-68-2" name="__codelineno-68-2" href="#__codelineno-68-2"></a>$<span class="w"> </span>holoconf<span class="w"> </span>get<span class="w"> </span>config.yaml<span class="w"> </span>data<span class="w"> </span>--allow-http
 </span></code></pre></div>
 </div>
 </div>
@@ -3166,12 +3349,12 @@
 <div class="admonition tip">
 <p class="admonition-title">Caching HTTP Responses</p>
 <p>HTTP values are fetched every time you access them. For frequently accessed values:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-62-1"><a id="__codelineno-62-1" name="__codelineno-62-1" href="#__codelineno-62-1"></a><span class="c1"># Fetch once and cache</span>
-</span><span id="__span-62-2"><a id="__codelineno-62-2" name="__codelineno-62-2" href="#__codelineno-62-2"></a><span class="n">flags</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">feature_flags</span>
-</span><span id="__span-62-3"><a id="__codelineno-62-3" name="__codelineno-62-3" href="#__codelineno-62-3"></a>
-</span><span id="__span-62-4"><a id="__codelineno-62-4" name="__codelineno-62-4" href="#__codelineno-62-4"></a><span class="c1"># Use cached value</span>
-</span><span id="__span-62-5"><a id="__codelineno-62-5" name="__codelineno-62-5" href="#__codelineno-62-5"></a><span class="k">if</span> <span class="n">flags</span><span class="p">[</span><span class="s1">&#39;feature_a&#39;</span><span class="p">]:</span>
-</span><span id="__span-62-6"><a id="__codelineno-62-6" name="__codelineno-62-6" href="#__codelineno-62-6"></a>    <span class="c1"># ...</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-69-1"><a id="__codelineno-69-1" name="__codelineno-69-1" href="#__codelineno-69-1"></a><span class="c1"># Fetch once and cache</span>
+</span><span id="__span-69-2"><a id="__codelineno-69-2" name="__codelineno-69-2" href="#__codelineno-69-2"></a><span class="n">flags</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">feature_flags</span>
+</span><span id="__span-69-3"><a id="__codelineno-69-3" name="__codelineno-69-3" href="#__codelineno-69-3"></a>
+</span><span id="__span-69-4"><a id="__codelineno-69-4" name="__codelineno-69-4" href="#__codelineno-69-4"></a><span class="c1"># Use cached value</span>
+</span><span id="__span-69-5"><a id="__codelineno-69-5" name="__codelineno-69-5" href="#__codelineno-69-5"></a><span class="k">if</span> <span class="n">flags</span><span class="p">[</span><span class="s1">&#39;feature_a&#39;</span><span class="p">]:</span>
+</span><span id="__span-69-6"><a id="__codelineno-69-6" name="__codelineno-69-6" href="#__codelineno-69-6"></a>    <span class="c1"># ...</span>
 </span></code></pre></div>
 <p>This avoids repeated network requests.</p>
 </div>

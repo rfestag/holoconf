@@ -3104,6 +3104,14 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <li><code>${file:/absolute/path}</code> - Absolute path (minimal form)</li>
 <li>Remote file URIs (<code>file://hostname/path</code>) are rejected with clear error</li>
 <li>Plain paths continue to work as before</li>
+<li><strong>Certificate Variables for HTTPS</strong>: HTTPS resolver now accepts certificate/key content from variables, not just file paths (#39)</li>
+<li>Pass PEM certificates directly from environment variables or other resolvers</li>
+<li>Support for P12/PFX binary certificates via <code>parse=binary</code> from file resolver</li>
+<li>Auto-detection: <code>-----BEGIN</code> marker = PEM content, otherwise = file path</li>
+<li>P12 binary content auto-detected when passed as bytes</li>
+<li>Fully backwards compatible - existing file paths continue to work</li>
+<li>Example: <code>${https:api.com/config,client_cert=${env:CERT_PEM},client_key=${env:KEY_PEM}}</code></li>
+<li>Example: <code>${https:api.com/config,client_cert=${file:./id.p12,parse=binary}}</code></li>
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
