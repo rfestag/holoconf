@@ -9,6 +9,10 @@ use std::sync::{Arc, OnceLock, RwLock};
 use crate::error::{Error, Result};
 use crate::value::Value;
 
+// PEM format constants
+const PEM_BEGIN_MARKER: &str = "-----BEGIN";
+const PEM_BEGIN_ENCRYPTED_KEY: &str = "-----BEGIN ENCRYPTED PRIVATE KEY-----";
+
 /// Certificate or key input - can be text (PEM content or file path) or binary (P12/PFX bytes)
 #[derive(Clone, Debug)]
 pub enum CertInput {
@@ -21,7 +25,7 @@ pub enum CertInput {
 impl CertInput {
     /// Check if this looks like PEM content (has -----BEGIN marker)
     pub fn is_pem_content(&self) -> bool {
-        matches!(self, CertInput::Text(s) if s.contains("-----BEGIN"))
+        matches!(self, CertInput::Text(s) if s.contains(PEM_BEGIN_MARKER))
     }
 
     /// Check if this looks like a P12/PFX file path (by extension)
@@ -1083,21 +1087,27 @@ fn load_certs(input: &CertInput) -> Result<Vec<ureq::tls::Certificate<'static>>>
             ))
         }
         CertInput::Text(text) => {
-            if text.contains("-----BEGIN") {
-                // Parse as PEM content directly
-                log::trace!("Loading certificates from PEM content (detected by -----BEGIN marker)");
-                parse_pem_certs(text.as_bytes(), "PEM content")
-            } else {
-                // Read from file path
+            // Try as file path first
+            let path = std::path::Path::new(text);
+            if path.exists() {
                 log::trace!("Loading certificates from file: {}", text);
-                let path = std::path::Path::new(text);
                 let bytes = std::fs::read(path).map_err(|e| {
+                    // Sanitize path for error message (could contain PEM content if detection fails)
+                    let display_path = if text.len() < 256 && !text.contains('\n') {
+                        text
+                    } else {
+                        "[PEM content or long path]"
+                    };
                     Error::pem_load_error(
-                        text,
+                        display_path,
                         format!("Failed to read certificate file: {}", e),
                     )
                 })?;
                 parse_pem_certs(&bytes, text)
+            } else {
+                // Fallback to parsing as PEM content
+                log::trace!("Path does not exist, attempting to parse as PEM content");
+                parse_pem_certs(text.as_bytes(), "PEM content")
             }
         }
     }
@@ -1113,7 +1123,7 @@ fn parse_pem_private_key(
     use pkcs8::der::Decode;
 
     // Check if this is an encrypted PKCS#8 key
-    if pem_content.contains("-----BEGIN ENCRYPTED PRIVATE KEY-----") {
+    if pem_content.contains(PEM_BEGIN_ENCRYPTED_KEY) {
         let pwd = password.ok_or_else(|| {
             Error::tls_config_error(format!(
                 "Password required for encrypted private key from: {}",
@@ -1164,20 +1174,27 @@ fn load_private_key(
             ))
         }
         CertInput::Text(text) => {
-            if text.contains("-----BEGIN") {
-                // Parse as PEM content
-                log::trace!("Loading private key from PEM content (detected by -----BEGIN marker)");
-                parse_pem_private_key(text, password, "PEM content")
-            } else {
-                // Read from file path
+            // Try as file path first
+            let path = std::path::Path::new(text);
+            if path.exists() {
                 log::trace!("Loading private key from file: {}", text);
-                let pem_content = std::fs::read_to_string(text).map_err(|e| {
+                let pem_content = std::fs::read_to_string(path).map_err(|e| {
+                    // Sanitize path for error message
+                    let display_path = if text.len() < 256 && !text.contains('\n') {
+                        text
+                    } else {
+                        "[PEM content or long path]"
+                    };
                     Error::pem_load_error(
-                        text,
+                        display_path,
                         format!("Failed to read key file: {}", e),
                     )
                 })?;
                 parse_pem_private_key(&pem_content, password, text)
+            } else {
+                // Fallback to parsing as PEM content
+                log::trace!("Path does not exist, attempting to parse as PEM content");
+                parse_pem_private_key(text, password, "PEM content")
             }
         }
     }
@@ -1236,6 +1253,14 @@ fn parse_p12_identity(
     Vec<ureq::tls::Certificate<'static>>,
     ureq::tls::PrivateKey<'static>,
 )> {
+    // Warn if using empty password (valid but insecure)
+    if password.is_empty() {
+        log::warn!(
+            "Loading P12 file without password from: {} - ensure file is properly protected",
+            source
+        );
+    }
+
     let keystore = p12_keystore::KeyStore::from_pkcs12(p12_data, password)
         .map_err(|e| Error::p12_load_error(source, e.to_string()))?;
 
@@ -1284,6 +1309,7 @@ fn load_client_identity(
         // P12 binary content
         CertInput::Binary(bytes) => {
             log::trace!("Loading client identity from P12 binary content");
+            // P12 files may have empty passwords - this is valid (warning logged in parse_p12_identity)
             let pwd = password.unwrap_or("");
             parse_p12_identity(bytes, pwd, "P12 binary content")
         }
@@ -1296,6 +1322,7 @@ fn load_client_identity(
                 let bytes = std::fs::read(text).map_err(|e| {
                     Error::p12_load_error(text, format!("Failed to read P12 file: {}", e))
                 })?;
+                // P12 files may have empty passwords - this is valid (warning logged in parse_p12_identity)
                 let pwd = password.unwrap_or("");
                 return parse_p12_identity(&bytes, pwd, text);
             }
