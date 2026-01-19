@@ -77,14 +77,16 @@ Now let's load and read this configuration:
     # Load from file
     config = Config.load("config.yaml")
 
-    # Access values using dot notation (recommended)
-    app_name = config.app.name
-    db_host = config.database.host
+    # Access values - Python supports three ways:
+    app_name = config.app.name                  # Dot notation (recommended)
+    db_host = config["database"]["host"]        # Dict-like access
+    db_port = config.get("database.port")       # get() method
 
+    # All three work! We'll use dot notation throughout this guide.
     print(f"App: {app_name}")
-    print(f"Database: {db_host}")
+    print(f"Database: {db_host}:{db_port}")
     # App: my-application
-    # Database: localhost
+    # Database: localhost:5432
     ```
 
 === "Rust"
@@ -96,14 +98,15 @@ Now let's load and read this configuration:
         // Load from file
         let config = Config::load("config.yaml")?;
 
-        // Access values using dot notation
+        // Access values with get() - supports type conversion
         let app_name: String = config.get("app.name")?;
         let db_host: String = config.get("database.host")?;
+        let db_port: i64 = config.get("database.port")?;
 
         println!("App: {}", app_name);
-        println!("Database: {}", db_host);
+        println!("Database: {}:{}", db_host, db_port);
         // App: my-application
-        // Database: localhost
+        // Database: localhost:5432
 
         Ok(())
     }
@@ -112,41 +115,23 @@ Now let's load and read this configuration:
 === "CLI"
 
     ```bash
-    # Get a specific value
+    # Get specific values with dot notation
     $ holoconf get config.yaml app.name
     my-application
 
-    # Get database host
     $ holoconf get config.yaml database.host
     localhost
+
+    # Or dump the entire config
+    $ holoconf dump config.yaml
+    app:
+      name: my-application
+    database:
+      host: localhost
+      port: 5432
     ```
 
 This works, but the configuration is completely static. Let's make it dynamic!
-
-### Three Ways to Access Values
-
-By the way, Python supports three different ways to access values. Here they are for reference:
-
-=== "Python"
-
-    ```python
-    from holoconf import Config
-
-    config = Config.load("config.yaml")
-
-    # Dot notation (recommended - most Pythonic)
-    host = config.database.host
-
-    # Dict-like access (alternative)
-    host = config["database"]["host"]
-
-    # Explicit get() method (alternative)
-    host = config.get("database.host")
-
-    # All three return the same value!
-    ```
-
-We'll use dot notation throughout the guide because it's the most readable and Pythonic.
 
 ## Interpolation: Dynamic Values
 
