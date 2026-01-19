@@ -94,10 +94,10 @@ class Config:
             http_allowlist: List of URL patterns to allow (glob-style)
             http_proxy: Proxy URL (e.g., "http://proxy:8080" or "socks5://proxy:1080")
             http_proxy_from_env: Auto-detect proxy from HTTP_PROXY/HTTPS_PROXY env vars
-            http_ca_bundle: CA bundle (str file path or PEM content, or bytes P12/PFX) - replaces default roots
-            http_extra_ca_bundle: Extra CA bundle (str file path or PEM content, or bytes P12/PFX) - adds to default roots
-            http_client_cert: Client cert (str file path/PEM content or bytes P12/PFX) for mTLS
-            http_client_key: Client key (str file path or PEM content, or bytes P12/PFX, not needed for P12/PFX cert)
+            http_ca_bundle: CA bundle (str path/PEM or bytes P12) - replaces default roots
+            http_extra_ca_bundle: Extra CA bundle (str path/PEM or bytes P12) - adds to roots
+            http_client_cert: Client cert (str path/PEM or bytes P12) for mTLS
+            http_client_key: Client key (str path/PEM or bytes P12, not needed for P12)
             http_client_key_password: Password for encrypted key or P12/PFX file
 
         Returns:
@@ -141,10 +141,10 @@ class Config:
             http_allowlist: List of URL patterns to allow (glob-style)
             http_proxy: Proxy URL (e.g., "http://proxy:8080" or "socks5://proxy:1080")
             http_proxy_from_env: Auto-detect proxy from HTTP_PROXY/HTTPS_PROXY env vars
-            http_ca_bundle: CA bundle (str file path or PEM content, or bytes P12/PFX) - replaces default roots
-            http_extra_ca_bundle: Extra CA bundle (str file path or PEM content, or bytes P12/PFX) - adds to default roots
-            http_client_cert: Client cert (str file path/PEM content or bytes P12/PFX) for mTLS
-            http_client_key: Client key (str file path or PEM content, or bytes P12/PFX, not needed for P12/PFX cert)
+            http_ca_bundle: CA bundle (str path/PEM or bytes P12) - replaces default roots
+            http_extra_ca_bundle: Extra CA bundle (str path/PEM or bytes P12) - adds to roots
+            http_client_cert: Client cert (str path/PEM or bytes P12) for mTLS
+            http_client_key: Client key (str path/PEM or bytes P12, not needed for P12)
             http_client_key_password: Password for encrypted key or P12/PFX file
 
         Returns:
@@ -203,10 +203,10 @@ class Config:
             http_allowlist: List of URL patterns to allow (glob-style)
             http_proxy: Proxy URL (e.g., "http://proxy:8080" or "socks5://proxy:1080")
             http_proxy_from_env: Auto-detect proxy from HTTP_PROXY/HTTPS_PROXY env vars
-            http_ca_bundle: CA bundle (str file path or PEM content, or bytes P12/PFX) - replaces default roots
-            http_extra_ca_bundle: Extra CA bundle (str file path or PEM content, or bytes P12/PFX) - adds to default roots
-            http_client_cert: Client cert (str file path/PEM content or bytes P12/PFX) for mTLS
-            http_client_key: Client key (str file path or PEM content, or bytes P12/PFX, not needed for P12/PFX cert)
+            http_ca_bundle: CA bundle (str path/PEM or bytes P12) - replaces default roots
+            http_extra_ca_bundle: Extra CA bundle (str path/PEM or bytes P12) - adds to roots
+            http_client_cert: Client cert (str path/PEM or bytes P12) for mTLS
+            http_client_key: Client key (str path/PEM or bytes P12, not needed for P12)
             http_client_key_password: Password for encrypted key or P12/PFX file
 
         Returns:
