@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-01-19
+
 ### Added
 - **HTTPS Resolver**: New `https` resolver that auto-prepends `https://` to URLs (#43)
   - Use `${https:example.com/config}` instead of `${http:https://example.com/config}`
