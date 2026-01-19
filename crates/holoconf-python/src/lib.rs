@@ -21,7 +21,7 @@ use std::sync::Arc;
 
 use holoconf_core::{
     error::ErrorKind,
-    resolver::{ResolvedValue as CoreResolvedValue, Resolver, ResolverContext},
+    resolver::{CertInput, ResolvedValue as CoreResolvedValue, Resolver, ResolverContext},
     Config as CoreConfig, ConfigOptions, Error as CoreError, Schema as CoreSchema,
     Value as CoreValue,
 };
@@ -84,6 +84,18 @@ fn to_py_err(err: CoreError) -> PyErr {
         ErrorKind::Io => HoloconfError::new_err(message),
         ErrorKind::Internal => HoloconfError::new_err(message),
     }
+}
+
+/// Convert Python str or bytes to CertInput
+fn py_to_cert_input(_py: Python<'_>, obj: &Bound<'_, PyAny>) -> PyResult<CertInput> {
+    // Try bytes first (for P12/PFX binary)
+    if let Ok(bytes) = obj.downcast::<PyBytes>() {
+        return Ok(CertInput::Binary(bytes.as_bytes().to_vec()));
+    }
+
+    // Otherwise, extract as string (for PEM content or file path)
+    let text: String = obj.extract()?;
+    Ok(CertInput::Text(text))
 }
 
 /// Convert a CoreValue to a Python object
@@ -330,10 +342,10 @@ impl PyConfig {
     ///     http_allowlist: List of URL patterns to allow (glob-style)
     ///     http_proxy: Proxy URL (e.g., "http://proxy:8080" or "socks5://proxy:1080")
     ///     http_proxy_from_env: Auto-detect proxy from HTTP_PROXY/HTTPS_PROXY env vars
-    ///     http_ca_bundle: Path to CA bundle PEM file (replaces default roots)
-    ///     http_extra_ca_bundle: Path to extra CA bundle PEM file (adds to default roots)
-    ///     http_client_cert: Path to client certificate (PEM or P12/PFX) for mTLS
-    ///     http_client_key: Path to client private key PEM (not needed for P12/PFX)
+    ///     http_ca_bundle: CA bundle (str file path or PEM content) - replaces default roots
+    ///     http_extra_ca_bundle: Extra CA bundle (str file path or PEM content) - adds to default roots
+    ///     http_client_cert: Client cert (str file path/PEM content or bytes P12/PFX) for mTLS
+    ///     http_client_key: Client key (str file path or PEM content, not needed for P12/PFX)
     ///     http_client_key_password: Password for encrypted key or P12/PFX file
     ///
     ///     NOTE: http_insecure removed for security. Use insecure=true kwarg on individual
@@ -355,6 +367,7 @@ impl PyConfig {
     ))]
     #[allow(clippy::too_many_arguments)]
     fn loads(
+        py: Python<'_>,
         yaml: &str,
         base_path: Option<&str>,
         file_roots: Option<Vec<String>>,
@@ -362,10 +375,10 @@ impl PyConfig {
         http_allowlist: Option<Vec<String>>,
         http_proxy: Option<&str>,
         http_proxy_from_env: bool,
-        http_ca_bundle: Option<&str>,
-        http_extra_ca_bundle: Option<&str>,
-        http_client_cert: Option<&str>,
-        http_client_key: Option<&str>,
+        http_ca_bundle: Option<Bound<'_, PyAny>>,
+        http_extra_ca_bundle: Option<Bound<'_, PyAny>>,
+        http_client_cert: Option<Bound<'_, PyAny>>,
+        http_client_key: Option<Bound<'_, PyAny>>,
         http_client_key_password: Option<&str>,
     ) -> PyResult<Self> {
         let mut options = ConfigOptions::default();
@@ -385,10 +398,18 @@ impl PyConfig {
         options.http_allowlist = http_allowlist.unwrap_or_default();
         options.http_proxy = http_proxy.map(String::from);
         options.http_proxy_from_env = http_proxy_from_env;
-        options.http_ca_bundle = http_ca_bundle.map(std::path::PathBuf::from);
-        options.http_extra_ca_bundle = http_extra_ca_bundle.map(std::path::PathBuf::from);
-        options.http_client_cert = http_client_cert.map(std::path::PathBuf::from);
-        options.http_client_key = http_client_key.map(std::path::PathBuf::from);
+        options.http_ca_bundle = http_ca_bundle
+            .map(|obj| py_to_cert_input(py, &obj))
+            .transpose()?;
+        options.http_extra_ca_bundle = http_extra_ca_bundle
+            .map(|obj| py_to_cert_input(py, &obj))
+            .transpose()?;
+        options.http_client_cert = http_client_cert
+            .map(|obj| py_to_cert_input(py, &obj))
+            .transpose()?;
+        options.http_client_key = http_client_key
+            .map(|obj| py_to_cert_input(py, &obj))
+            .transpose()?;
         options.http_client_key_password = http_client_key_password.map(String::from);
         // http_insecure removed - use insecure=true kwarg on resolver calls
         let inner = CoreConfig::from_yaml_with_options(yaml, options).map_err(to_py_err)?;
@@ -410,10 +431,10 @@ impl PyConfig {
     ///     http_allowlist: List of URL patterns to allow (glob-style)
     ///     http_proxy: Proxy URL (e.g., "http://proxy:8080" or "socks5://proxy:1080")
     ///     http_proxy_from_env: Auto-detect proxy from HTTP_PROXY/HTTPS_PROXY env vars
-    ///     http_ca_bundle: Path to CA bundle PEM file (replaces default roots)
-    ///     http_extra_ca_bundle: Path to extra CA bundle PEM file (adds to default roots)
-    ///     http_client_cert: Path to client certificate (PEM or P12/PFX) for mTLS
-    ///     http_client_key: Path to client private key PEM (not needed for P12/PFX)
+    ///     http_ca_bundle: CA bundle (str file path or PEM content) - replaces default roots
+    ///     http_extra_ca_bundle: Extra CA bundle (str file path or PEM content) - adds to default roots
+    ///     http_client_cert: Client cert (str file path/PEM content or bytes P12/PFX) for mTLS
+    ///     http_client_key: Client key (str file path or PEM content, not needed for P12/PFX)
     ///     http_client_key_password: Password for encrypted key or P12/PFX file
     ///
     ///     NOTE: http_insecure removed for security. Use insecure=true kwarg on individual
@@ -442,6 +463,7 @@ impl PyConfig {
     ))]
     #[allow(clippy::too_many_arguments)]
     fn load(
+        py: Python<'_>,
         path: &str,
         schema: Option<&str>,
         file_roots: Option<Vec<String>>,
@@ -449,10 +471,10 @@ impl PyConfig {
         http_allowlist: Option<Vec<String>>,
         http_proxy: Option<&str>,
         http_proxy_from_env: bool,
-        http_ca_bundle: Option<&str>,
-        http_extra_ca_bundle: Option<&str>,
-        http_client_cert: Option<&str>,
-        http_client_key: Option<&str>,
+        http_ca_bundle: Option<Bound<'_, PyAny>>,
+        http_extra_ca_bundle: Option<Bound<'_, PyAny>>,
+        http_client_cert: Option<Bound<'_, PyAny>>,
+        http_client_key: Option<Bound<'_, PyAny>>,
         http_client_key_password: Option<&str>,
     ) -> PyResult<Self> {
         let mut options = ConfigOptions::default();
@@ -466,10 +488,18 @@ impl PyConfig {
         options.http_allowlist = http_allowlist.unwrap_or_default();
         options.http_proxy = http_proxy.map(String::from);
         options.http_proxy_from_env = http_proxy_from_env;
-        options.http_ca_bundle = http_ca_bundle.map(std::path::PathBuf::from);
-        options.http_extra_ca_bundle = http_extra_ca_bundle.map(std::path::PathBuf::from);
-        options.http_client_cert = http_client_cert.map(std::path::PathBuf::from);
-        options.http_client_key = http_client_key.map(std::path::PathBuf::from);
+        options.http_ca_bundle = http_ca_bundle
+            .map(|obj| py_to_cert_input(py, &obj))
+            .transpose()?;
+        options.http_extra_ca_bundle = http_extra_ca_bundle
+            .map(|obj| py_to_cert_input(py, &obj))
+            .transpose()?;
+        options.http_client_cert = http_client_cert
+            .map(|obj| py_to_cert_input(py, &obj))
+            .transpose()?;
+        options.http_client_key = http_client_key
+            .map(|obj| py_to_cert_input(py, &obj))
+            .transpose()?;
         options.http_client_key_password = http_client_key_password.map(String::from);
         // http_insecure removed - use insecure=true kwarg on resolver calls
 
@@ -497,10 +527,10 @@ impl PyConfig {
     ///     http_allowlist: List of URL patterns to allow (glob-style)
     ///     http_proxy: Proxy URL (e.g., "http://proxy:8080" or "socks5://proxy:1080")
     ///     http_proxy_from_env: Auto-detect proxy from HTTP_PROXY/HTTPS_PROXY env vars
-    ///     http_ca_bundle: Path to CA bundle PEM file (replaces default roots)
-    ///     http_extra_ca_bundle: Path to extra CA bundle PEM file (adds to default roots)
-    ///     http_client_cert: Path to client certificate (PEM or P12/PFX) for mTLS
-    ///     http_client_key: Path to client private key PEM (not needed for P12/PFX)
+    ///     http_ca_bundle: CA bundle (str file path or PEM content) - replaces default roots
+    ///     http_extra_ca_bundle: Extra CA bundle (str file path or PEM content) - adds to default roots
+    ///     http_client_cert: Client cert (str file path/PEM content or bytes P12/PFX) for mTLS
+    ///     http_client_key: Client key (str file path or PEM content, not needed for P12/PFX)
     ///     http_client_key_password: Password for encrypted key or P12/PFX file
     ///
     ///     NOTE: http_insecure removed for security. Use insecure=true kwarg on individual
@@ -522,6 +552,7 @@ impl PyConfig {
     ))]
     #[allow(clippy::too_many_arguments)]
     fn required(
+        py: Python<'_>,
         path: &str,
         schema: Option<&str>,
         file_roots: Option<Vec<String>>,
@@ -529,13 +560,14 @@ impl PyConfig {
         http_allowlist: Option<Vec<String>>,
         http_proxy: Option<&str>,
         http_proxy_from_env: bool,
-        http_ca_bundle: Option<&str>,
-        http_extra_ca_bundle: Option<&str>,
-        http_client_cert: Option<&str>,
-        http_client_key: Option<&str>,
+        http_ca_bundle: Option<Bound<'_, PyAny>>,
+        http_extra_ca_bundle: Option<Bound<'_, PyAny>>,
+        http_client_cert: Option<Bound<'_, PyAny>>,
+        http_client_key: Option<Bound<'_, PyAny>>,
         http_client_key_password: Option<&str>,
     ) -> PyResult<Self> {
         Self::load(
+            py,
             path,
             schema,
             file_roots,

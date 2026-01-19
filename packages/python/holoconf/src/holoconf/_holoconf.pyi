@@ -73,12 +73,11 @@ class Config:
         http_allowlist: list[str] | None = None,
         http_proxy: str | None = None,
         http_proxy_from_env: bool = False,
-        http_ca_bundle: str | None = None,
-        http_extra_ca_bundle: str | None = None,
-        http_client_cert: str | None = None,
-        http_client_key: str | None = None,
+        http_ca_bundle: str | bytes | None = None,
+        http_extra_ca_bundle: str | bytes | None = None,
+        http_client_cert: str | bytes | None = None,
+        http_client_key: str | bytes | None = None,
         http_client_key_password: str | None = None,
-        http_insecure: bool = False,
     ) -> Config:
         """Load configuration from a YAML file (required - errors if missing).
 
@@ -95,12 +94,11 @@ class Config:
             http_allowlist: List of URL patterns to allow (glob-style)
             http_proxy: Proxy URL (e.g., "http://proxy:8080" or "socks5://proxy:1080")
             http_proxy_from_env: Auto-detect proxy from HTTP_PROXY/HTTPS_PROXY env vars
-            http_ca_bundle: Path to CA bundle PEM file (replaces default roots)
-            http_extra_ca_bundle: Path to extra CA bundle PEM file (adds to default roots)
-            http_client_cert: Path to client certificate (PEM or P12/PFX) for mTLS
-            http_client_key: Path to client private key PEM (not needed for P12/PFX)
+            http_ca_bundle: CA bundle (str path/PEM or bytes P12) - replaces default roots
+            http_extra_ca_bundle: Extra CA bundle (str path/PEM or bytes P12) - adds to roots
+            http_client_cert: Client cert (str path/PEM or bytes P12) for mTLS
+            http_client_key: Client key (str path/PEM or bytes P12, not needed for P12)
             http_client_key_password: Password for encrypted key or P12/PFX file
-            http_insecure: DANGEROUS - Skip TLS certificate verification
 
         Returns:
             A new Config object
@@ -124,12 +122,11 @@ class Config:
         http_allowlist: list[str] | None = None,
         http_proxy: str | None = None,
         http_proxy_from_env: bool = False,
-        http_ca_bundle: str | None = None,
-        http_extra_ca_bundle: str | None = None,
-        http_client_cert: str | None = None,
-        http_client_key: str | None = None,
+        http_ca_bundle: str | bytes | None = None,
+        http_extra_ca_bundle: str | bytes | None = None,
+        http_client_cert: str | bytes | None = None,
+        http_client_key: str | bytes | None = None,
         http_client_key_password: str | None = None,
-        http_insecure: bool = False,
     ) -> Config:
         """Alias for `load()` - load a required config file.
 
@@ -144,12 +141,11 @@ class Config:
             http_allowlist: List of URL patterns to allow (glob-style)
             http_proxy: Proxy URL (e.g., "http://proxy:8080" or "socks5://proxy:1080")
             http_proxy_from_env: Auto-detect proxy from HTTP_PROXY/HTTPS_PROXY env vars
-            http_ca_bundle: Path to CA bundle PEM file (replaces default roots)
-            http_extra_ca_bundle: Path to extra CA bundle PEM file (adds to default roots)
-            http_client_cert: Path to client certificate (PEM or P12/PFX) for mTLS
-            http_client_key: Path to client private key PEM (not needed for P12/PFX)
+            http_ca_bundle: CA bundle (str path/PEM or bytes P12) - replaces default roots
+            http_extra_ca_bundle: Extra CA bundle (str path/PEM or bytes P12) - adds to roots
+            http_client_cert: Client cert (str path/PEM or bytes P12) for mTLS
+            http_client_key: Client key (str path/PEM or bytes P12, not needed for P12)
             http_client_key_password: Password for encrypted key or P12/PFX file
-            http_insecure: DANGEROUS - Skip TLS certificate verification
 
         Returns:
             A new Config object
@@ -190,12 +186,11 @@ class Config:
         http_allowlist: list[str] | None = None,
         http_proxy: str | None = None,
         http_proxy_from_env: bool = False,
-        http_ca_bundle: str | None = None,
-        http_extra_ca_bundle: str | None = None,
-        http_client_cert: str | None = None,
-        http_client_key: str | None = None,
+        http_ca_bundle: str | bytes | None = None,
+        http_extra_ca_bundle: str | bytes | None = None,
+        http_client_cert: str | bytes | None = None,
+        http_client_key: str | bytes | None = None,
         http_client_key_password: str | None = None,
-        http_insecure: bool = False,
     ) -> Config:
         """Load configuration from a YAML string.
 
@@ -208,12 +203,11 @@ class Config:
             http_allowlist: List of URL patterns to allow (glob-style)
             http_proxy: Proxy URL (e.g., "http://proxy:8080" or "socks5://proxy:1080")
             http_proxy_from_env: Auto-detect proxy from HTTP_PROXY/HTTPS_PROXY env vars
-            http_ca_bundle: Path to CA bundle PEM file (replaces default roots)
-            http_extra_ca_bundle: Path to extra CA bundle PEM file (adds to default roots)
-            http_client_cert: Path to client certificate (PEM or P12/PFX) for mTLS
-            http_client_key: Path to client private key PEM (not needed for P12/PFX)
+            http_ca_bundle: CA bundle (str path/PEM or bytes P12) - replaces default roots
+            http_extra_ca_bundle: Extra CA bundle (str path/PEM or bytes P12) - adds to roots
+            http_client_cert: Client cert (str path/PEM or bytes P12) for mTLS
+            http_client_key: Client key (str path/PEM or bytes P12, not needed for P12)
             http_client_key_password: Password for encrypted key or P12/PFX file
-            http_insecure: DANGEROUS - Skip TLS certificate verification
 
         Returns:
             A new Config object

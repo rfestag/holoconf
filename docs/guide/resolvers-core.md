@@ -744,6 +744,105 @@ This **replaces** the default CA bundle with your custom one. But what if you ne
 
 This **adds** your CA to the existing trust store, so you can fetch from both internal and external HTTPS endpoints.
 
+### Using Certificate Variables
+
+Instead of storing certificates as files, you can load them from environment variables or other resolvers. This is useful for:
+
+- Containerized environments where secrets are injected as environment variables
+- Secret management systems that provide certificates dynamically
+- CI/CD pipelines where certificates are stored in secure vaults
+
+#### PEM Certificates from Environment Variables
+
+Let's load client certificates for mTLS from environment variables:
+
+```yaml
+# config.yaml
+secure_api:
+  data: ${https:api.corp.com/config,client_cert=${env:CLIENT_CERT_PEM},client_key=${env:CLIENT_KEY_PEM}}
+```
+
+=== "Python"
+
+    ```python
+    import os
+    from holoconf import Config
+
+    # Set certificates in environment (in practice, these come from your secret management system)
+    os.environ["CLIENT_CERT_PEM"] = """-----BEGIN CERTIFICATE-----
+    MIICijCCAXICCQC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789
+    ...
+    -----END CERTIFICATE-----"""
+
+    os.environ["CLIENT_KEY_PEM"] = """-----BEGIN PRIVATE KEY-----
+    MIICdgIBADANBgkqhkiG9w0BAQEFAASCAmAwggJcAgEAAoGBAK1234567890
+    ...
+    -----END PRIVATE KEY-----"""
+
+    config = Config.load("config.yaml", allow_http=True)
+    data = config.secure_api.data  # Uses certificates from environment
+    ```
+
+=== "Rust"
+
+    ```rust
+    use holoconf::Config;
+    use std::env;
+
+    // Set certificates in environment
+    env::set_var("CLIENT_CERT_PEM", "-----BEGIN CERTIFICATE-----\n...");
+    env::set_var("CLIENT_KEY_PEM", "-----BEGIN PRIVATE KEY-----\n...");
+
+    let config = Config::load("config.yaml")?;
+    let data = config.get("secure_api.data")?;
+    ```
+
+#### CA Bundle from File Resolver
+
+You can also load CA bundles using the file resolver with `parse=text`:
+
+```yaml
+# config.yaml
+internal_api:
+  data: ${https:internal.corp.com/config,ca_bundle=${file:./certs/ca-bundle.pem,parse=text}}
+```
+
+This reads the CA bundle file and passes its PEM content directly to the HTTPS resolver.
+
+#### P12/PFX Binary Certificates (Python)
+
+For P12/PFX certificates (which contain both certificate and key), use `parse=binary`:
+
+```yaml
+# config.yaml
+secure_data:
+  value: ${https:secure.example.com/data,client_cert=${file:./certs/identity.p12,parse=binary},key_password=${env:P12_PASSWORD}}
+```
+
+=== "Python"
+
+    ```python
+    import os
+    from holoconf import Config
+
+    os.environ["P12_PASSWORD"] = "secret"
+
+    config = Config.load("config.yaml", allow_http=True)
+    value = config.secure_data.value  # Uses P12 certificate
+    ```
+
+**Auto-Detection**: HoloConf automatically detects whether you're providing:
+- A **file path** (string without `-----BEGIN` marker)
+- **PEM content** (string containing `-----BEGIN CERTIFICATE-----` or `-----BEGIN PRIVATE KEY-----`)
+- **P12 binary** (bytes type in Python, detected by `.p12`/`.pfx` extension for paths)
+
+This means you can mix and match:
+
+```yaml
+# Mixed mode: cert from environment, key from file path
+api_config: ${https:api.example.com/config,client_cert=${env:CERT_PEM},client_key=/etc/ssl/private/key.pem}
+```
+
 ### Authentication Headers
 
 Some configuration endpoints require authentication. Add custom headers:

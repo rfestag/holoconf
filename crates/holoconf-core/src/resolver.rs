@@ -9,6 +9,68 @@ use std::sync::{Arc, OnceLock, RwLock};
 use crate::error::{Error, Result};
 use crate::value::Value;
 
+// PEM format constants
+const PEM_BEGIN_MARKER: &str = "-----BEGIN";
+const PEM_BEGIN_ENCRYPTED_KEY: &str = "-----BEGIN ENCRYPTED PRIVATE KEY-----";
+
+/// Certificate or key input - can be text (PEM content or file path) or binary (P12/PFX bytes)
+#[derive(Clone, Debug)]
+pub enum CertInput {
+    /// PEM text content or file path to PEM/P12 file
+    Text(String),
+    /// Binary P12/PFX content
+    Binary(Vec<u8>),
+}
+
+impl CertInput {
+    /// Check if this looks like PEM content (has -----BEGIN marker)
+    pub fn is_pem_content(&self) -> bool {
+        matches!(self, CertInput::Text(s) if s.contains(PEM_BEGIN_MARKER))
+    }
+
+    /// Check if this looks like a P12/PFX file path (by extension)
+    pub fn is_p12_path(&self) -> bool {
+        matches!(self, CertInput::Text(s) if {
+            let lower = s.to_lowercase();
+            lower.ends_with(".p12") || lower.ends_with(".pfx")
+        })
+    }
+
+    /// Get the text content if this is a Text variant
+    pub fn as_text(&self) -> Option<&str> {
+        match self {
+            CertInput::Text(s) => Some(s),
+            CertInput::Binary(_) => None,
+        }
+    }
+
+    /// Get the binary content if this is a Binary variant
+    pub fn as_bytes(&self) -> Option<&[u8]> {
+        match self {
+            CertInput::Text(_) => None,
+            CertInput::Binary(b) => Some(b),
+        }
+    }
+}
+
+impl From<String> for CertInput {
+    fn from(s: String) -> Self {
+        CertInput::Text(s)
+    }
+}
+
+impl From<&str> for CertInput {
+    fn from(s: &str) -> Self {
+        CertInput::Text(s.to_string())
+    }
+}
+
+impl From<Vec<u8>> for CertInput {
+    fn from(b: Vec<u8>) -> Self {
+        CertInput::Binary(b)
+    }
+}
+
 // Global resolver registry for extension packages
 static GLOBAL_REGISTRY: OnceLock<RwLock<ResolverRegistry>> = OnceLock::new();
 
@@ -119,14 +181,14 @@ pub struct ResolverContext {
     pub http_proxy: Option<String>,
     /// Whether to auto-detect proxy from environment variables (HTTP_PROXY, HTTPS_PROXY, NO_PROXY)
     pub http_proxy_from_env: bool,
-    /// Path to CA bundle PEM file (replaces default webpki-roots)
-    pub http_ca_bundle: Option<std::path::PathBuf>,
-    /// Path to extra CA bundle PEM file (appends to webpki-roots)
-    pub http_extra_ca_bundle: Option<std::path::PathBuf>,
-    /// Path to client certificate PEM or P12/PFX file (for mTLS)
-    pub http_client_cert: Option<std::path::PathBuf>,
-    /// Path to client private key PEM file (for mTLS, not needed for P12/PFX)
-    pub http_client_key: Option<std::path::PathBuf>,
+    /// CA bundle (file path or PEM content) - replaces default webpki-roots
+    pub http_ca_bundle: Option<CertInput>,
+    /// Extra CA bundle (file path or PEM content) - appends to webpki-roots
+    pub http_extra_ca_bundle: Option<CertInput>,
+    /// Client certificate for mTLS (file path, PEM content, or P12/PFX binary)
+    pub http_client_cert: Option<CertInput>,
+    /// Client private key for mTLS (file path or PEM content, not needed for P12/PFX)
+    pub http_client_key: Option<CertInput>,
     /// Password for encrypted private key or P12/PFX file
     pub http_client_key_password: Option<String>,
     // NOTE: http_insecure removed - use insecure=true kwarg on each resolver call
@@ -177,27 +239,27 @@ impl ResolverContext {
         self
     }
 
-    /// Set CA bundle path (replaces webpki-roots)
-    pub fn with_http_ca_bundle(mut self, path: impl Into<std::path::PathBuf>) -> Self {
-        self.http_ca_bundle = Some(path.into());
+    /// Set CA bundle (file path or PEM content)
+    pub fn with_http_ca_bundle(mut self, input: impl Into<CertInput>) -> Self {
+        self.http_ca_bundle = Some(input.into());
         self
     }
 
-    /// Set extra CA bundle path (appends to webpki-roots)
-    pub fn with_http_extra_ca_bundle(mut self, path: impl Into<std::path::PathBuf>) -> Self {
-        self.http_extra_ca_bundle = Some(path.into());
+    /// Set extra CA bundle (file path or PEM content)
+    pub fn with_http_extra_ca_bundle(mut self, input: impl Into<CertInput>) -> Self {
+        self.http_extra_ca_bundle = Some(input.into());
         self
     }
 
-    /// Set client certificate path for mTLS
-    pub fn with_http_client_cert(mut self, path: impl Into<std::path::PathBuf>) -> Self {
-        self.http_client_cert = Some(path.into());
+    /// Set client certificate for mTLS (file path, PEM content, or P12/PFX binary)
+    pub fn with_http_client_cert(mut self, input: impl Into<CertInput>) -> Self {
+        self.http_client_cert = Some(input.into());
         self
     }
 
-    /// Set client private key path for mTLS
-    pub fn with_http_client_key(mut self, path: impl Into<std::path::PathBuf>) -> Self {
-        self.http_client_key = Some(path.into());
+    /// Set client private key for mTLS (file path or PEM content, not needed for P12/PFX)
+    pub fn with_http_client_key(mut self, input: impl Into<CertInput>) -> Self {
+        self.http_client_key = Some(input.into());
         self
     }
 
@@ -992,19 +1054,12 @@ fn url_matches_pattern(url: &str, pattern: &str) -> bool {
 // TLS/Proxy Configuration Helpers (HTTP feature)
 // =============================================================================
 
-/// Load certificates from a PEM file (returns owned static-lifetime certs)
+/// Parse PEM certificates from bytes
 #[cfg(feature = "http")]
-fn load_certs_from_pem(path: &std::path::Path) -> Result<Vec<ureq::tls::Certificate<'static>>> {
+fn parse_pem_certs(pem_bytes: &[u8], source: &str) -> Result<Vec<ureq::tls::Certificate<'static>>> {
     use ureq::tls::PemItem;
 
-    let pem_content = std::fs::read(path).map_err(|e| {
-        Error::pem_load_error(
-            path.display().to_string(),
-            format!("Failed to open file: {}", e),
-        )
-    })?;
-
-    let certs: Vec<_> = ureq::tls::parse_pem(&pem_content)
+    let certs: Vec<_> = ureq::tls::parse_pem(pem_bytes)
         .filter_map(|item| item.ok())
         .filter_map(|item| match item {
             PemItem::Certificate(cert) => Some(cert.to_owned()),
@@ -1014,60 +1069,77 @@ fn load_certs_from_pem(path: &std::path::Path) -> Result<Vec<ureq::tls::Certific
 
     if certs.is_empty() {
         return Err(Error::pem_load_error(
-            path.display().to_string(),
-            "No valid certificates found in PEM file",
+            source,
+            "No valid certificates found in PEM data",
         ));
     }
 
     Ok(certs)
 }
 
-/// Load a private key from a PEM file (handles unencrypted keys)
+/// Load certificates from CertInput (PEM content or file path)
 #[cfg(feature = "http")]
-fn load_private_key_from_pem(path: &std::path::Path) -> Result<ureq::tls::PrivateKey<'static>> {
-    let pem_content = std::fs::read(path).map_err(|e| {
-        Error::pem_load_error(
-            path.display().to_string(),
-            format!("Failed to open file: {}", e),
-        )
-    })?;
-
-    let key = ureq::tls::PrivateKey::from_pem(&pem_content).map_err(|e| {
-        Error::pem_load_error(
-            path.display().to_string(),
-            format!("Failed to parse key: {}", e),
-        )
-    })?;
-
-    Ok(key.to_owned())
+fn load_certs(input: &CertInput) -> Result<Vec<ureq::tls::Certificate<'static>>> {
+    match input {
+        CertInput::Binary(_) => {
+            Err(Error::tls_config_error(
+                "CA bundle must be PEM format, not binary. For P12 client certificates, use client_cert parameter."
+            ))
+        }
+        CertInput::Text(text) => {
+            // Try as file path first
+            let path = std::path::Path::new(text);
+            if path.exists() {
+                log::trace!("Loading certificates from file: {}", text);
+                let bytes = std::fs::read(path).map_err(|e| {
+                    // Sanitize path for error message (could contain PEM content if detection fails)
+                    let display_path = if text.len() < 256 && !text.contains('\n') {
+                        text
+                    } else {
+                        "[PEM content or long path]"
+                    };
+                    Error::pem_load_error(
+                        display_path,
+                        format!("Failed to read certificate file: {}", e),
+                    )
+                })?;
+                parse_pem_certs(&bytes, text)
+            } else {
+                // Fallback to parsing as PEM content
+                log::trace!("Path does not exist, attempting to parse as PEM content");
+                parse_pem_certs(text.as_bytes(), "PEM content")
+            }
+        }
+    }
 }
 
-/// Load an encrypted private key from a PEM file
+/// Parse a private key from PEM bytes (handles encrypted and unencrypted)
 #[cfg(feature = "http")]
-fn load_encrypted_private_key_from_pem(
-    path: &std::path::Path,
-    password: &str,
+fn parse_pem_private_key(
+    pem_content: &str,
+    password: Option<&str>,
+    source: &str,
 ) -> Result<ureq::tls::PrivateKey<'static>> {
     use pkcs8::der::Decode;
 
-    let pem_content = std::fs::read_to_string(path).map_err(|e| {
-        Error::pem_load_error(
-            path.display().to_string(),
-            format!("Failed to read file: {}", e),
-        )
-    })?;
-
     // Check if this is an encrypted PKCS#8 key
-    if pem_content.contains("-----BEGIN ENCRYPTED PRIVATE KEY-----") {
+    if pem_content.contains(PEM_BEGIN_ENCRYPTED_KEY) {
+        let pwd = password.ok_or_else(|| {
+            Error::tls_config_error(format!(
+                "Password required for encrypted private key from: {}",
+                source
+            ))
+        })?;
+
         // Extract the base64 content from PEM
-        let der_bytes = pem_to_der(&pem_content, "ENCRYPTED PRIVATE KEY")
-            .map_err(|e| Error::pem_load_error(path.display().to_string(), e))?;
+        let der_bytes = pem_to_der(pem_content, "ENCRYPTED PRIVATE KEY")
+            .map_err(|e| Error::pem_load_error(source, e))?;
 
         let encrypted = pkcs8::EncryptedPrivateKeyInfo::from_der(&der_bytes)
-            .map_err(|e| Error::pem_load_error(path.display().to_string(), e.to_string()))?;
+            .map_err(|e| Error::pem_load_error(source, e.to_string()))?;
 
         let decrypted = encrypted
-            .decrypt(password)
+            .decrypt(pwd)
             .map_err(|e| Error::key_decryption_error(e.to_string()))?;
 
         // The decrypted key is in PKCS#8 DER format
@@ -1077,14 +1149,54 @@ fn load_encrypted_private_key_from_pem(
         ureq::tls::PrivateKey::from_pem(pem_key.as_bytes())
             .map(|k| k.to_owned())
             .map_err(|e| {
-                Error::pem_load_error(
-                    path.display().to_string(),
-                    format!("Failed to parse decrypted key: {}", e),
-                )
+                Error::pem_load_error(source, format!("Failed to parse decrypted key: {}", e))
             })
     } else {
-        // Not encrypted, try loading as regular key
-        load_private_key_from_pem(path)
+        // Try loading as regular key
+        ureq::tls::PrivateKey::from_pem(pem_content.as_bytes())
+            .map(|k| k.to_owned())
+            .map_err(|e| {
+                Error::pem_load_error(source, format!("Failed to parse private key: {}", e))
+            })
+    }
+}
+
+/// Load a private key from CertInput (PEM content or file path)
+#[cfg(feature = "http")]
+fn load_private_key(
+    input: &CertInput,
+    password: Option<&str>,
+) -> Result<ureq::tls::PrivateKey<'static>> {
+    match input {
+        CertInput::Binary(_) => {
+            Err(Error::tls_config_error(
+                "Private key must be PEM text format, not binary. For P12, use client_cert only (no client_key needed)."
+            ))
+        }
+        CertInput::Text(text) => {
+            // Try as file path first
+            let path = std::path::Path::new(text);
+            if path.exists() {
+                log::trace!("Loading private key from file: {}", text);
+                let pem_content = std::fs::read_to_string(path).map_err(|e| {
+                    // Sanitize path for error message
+                    let display_path = if text.len() < 256 && !text.contains('\n') {
+                        text
+                    } else {
+                        "[PEM content or long path]"
+                    };
+                    Error::pem_load_error(
+                        display_path,
+                        format!("Failed to read key file: {}", e),
+                    )
+                })?;
+                parse_pem_private_key(&pem_content, password, text)
+            } else {
+                // Fallback to parsing as PEM content
+                log::trace!("Path does not exist, attempting to parse as PEM content");
+                parse_pem_private_key(text, password, "PEM content")
+            }
+        }
     }
 }
 
@@ -1131,52 +1243,39 @@ fn der_to_pem(der: &[u8], label: &str) -> String {
     )
 }
 
-/// Detect if a file is P12/PFX format by extension
+/// Parse P12/PFX bytes into certificate chain and private key
 #[cfg(feature = "http")]
-fn is_p12_file(path: &std::path::Path) -> bool {
-    path.extension()
-        .and_then(|ext| ext.to_str())
-        .map(|ext| ext.eq_ignore_ascii_case("p12") || ext.eq_ignore_ascii_case("pfx"))
-        .unwrap_or(false)
-}
-
-/// Load client certificate and key from P12/PFX file
-#[cfg(feature = "http")]
-fn load_identity_from_p12(
-    path: &std::path::Path,
+fn parse_p12_identity(
+    p12_data: &[u8],
     password: &str,
+    source: &str,
 ) -> Result<(
     Vec<ureq::tls::Certificate<'static>>,
     ureq::tls::PrivateKey<'static>,
 )> {
-    let p12_data = std::fs::read(path).map_err(|e| {
-        Error::p12_load_error(
-            path.display().to_string(),
-            format!("Failed to read file: {}", e),
-        )
-    })?;
+    // Warn if using empty password (valid but insecure)
+    if password.is_empty() {
+        log::warn!(
+            "Loading P12 file without password from: {} - ensure file is properly protected",
+            source
+        );
+    }
 
-    let keystore = p12_keystore::KeyStore::from_pkcs12(&p12_data, password)
-        .map_err(|e| Error::p12_load_error(path.display().to_string(), e.to_string()))?;
+    let keystore = p12_keystore::KeyStore::from_pkcs12(p12_data, password)
+        .map_err(|e| Error::p12_load_error(source, e.to_string()))?;
 
     // Get the first key entry (most P12 files have one key)
     // private_key_chain() returns Option<(&str, &PrivateKeyChain)>
-    let (_alias, key_chain) = keystore.private_key_chain().ok_or_else(|| {
-        Error::p12_load_error(
-            path.display().to_string(),
-            "No private key found in P12 file",
-        )
-    })?;
+    let (_alias, key_chain) = keystore
+        .private_key_chain()
+        .ok_or_else(|| Error::p12_load_error(source, "No private key found in P12 data"))?;
 
     // Get the private key DER bytes - wrap in PEM for ureq
     let pem_key = der_to_pem(key_chain.key(), "PRIVATE KEY");
     let private_key = ureq::tls::PrivateKey::from_pem(pem_key.as_bytes())
         .map(|k| k.to_owned())
         .map_err(|e| {
-            Error::p12_load_error(
-                path.display().to_string(),
-                format!("Failed to parse private key: {}", e),
-            )
+            Error::p12_load_error(source, format!("Failed to parse private key: {}", e))
         })?;
 
     // Get certificates from the chain
@@ -1188,44 +1287,60 @@ fn load_identity_from_p12(
 
     if certs.is_empty() {
         return Err(Error::p12_load_error(
-            path.display().to_string(),
-            "No certificates found in P12 file",
+            source,
+            "No certificates found in P12 data",
         ));
     }
 
     Ok((certs, private_key))
 }
 
-/// Load client identity (cert + key) for mTLS
+/// Load client identity (cert + key) for mTLS from CertInput
 #[cfg(feature = "http")]
 fn load_client_identity(
-    cert_path: &std::path::Path,
-    key_path: Option<&std::path::Path>,
+    cert_input: &CertInput,
+    key_input: Option<&CertInput>,
     password: Option<&str>,
 ) -> Result<(
     Vec<ureq::tls::Certificate<'static>>,
     ureq::tls::PrivateKey<'static>,
 )> {
-    // If cert is P12/PFX, load both cert and key from it
-    if is_p12_file(cert_path) {
-        let pwd = password.unwrap_or("");
-        return load_identity_from_p12(cert_path, pwd);
+    match cert_input {
+        // P12 binary content
+        CertInput::Binary(bytes) => {
+            log::trace!("Loading client identity from P12 binary content");
+            // P12 files may have empty passwords - this is valid (warning logged in parse_p12_identity)
+            let pwd = password.unwrap_or("");
+            parse_p12_identity(bytes, pwd, "P12 binary content")
+        }
+
+        // Text - could be PEM content, P12 path, or PEM path
+        CertInput::Text(text) => {
+            // Check if it's a P12 file path
+            if cert_input.is_p12_path() {
+                log::trace!("Loading client identity from P12 file: {}", text);
+                let bytes = std::fs::read(text).map_err(|e| {
+                    Error::p12_load_error(text, format!("Failed to read P12 file: {}", e))
+                })?;
+                // P12 files may have empty passwords - this is valid (warning logged in parse_p12_identity)
+                let pwd = password.unwrap_or("");
+                return parse_p12_identity(&bytes, pwd, text);
+            }
+
+            // PEM content or path
+            log::trace!("Loading client identity from PEM (cert + key)");
+            let certs = load_certs(cert_input)?;
+
+            let key_input = key_input.ok_or_else(|| {
+                Error::tls_config_error(
+                    "client_key required when using PEM certificate (not needed for P12)",
+                )
+            })?;
+
+            let key = load_private_key(key_input, password)?;
+            Ok((certs, key))
+        }
     }
-
-    // Otherwise, load PEM cert and key separately
-    let cert_chain = load_certs_from_pem(cert_path)?;
-
-    let key_path = key_path.ok_or_else(|| {
-        Error::tls_config_error("Client key path required when using PEM certificate (not P12)")
-    })?;
-
-    let private_key = if let Some(pwd) = password {
-        load_encrypted_private_key_from_pem(key_path, pwd)?
-    } else {
-        load_private_key_from_pem(key_path)?
-    };
-
-    Ok((cert_chain, private_key))
 }
 
 /// Build TLS configuration from context and per-request kwargs
@@ -1259,36 +1374,36 @@ fn build_tls_config(
     }
 
     // Load CA bundle if specified (per-request overrides context)
-    let ca_bundle_path = kwargs
+    let ca_bundle_input = kwargs
         .get("ca_bundle")
-        .map(std::path::PathBuf::from)
+        .map(|s| CertInput::Text(s.clone()))
         .or_else(|| ctx.http_ca_bundle.clone());
 
-    let extra_ca_bundle_path = kwargs
+    let extra_ca_bundle_input = kwargs
         .get("extra_ca_bundle")
-        .map(std::path::PathBuf::from)
+        .map(|s| CertInput::Text(s.clone()))
         .or_else(|| ctx.http_extra_ca_bundle.clone());
 
-    if let Some(ca_path) = ca_bundle_path {
+    if let Some(ca_input) = ca_bundle_input.as_ref() {
         // Replace root certs with custom CA bundle
-        let certs = load_certs_from_pem(&ca_path)?;
+        let certs = load_certs(ca_input)?;
         builder = builder.root_certs(RootCerts::Specific(Arc::new(certs)));
-    } else if let Some(extra_ca_path) = extra_ca_bundle_path {
+    } else if let Some(extra_ca_input) = extra_ca_bundle_input.as_ref() {
         // Add extra certs to webpki roots using new_with_certs
-        let extra_certs = load_certs_from_pem(&extra_ca_path)?;
+        let extra_certs = load_certs(extra_ca_input)?;
         builder = builder.root_certs(RootCerts::new_with_certs(&extra_certs));
     }
 
     // Load client certificate for mTLS (per-request overrides context)
-    let client_cert_path = kwargs
+    let client_cert_input = kwargs
         .get("client_cert")
-        .map(std::path::PathBuf::from)
+        .map(|s| CertInput::Text(s.clone()))
         .or_else(|| ctx.http_client_cert.clone());
 
-    if let Some(cert_path) = client_cert_path {
-        let client_key_path = kwargs
+    if let Some(cert_input) = client_cert_input.as_ref() {
+        let client_key_input = kwargs
             .get("client_key")
-            .map(std::path::PathBuf::from)
+            .map(|s| CertInput::Text(s.clone()))
             .or_else(|| ctx.http_client_key.clone());
 
         let password = kwargs
@@ -1296,7 +1411,7 @@ fn build_tls_config(
             .map(|s| s.as_str())
             .or(ctx.http_client_key_password.as_deref());
 
-        let (certs, key) = load_client_identity(&cert_path, client_key_path.as_deref(), password)?;
+        let (certs, key) = load_client_identity(cert_input, client_key_input.as_ref(), password)?;
 
         let client_cert = ClientCert::new_with_certs(&certs, key);
         builder = builder.client_cert(Some(client_cert));
@@ -2420,6 +2535,67 @@ mod tests {
         let result = normalize_file_path("data\0.txt");
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("null byte"));
+    }
+
+    // Tests for CertInput type
+    #[test]
+    fn test_cert_input_is_pem_content() {
+        let pem_content = CertInput::Text("-----BEGIN CERTIFICATE-----\nMIIC...".to_string());
+        assert!(pem_content.is_pem_content());
+
+        let file_path = CertInput::Text("/path/to/cert.pem".to_string());
+        assert!(!file_path.is_pem_content());
+
+        let binary = CertInput::Binary(vec![0, 1, 2, 3]);
+        assert!(!binary.is_pem_content());
+    }
+
+    #[test]
+    fn test_cert_input_is_p12_path() {
+        assert!(CertInput::Text("/path/to/identity.p12".to_string()).is_p12_path());
+        assert!(CertInput::Text("/path/to/identity.pfx".to_string()).is_p12_path());
+        assert!(CertInput::Text("/path/to/identity.P12".to_string()).is_p12_path());
+        assert!(CertInput::Text("/path/to/identity.PFX".to_string()).is_p12_path());
+
+        assert!(!CertInput::Text("/path/to/cert.pem".to_string()).is_p12_path());
+        assert!(!CertInput::Text("-----BEGIN CERTIFICATE-----".to_string()).is_p12_path());
+        assert!(!CertInput::Binary(vec![0, 1, 2, 3]).is_p12_path());
+    }
+
+    #[test]
+    fn test_cert_input_as_text() {
+        let text_input = CertInput::Text("some text".to_string());
+        assert_eq!(text_input.as_text(), Some("some text"));
+
+        let binary_input = CertInput::Binary(vec![0, 1, 2]);
+        assert_eq!(binary_input.as_text(), None);
+    }
+
+    #[test]
+    fn test_cert_input_as_bytes() {
+        let binary_input = CertInput::Binary(vec![0, 1, 2]);
+        assert_eq!(binary_input.as_bytes(), Some(&[0, 1, 2][..]));
+
+        let text_input = CertInput::Text("some text".to_string());
+        assert_eq!(text_input.as_bytes(), None);
+    }
+
+    #[test]
+    fn test_cert_input_from_string() {
+        let input1 = CertInput::from("test".to_string());
+        assert!(matches!(input1, CertInput::Text(_)));
+        assert_eq!(input1.as_text(), Some("test"));
+
+        let input2 = CertInput::from("test");
+        assert!(matches!(input2, CertInput::Text(_)));
+        assert_eq!(input2.as_text(), Some("test"));
+    }
+
+    #[test]
+    fn test_cert_input_from_vec_u8() {
+        let input = CertInput::from(vec![1, 2, 3]);
+        assert!(matches!(input, CertInput::Binary(_)));
+        assert_eq!(input.as_bytes(), Some(&[1, 2, 3][..]));
     }
 }
 
