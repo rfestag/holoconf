@@ -487,10 +487,9 @@ fn env_resolver(
 ///
 /// Returns (normalized_path, is_relative)
 fn normalize_file_path(arg: &str) -> Result<(String, bool)> {
-    if arg.starts_with("//") {
+    if let Some(after_slashes) = arg.strip_prefix("//") {
         // file://... format - Parse as RFC 8089 file: URL
         // Remove exactly two leading slashes to get the authority+path
-        let after_slashes = &arg[2..];
 
         // Check if this is file:/// (third slash means empty authority)
         if after_slashes.starts_with('/') {
