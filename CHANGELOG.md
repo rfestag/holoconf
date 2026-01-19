@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **HTTPS Resolver**: New `https` resolver that auto-prepends `https://` to URLs (#43)
+  - Use `${https:example.com/config}` instead of `${http:https://example.com/config}`
+  - Separate resolver for clarity and convenience
+  - Same security model as `http` resolver (disabled by default, requires `allow_http=True`)
+- **File Resolver RFC 8089 Support**: File resolver now supports RFC 8089 file: URI syntax (#43)
+  - `${file:///absolute/path}` - Absolute path with empty authority
+  - `${file://localhost/absolute/path}` - Absolute path with explicit localhost
+  - `${file://127.0.0.1/path}` - Localhost via IPv4 loopback
+  - `${file://::1/path}` - Localhost via IPv6 loopback
+  - `${file:/absolute/path}` - Absolute path (minimal form)
+  - Remote file URIs (`file://hostname/path`) are rejected with clear error
+  - Plain paths continue to work as before
+
+### Changed
+- **HTTP/HTTPS URL Normalization**: HTTP and HTTPS resolvers now auto-prepend protocol schemes (#43)
+  - Old syntax still works: `${http:https://example.com}` → `http://example.com`
+  - New clean syntax: `${https:example.com}` → `https://example.com`
+  - Fully backwards compatible with existing configurations
+  - Invalid URL syntax (like `///example.com`) now returns a clear error
+
+### Fixed
+- **CLI HTTP Feature**: CLI now enables HTTP/HTTPS resolvers by default via the `http` feature (#43)
+
+### Security
+- **File Resolver Null Byte Validation**: File paths with null bytes are now rejected to prevent potential path traversal attacks (#43)
+- **Enhanced Localhost Detection**: File resolver now recognizes IPv4 (127.x.x.x) and IPv6 (::1) localhost addresses in addition to hostname "localhost" (#43)
+
 ## [0.3.0] - 2026-01-17
 
 ### Security

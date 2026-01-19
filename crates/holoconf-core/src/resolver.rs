@@ -476,6 +476,36 @@ fn env_resolver(
     }
 }
 
+/// Check if a hostname represents localhost
+///
+/// Recognizes various forms of localhost:
+/// - "localhost" (case-insensitive)
+/// - "127.0.0.1" (IPv4 loopback)
+/// - Any 127.x.x.x address (IPv4 loopback range)
+/// - "::1" (IPv6 loopback)
+/// - "[::1]" (IPv6 loopback with brackets)
+///
+/// Note: We intentionally reject internationalized domain names (IDN)
+/// and punycode for security and simplicity.
+fn is_localhost(hostname: &str) -> bool {
+    // ASCII localhost (case-insensitive)
+    if hostname.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+
+    // IPv4 loopback: 127.0.0.1 or any 127.x.x.x
+    if hostname.starts_with("127.") {
+        return true;
+    }
+
+    // IPv6 loopback: ::1 or [::1]
+    if hostname == "::1" || hostname == "[::1]" {
+        return true;
+    }
+
+    false
+}
+
 /// Normalize file path according to RFC 8089 file: URI scheme
 ///
 /// RFC 8089 defines these valid formats:
@@ -487,6 +517,14 @@ fn env_resolver(
 ///
 /// Returns (normalized_path, is_relative)
 fn normalize_file_path(arg: &str) -> Result<(String, bool)> {
+    // Security: Reject null bytes
+    if arg.contains('\0') {
+        return Err(Error::resolver_custom(
+            "file",
+            "File paths cannot contain null bytes",
+        ));
+    }
+
     if let Some(after_slashes) = arg.strip_prefix("//") {
         // file://... format - Parse as RFC 8089 file: URL
         // Remove exactly two leading slashes to get the authority+path
@@ -498,10 +536,16 @@ fn normalize_file_path(arg: &str) -> Result<(String, bool)> {
             Ok((after_slashes.to_string(), false))
         } else {
             // file://hostname/path or file://hostname format
+            // Extract hostname (before first slash, or entire string if no slash)
             let parts: Vec<&str> = after_slashes.splitn(2, '/').collect();
             let hostname = parts[0];
 
-            if hostname.eq_ignore_ascii_case("localhost") {
+            // Check if empty hostname (file:// with no authority)
+            if hostname.is_empty() {
+                return Ok(("/".to_string(), false));
+            }
+
+            if is_localhost(hostname) {
                 // file://localhost/path - explicit localhost
                 let path = parts
                     .get(1)
@@ -513,9 +557,14 @@ fn normalize_file_path(arg: &str) -> Result<(String, bool)> {
                 Err(Error::resolver_custom(
                     "file",
                     format!(
-                        "Remote file URIs not supported: file://{}\n\
-                         HoloConf only supports local files. Use file:///path for absolute paths or file:path for relative paths.",
-                        arg
+                        "Remote file URIs not supported: hostname '{}' is not localhost\n\
+                         \n\
+                         HoloConf only supports local files:\n\
+                         - file:///path/to/file (absolute, empty authority)\n\
+                         - file://localhost/path/to/file (absolute, explicit localhost)\n\
+                         - file:/path/to/file (absolute, minimal)\n\
+                         - relative/path/to/file (relative to config directory)",
+                        hostname
                     ),
                 ))
             }
@@ -721,8 +770,10 @@ fn file_resolver(
 ///   ${https://example.com}    → https://example.com
 ///   ${https:example.com}      → https://example.com
 ///   ${https:https://example}  → https://example.com (backwards compatible)
+///
+/// Returns an error if the URL is invalid (empty, or has invalid syntax like ///)
 #[cfg(feature = "http")]
-fn normalize_http_url(scheme: &str, arg: &str) -> String {
+fn normalize_http_url(scheme: &str, arg: &str) -> Result<String> {
     // Strip any existing http:// or https:// prefix
     let clean = arg
         .strip_prefix("http://")
@@ -732,8 +783,104 @@ fn normalize_http_url(scheme: &str, arg: &str) -> String {
     // Strip leading // if present (handles ${https://example.com} syntax)
     let clean = clean.strip_prefix("//").unwrap_or(clean);
 
+    // Validate: Reject empty URLs
+    if clean.trim().is_empty() {
+        return Err(Error::resolver_custom(
+            scheme,
+            format!(
+                "{} resolver requires a non-empty URL",
+                scheme.to_uppercase()
+            ),
+        ));
+    }
+
+    // Validate: Reject URLs starting with / (like /// which would create scheme:///)
+    if clean.starts_with('/') {
+        return Err(Error::resolver_custom(
+            scheme,
+            format!(
+                "Invalid URL syntax: '{}'. URLs must have a hostname after the ://\n\
+                 Valid formats:\n\
+                 - ${{{}:example.com/path}} (clean syntax)\n\
+                 - ${{{}:{}://example.com/path}} (backwards compatible)",
+                arg, scheme, scheme, scheme
+            ),
+        ));
+    }
+
     // Prepend the correct scheme
-    format!("{}://{}", scheme, clean)
+    Ok(format!("{}://{}", scheme, clean))
+}
+
+/// Common HTTP/HTTPS resolver implementation
+///
+/// This shared function reduces duplication between http_resolver and https_resolver.
+/// The only difference between the two resolvers is the scheme they prepend.
+fn http_or_https_resolver(
+    scheme: &str,
+    args: &[String],
+    kwargs: &HashMap<String, String>,
+    ctx: &ResolverContext,
+) -> Result<ResolvedValue> {
+    if args.is_empty() {
+        return Err(
+            Error::parse(format!("{} resolver requires a URL", scheme.to_uppercase()))
+                .with_path(ctx.config_path.clone()),
+        );
+    }
+
+    #[cfg(feature = "http")]
+    {
+        // Normalize URL to prepend the appropriate scheme
+        let url = normalize_http_url(scheme, &args[0])?;
+
+        // Check if HTTP is enabled
+        if !ctx.allow_http {
+            return Err(Error {
+                kind: crate::error::ErrorKind::Resolver(
+                    crate::error::ResolverErrorKind::HttpDisabled,
+                ),
+                path: Some(ctx.config_path.clone()),
+                source_location: None,
+                help: Some(format!(
+                    "{} resolver is disabled. The URL specified by this config path cannot be fetched.\n\
+                     Enable with Config.load(..., allow_http=True)",
+                    scheme.to_uppercase()
+                )),
+                cause: None,
+            });
+        }
+
+        // Check URL against allowlist if configured
+        if !ctx.http_allowlist.is_empty() {
+            let url_allowed = ctx
+                .http_allowlist
+                .iter()
+                .any(|pattern| url_matches_pattern(&url, pattern));
+            if !url_allowed {
+                return Err(Error::http_not_in_allowlist(
+                    &url,
+                    &ctx.http_allowlist,
+                    Some(ctx.config_path.clone()),
+                ));
+            }
+        }
+
+        http_fetch(&url, kwargs, ctx)
+    }
+
+    #[cfg(not(feature = "http"))]
+    {
+        // If compiled without HTTP feature, return an error
+        let _ = (kwargs, ctx); // Suppress unused warnings
+        Err(Error::resolver_custom(
+            scheme,
+            format!(
+                "{} support not compiled in. Rebuild with --features http",
+                scheme.to_uppercase()
+            ),
+        ))
+    }
 }
 
 /// Built-in HTTP resolver
@@ -741,18 +888,18 @@ fn normalize_http_url(scheme: &str, arg: &str) -> String {
 /// Fetches content from remote URLs.
 ///
 /// Usage:
-///   ${http://example.com/config.yaml}                 - Auto-detect parse mode
+///   ${http:example.com/config.yaml}                   - Clean syntax (auto-prepends http://)
 ///   ${http:example.com/config,parse=yaml}             - Parse as YAML
-///   ${http://example.com/config,parse=json}           - Parse as JSON
-///   ${http://example.com/config,parse=text}           - Read as text
-///   ${http://example.com/config,parse=binary}         - Read as binary
-///   ${http://example.com/config,timeout=60}           - Timeout in seconds
-///   ${http://example.com/config,header=Auth:Bearer token} - Add header
-///   ${http://example.com/config,default={}}           - Default if request fails
-///   ${http://example.com/config,sensitive=true}       - Mark as sensitive
+///   ${http:example.com/config,parse=json}             - Parse as JSON
+///   ${http:example.com/config,parse=text}             - Read as text
+///   ${http:example.com/config,parse=binary}           - Read as binary
+///   ${http:example.com/config,timeout=60}             - Timeout in seconds
+///   ${http:example.com/config,header=Auth:Bearer token} - Add header
+///   ${http:example.com/config,default={}}             - Default if request fails
+///   ${http:example.com/config,sensitive=true}         - Mark as sensitive
 ///
 /// Backwards compatible:
-///   ${http:https://example.com}                       - Still works (for http/https mixing)
+///   ${http:http://example.com}                        - Still works (protocol stripped and re-prepended)
 ///
 /// Security:
 /// - Disabled by default (requires allow_http=true in ConfigOptions)
@@ -762,58 +909,7 @@ fn http_resolver(
     kwargs: &HashMap<String, String>,
     ctx: &ResolverContext,
 ) -> Result<ResolvedValue> {
-    if args.is_empty() {
-        return Err(Error::parse("http resolver requires a URL").with_path(ctx.config_path.clone()));
-    }
-
-    // Perform the actual HTTP request
-    #[cfg(feature = "http")]
-    {
-        // Normalize URL to prepend http:// scheme
-        let url = normalize_http_url("http", &args[0]);
-
-        // Check if HTTP is enabled
-        if !ctx.allow_http {
-            return Err(Error {
-                kind: crate::error::ErrorKind::Resolver(crate::error::ResolverErrorKind::HttpDisabled),
-                path: Some(ctx.config_path.clone()),
-                source_location: None,
-                help: Some(
-                    "HTTP resolver is disabled. The URL specified by this config path cannot be fetched.\n\
-                     Enable with Config.load(..., allow_http=True)".to_string()
-                ),
-                cause: None,
-            });
-        }
-
-        // Check URL against allowlist if configured
-        if !ctx.http_allowlist.is_empty() {
-            let url_allowed = ctx
-                .http_allowlist
-                .iter()
-                .any(|pattern| url_matches_pattern(&url, pattern));
-            if !url_allowed {
-                return Err(Error::http_not_in_allowlist(
-                    &url,
-                    &ctx.http_allowlist,
-                    Some(ctx.config_path.clone()),
-                ));
-            }
-        }
-
-        http_fetch(&url, kwargs, ctx)
-    }
-
-    #[cfg(not(feature = "http"))]
-    {
-        // If compiled without HTTP feature, return an error
-        let _ = kwargs; // Suppress unused warning
-        let _ = ctx; // Suppress unused warning
-        Err(Error::resolver_custom(
-            "http",
-            "HTTP support not compiled in. Rebuild with --features http",
-        ))
-    }
+    http_or_https_resolver("http", args, kwargs, ctx)
 }
 
 /// Built-in HTTPS resolver
@@ -821,18 +917,18 @@ fn http_resolver(
 /// Fetches content from remote HTTPS URLs. Same as http_resolver but prepends https:// scheme.
 ///
 /// Usage:
-///   ${https://example.com/config.yaml}                - Auto-detect parse mode
+///   ${https:example.com/config.yaml}                  - Clean syntax (auto-prepends https://)
 ///   ${https:example.com/config,parse=yaml}            - Parse as YAML
-///   ${https://example.com/config,parse=json}          - Parse as JSON
-///   ${https://example.com/config,parse=text}          - Read as text
-///   ${https://example.com/config,parse=binary}        - Read as binary
-///   ${https://example.com/config,timeout=60}          - Timeout in seconds
-///   ${https://example.com/config,header=Auth:Bearer token} - Add header
-///   ${https://example.com/config,default={}}          - Default if request fails
-///   ${https://example.com/config,sensitive=true}      - Mark as sensitive
+///   ${https:example.com/config,parse=json}            - Parse as JSON
+///   ${https:example.com/config,parse=text}            - Read as text
+///   ${https:example.com/config,parse=binary}          - Read as binary
+///   ${https:example.com/config,timeout=60}            - Timeout in seconds
+///   ${https:example.com/config,header=Auth:Bearer token} - Add header
+///   ${https:example.com/config,default={}}            - Default if request fails
+///   ${https:example.com/config,sensitive=true}        - Mark as sensitive
 ///
 /// Backwards compatible:
-///   ${https:https://example.com}                      - Still works
+///   ${https:https://example.com}                      - Still works (protocol stripped and re-prepended)
 ///
 /// Security:
 /// - Disabled by default (requires allow_http=true in ConfigOptions)
@@ -842,60 +938,7 @@ fn https_resolver(
     kwargs: &HashMap<String, String>,
     ctx: &ResolverContext,
 ) -> Result<ResolvedValue> {
-    if args.is_empty() {
-        return Err(
-            Error::parse("https resolver requires a URL").with_path(ctx.config_path.clone())
-        );
-    }
-
-    // Perform the actual HTTP request
-    #[cfg(feature = "http")]
-    {
-        // Normalize URL to prepend https:// scheme
-        let url = normalize_http_url("https", &args[0]);
-
-        // Check if HTTP is enabled
-        if !ctx.allow_http {
-            return Err(Error {
-                kind: crate::error::ErrorKind::Resolver(crate::error::ResolverErrorKind::HttpDisabled),
-                path: Some(ctx.config_path.clone()),
-                source_location: None,
-                help: Some(
-                    "HTTPS resolver is disabled. The URL specified by this config path cannot be fetched.\n\
-                     Enable with Config.load(..., allow_http=True)".to_string()
-                ),
-                cause: None,
-            });
-        }
-
-        // Check URL against allowlist if configured
-        if !ctx.http_allowlist.is_empty() {
-            let url_allowed = ctx
-                .http_allowlist
-                .iter()
-                .any(|pattern| url_matches_pattern(&url, pattern));
-            if !url_allowed {
-                return Err(Error::http_not_in_allowlist(
-                    &url,
-                    &ctx.http_allowlist,
-                    Some(ctx.config_path.clone()),
-                ));
-            }
-        }
-
-        http_fetch(&url, kwargs, ctx)
-    }
-
-    #[cfg(not(feature = "http"))]
-    {
-        // If compiled without HTTP feature, return an error
-        let _ = kwargs; // Suppress unused warning
-        let _ = ctx; // Suppress unused warning
-        Err(Error::resolver_custom(
-            "https",
-            "HTTPS support not compiled in. Rebuild with --features http",
-        ))
-    }
+    http_or_https_resolver("https", args, kwargs, ctx)
 }
 
 /// Check if a URL matches an allowlist pattern
@@ -1646,7 +1689,7 @@ mod tests {
     #[test]
     fn test_http_resolver_disabled() {
         let ctx = ResolverContext::new("test.path");
-        let args = vec!["https://example.com/config.yaml".to_string()];
+        let args = vec!["example.com/config.yaml".to_string()];
         let kwargs = HashMap::new();
 
         let result = http_resolver(&args, &kwargs, &ctx);
@@ -1654,6 +1697,7 @@ mod tests {
 
         let err = result.unwrap_err();
         let display = format!("{}", err);
+        // Error message uses uppercase HTTP
         assert!(display.contains("HTTP resolver is disabled"));
     }
 
@@ -2177,6 +2221,205 @@ mod tests {
         assert_eq!(result.value.as_str(), Some("custom=myvalue"));
         // Sensitive override should still be applied by framework
         assert!(result.sensitive);
+    }
+
+    // Tests for normalize_http_url function
+    #[test]
+    #[cfg(feature = "http")]
+    fn test_normalize_http_url_clean_syntax() {
+        assert_eq!(
+            normalize_http_url("https", "example.com/path").unwrap(),
+            "https://example.com/path"
+        );
+        assert_eq!(
+            normalize_http_url("http", "example.com").unwrap(),
+            "http://example.com"
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "http")]
+    fn test_normalize_http_url_double_slash() {
+        assert_eq!(
+            normalize_http_url("https", "//example.com/path").unwrap(),
+            "https://example.com/path"
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "http")]
+    fn test_normalize_http_url_existing_https() {
+        assert_eq!(
+            normalize_http_url("https", "https://example.com/path").unwrap(),
+            "https://example.com/path"
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "http")]
+    fn test_normalize_http_url_wrong_scheme() {
+        // Should strip http:// and add https://
+        assert_eq!(
+            normalize_http_url("https", "http://example.com").unwrap(),
+            "https://example.com"
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "http")]
+    fn test_normalize_http_url_with_query() {
+        assert_eq!(
+            normalize_http_url("https", "example.com/path?query=val&other=val2").unwrap(),
+            "https://example.com/path?query=val&other=val2"
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "http")]
+    fn test_normalize_http_url_empty() {
+        let result = normalize_http_url("https", "");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("non-empty URL"));
+    }
+
+    #[test]
+    #[cfg(feature = "http")]
+    fn test_normalize_http_url_triple_slash() {
+        // ${https:///example.com} should error (invalid syntax)
+        let result = normalize_http_url("https", "///example.com");
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Invalid URL syntax"));
+    }
+
+    #[test]
+    #[cfg(feature = "http")]
+    fn test_normalize_http_url_whitespace_only() {
+        let result = normalize_http_url("https", "   ");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("non-empty URL"));
+    }
+
+    // Tests for is_localhost function
+    #[test]
+    fn test_is_localhost_ascii() {
+        assert!(is_localhost("localhost"));
+        assert!(is_localhost("LOCALHOST"));
+        assert!(is_localhost("LocalHost"));
+    }
+
+    #[test]
+    fn test_is_localhost_ipv4() {
+        assert!(is_localhost("127.0.0.1"));
+        assert!(is_localhost("127.0.0.100"));
+        assert!(is_localhost("127.1.2.3"));
+        assert!(!is_localhost("128.0.0.1"));
+    }
+
+    #[test]
+    fn test_is_localhost_ipv6() {
+        assert!(is_localhost("::1"));
+        assert!(is_localhost("[::1]"));
+        assert!(!is_localhost("::2"));
+    }
+
+    #[test]
+    fn test_is_localhost_not() {
+        assert!(!is_localhost("example.com"));
+        assert!(!is_localhost("remote.host"));
+        assert!(!is_localhost("192.168.1.1"));
+    }
+
+    // Tests for normalize_file_path function
+    #[test]
+    fn test_normalize_file_path_relative() {
+        let (path, is_rel) = normalize_file_path("data.txt").unwrap();
+        assert_eq!(path, "data.txt");
+        assert!(is_rel);
+
+        let (path, is_rel) = normalize_file_path("./data.txt").unwrap();
+        assert_eq!(path, "./data.txt");
+        assert!(is_rel);
+    }
+
+    #[test]
+    fn test_normalize_file_path_absolute() {
+        let (path, is_rel) = normalize_file_path("/etc/config.yaml").unwrap();
+        assert_eq!(path, "/etc/config.yaml");
+        assert!(!is_rel);
+    }
+
+    #[test]
+    fn test_normalize_file_path_rfc8089_empty_authority() {
+        // file:/// (empty authority = localhost)
+        let (path, is_rel) = normalize_file_path("///etc/config.yaml").unwrap();
+        assert_eq!(path, "/etc/config.yaml");
+        assert!(!is_rel);
+    }
+
+    #[test]
+    fn test_normalize_file_path_rfc8089_localhost() {
+        // file://localhost/
+        let (path, is_rel) = normalize_file_path("//localhost/var/data").unwrap();
+        assert_eq!(path, "/var/data");
+        assert!(!is_rel);
+
+        // file://localhost (no path)
+        let (path, is_rel) = normalize_file_path("//localhost").unwrap();
+        assert_eq!(path, "/");
+        assert!(!is_rel);
+    }
+
+    #[test]
+    fn test_normalize_file_path_rfc8089_localhost_ipv4() {
+        // file://127.0.0.1/
+        let (path, is_rel) = normalize_file_path("//127.0.0.1/tmp/file.txt").unwrap();
+        assert_eq!(path, "/tmp/file.txt");
+        assert!(!is_rel);
+    }
+
+    #[test]
+    fn test_normalize_file_path_rfc8089_localhost_ipv6() {
+        // file://::1/
+        let (path, is_rel) = normalize_file_path("//::1/tmp/file.txt").unwrap();
+        assert_eq!(path, "/tmp/file.txt");
+        assert!(!is_rel);
+    }
+
+    #[test]
+    fn test_normalize_file_path_rfc8089_remote_rejected() {
+        let result = normalize_file_path("//remote.host/path");
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("Remote file URIs not supported"));
+        assert!(err_msg.contains("remote.host"));
+
+        let result = normalize_file_path("//server.example.com/share");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_normalize_file_path_rfc8089_empty_hostname() {
+        // file:// with no authority
+        let (path, is_rel) = normalize_file_path("//").unwrap();
+        assert_eq!(path, "/");
+        assert!(!is_rel);
+    }
+
+    #[test]
+    fn test_normalize_file_path_null_byte() {
+        let result = normalize_file_path("/etc/passwd\0.txt");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("null byte"));
+    }
+
+    #[test]
+    fn test_normalize_file_path_null_byte_relative() {
+        let result = normalize_file_path("data\0.txt");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("null byte"));
     }
 }
 
