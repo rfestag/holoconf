@@ -1,12 +1,12 @@
 # Interpolation
 
-Configuration files often need values that change based on where they run or reference other configuration values. You don't want to hardcode `localhost` for your database if it needs to be `prod-db.example.com` in production. That's where interpolation comes in.
+As your configuration grows, you'll find yourself repeating the same values in multiple places. You might define a hostname once and then need to use it in several URLs. Or you might want to build connection strings from smaller pieces. Repeating these values makes your configuration harder to maintain and error-prone.
 
-Interpolation lets you insert dynamic values into your configuration using a simple syntax: `${...}`. Let's explore how it works.
+Interpolation solves this by letting you reference values within your configuration using a simple syntax: `${...}`. Let's explore how it works.
 
-## Self-References: Avoiding Duplication
+## Self-References: Keeping Configuration DRY
 
-The simplest form of interpolation references other values in the same configuration. This helps you avoid duplicating information:
+The most common use of interpolation is referencing other values in the same configuration file. This keeps your configuration DRY (Don't Repeat Yourself):
 
 ```yaml
 server:
@@ -46,6 +46,8 @@ When you access `server.url`, HoloConf automatically resolves the references:
     https://api.example.com:8080
     ```
 
+Now when you need to change the hostname, you only update it in one place.
+
 ### Absolute References (Default)
 
 By default, references are **absolute** - they specify the full path from the root of the configuration:
@@ -61,7 +63,7 @@ app:
 
 ### Relative References
 
-You can also use **relative references** with a dot prefix. This is especially useful for referencing siblings or parent values:
+You can also use **relative references** with a dot prefix. This is especially useful for keeping configuration sections self-contained:
 
 ```yaml
 database:
@@ -77,7 +79,7 @@ The dot syntax works like filesystem paths:
 - **`...grandparent`** - Go up two levels (grandparent)
 - And so on...
 
-Here's a more complex example:
+Here's a more complex example showing how relative references make sections more modular:
 
 ```yaml
 company:
@@ -133,37 +135,24 @@ When accessed:
 !!! tip "When to Use Relative vs Absolute"
     Use **absolute** references when you need a specific value regardless of where you are in the config. Use **relative** references when you want to keep sections self-contained and easier to refactor.
 
-## Understanding the Interpolation Syntax
+## Resolvers: Getting Values from External Sources
 
-Self-references are just one type of interpolation. The general syntax is:
+Self-references are powerful, but sometimes you need values from **outside** your configuration file - like environment variables, files, external services, or cloud provider APIs. This is where **resolvers** come in.
+
+A resolver is a mechanism for fetching values from external sources. The syntax extends what you've already learned:
 
 ```
-${resolver:argument,param1=value1,param2=value2}
+${resolver:argument}
 ```
 
-Let's break this down:
-
-- **`resolver`** - Where to get the value from (like `env` for environment variables, `file` for files, etc.)
-- **`argument`** - What to fetch (like a variable name or file path)
-- **`param=value`** - Optional parameters that modify the behavior
-
-For self-references, the resolver is implicit (no prefix), and the argument is just the path.
-
-## Framework-Level Parameters
-
-HoloConf automatically implements semantics for certain parameters so each resolver doesn't have to. These work with **any** resolver:
-
-### Default Values
-
-Add a fallback value that's used when resolution fails:
+For example, to pull a value from an environment variable:
 
 ```yaml
 database:
-  host: ${env:DB_HOST,default=localhost}
-  port: ${env:DB_PORT,default=5432}
+  host: ${env:DB_HOST}
+  port: ${env:DB_PORT}
+  url: postgres://${.host}:${.port}/db  # Combines env values with self-reference
 ```
-
-Now your configuration works whether or not the environment variables are set:
 
 === "Python"
 
@@ -171,16 +160,12 @@ Now your configuration works whether or not the environment variables are set:
     import os
     from holoconf import Config
 
-    # Without environment variables - uses defaults
-    config = Config.load("config.yaml")
-    print(config.database.host)
-    # localhost
-
-    # With environment variables - uses actual values
     os.environ["DB_HOST"] = "prod-db.example.com"
+    os.environ["DB_PORT"] = "5432"
+
     config = Config.load("config.yaml")
-    print(config.database.host)
-    # prod-db.example.com
+    print(config.database.url)
+    # postgres://prod-db.example.com:5432/db
     ```
 
 === "Rust"
@@ -189,302 +174,35 @@ Now your configuration works whether or not the environment variables are set:
     use holoconf::Config;
     use std::env;
 
-    // Without environment variables
-    let config = Config::load("config.yaml")?;
-    let host: String = config.get("database.host")?;
-    println!("{}", host);
-    // localhost
-
-    // With environment variables
     env::set_var("DB_HOST", "prod-db.example.com");
-    let config = Config::load("config.yaml")?;
-    let host: String = config.get("database.host")?;
-    println!("{}", host);
-    // prod-db.example.com
-    ```
-
-=== "CLI"
-
-    ```bash
-    # Without environment variable
-    $ holoconf get config.yaml database.host
-    localhost
-
-    # With environment variable
-    $ DB_HOST=prod-db.example.com holoconf get config.yaml database.host
-    prod-db.example.com
-    ```
-
-!!! tip "When to Use Defaults"
-    Provide defaults for values that should "just work" in development, like local database hosts or sensible timeouts. Don't provide defaults for secrets or production-specific values - let those fail if not configured.
-
-#### Nested Defaults: Fallback Chains
-
-Default values can themselves contain interpolation, creating fallback chains:
-
-```yaml
-api:
-  # Try PRIMARY_URL first, fall back to SECONDARY_URL, then to localhost
-  url: ${env:PRIMARY_URL,default=${env:SECONDARY_URL,default=http://localhost:8000}}
-```
-
-=== "Python"
-
-    ```python
-    import os
-    from holoconf import Config
-
-    # Neither variable set - uses final default
-    config = Config.load("config.yaml")
-    print(config.api.url)
-    # http://localhost:8000
-
-    # Only secondary set
-    os.environ["SECONDARY_URL"] = "http://backup.example.com"
-    config = Config.load("config.yaml")
-    print(config.api.url)
-    # http://backup.example.com
-
-    # Primary set - uses primary (ignores secondary)
-    os.environ["PRIMARY_URL"] = "http://primary.example.com"
-    config = Config.load("config.yaml")
-    print(config.api.url)
-    # http://primary.example.com
-    ```
-
-=== "Rust"
-
-    ```rust
-    use holoconf::Config;
-    use std::env;
-
-    // Neither set - uses final default
-    let config = Config::load("config.yaml")?;
-    let url: String = config.get("api.url")?;
-    println!("{}", url);
-    // http://localhost:8000
-
-    // Only secondary set
-    env::set_var("SECONDARY_URL", "http://backup.example.com");
-    let config = Config::load("config.yaml")?;
-    let url: String = config.get("api.url")?;
-    println!("{}", url);
-    // http://backup.example.com
-    ```
-
-=== "CLI"
-
-    ```bash
-    # Neither set
-    $ holoconf get config.yaml api.url
-    http://localhost:8000
-
-    # Only secondary set
-    $ SECONDARY_URL=http://backup.example.com holoconf get config.yaml api.url
-    http://backup.example.com
-
-    # Primary set
-    $ PRIMARY_URL=http://primary.example.com holoconf get config.yaml api.url
-    http://primary.example.com
-    ```
-
-!!! note "Lazy Evaluation"
-    Default values are only evaluated if needed. If the primary value succeeds, HoloConf never evaluates the default. This is efficient and allows defaults to reference values that might not exist.
-
-### Sensitive Values
-
-Mark values that should never appear in logs or debug output:
-
-```yaml
-api:
-  key: ${env:API_KEY,sensitive=true}
-  secret: ${env:API_SECRET,sensitive=true}
-```
-
-When you dump the configuration, sensitive values are automatically redacted:
-
-=== "Python"
-
-    ```python
-    import os
-    from holoconf import Config
-
-    os.environ["API_KEY"] = "super-secret-key-12345"
-    os.environ["API_SECRET"] = "super-secret-value"
-    config = Config.load("config.yaml")
-
-    # Dump with redaction
-    print(config.to_yaml(redact=True))
-    # api:
-    #   key: '[REDACTED]'
-    #   secret: '[REDACTED]'
-
-    # But you can still access actual values when needed
-    key = config.api.key
-    print(f"Key length: {len(key)}")
-    # Key length: 21
-    ```
-
-=== "Rust"
-
-    ```rust
-    use holoconf::Config;
-    use std::env;
-
-    env::set_var("API_KEY", "super-secret-key-12345");
-    env::set_var("API_SECRET", "super-secret-value");
-    let config = Config::load("config.yaml")?;
-
-    // Dump with redaction
-    let yaml = config.to_yaml(true, true)?;  // resolve=true, redact=true
-    println!("{}", yaml);
-    // api:
-    //   key: '[REDACTED]'
-    //   secret: '[REDACTED]'
-
-    // But you can still access actual values
-    let key: String = config.get("api.key")?;
-    println!("Key length: {}", key.len());
-    // Key length: 21
-    ```
-
-=== "CLI"
-
-    ```bash
-    $ export API_KEY="super-secret-key-12345"
-    $ export API_SECRET="super-secret-value"
-
-    $ holoconf dump config.yaml --resolve
-    api:
-      key: '[REDACTED]'
-      secret: '[REDACTED]'
-
-    # Access actual value (use carefully!)
-    $ holoconf get config.yaml api.key
-    super-secret-key-12345
-    ```
-
-!!! warning "Security Best Practice"
-    Always mark secrets, passwords, tokens, and API keys as `sensitive=true`. This prevents them from accidentally leaking into logs, error messages, or monitoring systems.
-
-### Combining Parameters
-
-You can use multiple framework-level parameters together:
-
-```yaml
-database:
-  password: ${env:DB_PASSWORD,default=dev-password,sensitive=true}
-```
-
-This gives you:
-
-- A working default for development
-- Automatic redaction in dumps
-- Production can override via environment variable
-
-## Example: Environment Variables
-
-Let's see a concrete example using the `env` resolver to pull values from environment variables:
-
-```yaml
-database:
-  host: ${env:DB_HOST,default=localhost}
-  port: ${env:DB_PORT,default=5432}
-  password: ${env:DB_PASSWORD,sensitive=true}
-  url: postgres://${.host}:${.port}/mydb
-```
-
-This configuration combines several interpolation techniques:
-
-- **Environment variables** with defaults (`env:DB_HOST,default=localhost`)
-- **Sensitive values** for secrets (`env:DB_PASSWORD,sensitive=true`)
-- **Self-references** to build URLs (`${.host}`)
-
-=== "Python"
-
-    ```python
-    import os
-    from holoconf import Config
-
-    # Set production values
-    os.environ["DB_HOST"] = "prod-db.example.com"
-    os.environ["DB_PORT"] = "5433"
-    os.environ["DB_PASSWORD"] = "super-secret"
-
-    config = Config.load("config.yaml")
-
-    # Access values
-    print(config.database.host)      # prod-db.example.com
-    print(config.database.port)      # 5433
-    print(config.database.url)       # postgres://prod-db.example.com:5433/mydb
-
-    # Dump config (password is redacted)
-    print(config.to_yaml(redact=True))
-    # database:
-    #   host: prod-db.example.com
-    #   port: 5433
-    #   password: '[REDACTED]'
-    #   url: postgres://prod-db.example.com:5433/mydb
-    ```
-
-=== "Rust"
-
-    ```rust
-    use holoconf::Config;
-    use std::env;
-
-    // Set production values
-    env::set_var("DB_HOST", "prod-db.example.com");
-    env::set_var("DB_PORT", "5433");
-    env::set_var("DB_PASSWORD", "super-secret");
+    env::set_var("DB_PORT", "5432");
 
     let config = Config::load("config.yaml")?;
-
-    // Access values
-    let host: String = config.get("database.host")?;
-    let port: i64 = config.get("database.port")?;
     let url: String = config.get("database.url")?;
-
-    println!("{}", host);  // prod-db.example.com
-    println!("{}", port);  // 5433
-    println!("{}", url);   // postgres://prod-db.example.com:5433/mydb
+    println!("{}", url);
+    // postgres://prod-db.example.com:5432/db
     ```
 
 === "CLI"
 
     ```bash
     $ export DB_HOST="prod-db.example.com"
-    $ export DB_PORT="5433"
-    $ export DB_PASSWORD="super-secret"
-
-    $ holoconf get config.yaml database.host
-    prod-db.example.com
-
+    $ export DB_PORT="5432"
     $ holoconf get config.yaml database.url
-    postgres://prod-db.example.com:5433/mydb
-
-    $ holoconf dump config.yaml --resolve
-    database:
-      host: prod-db.example.com
-      port: 5433
-      password: '[REDACTED]'
-      url: postgres://prod-db.example.com:5433/mydb
+    postgres://prod-db.example.com:5432/db
     ```
 
-## Other Resolvers
+HoloConf includes several built-in resolvers for common use cases:
 
-HoloConf supports many types of resolvers beyond environment variables and self-references:
+- **`env`** - Environment variables
+- **`file`** - File contents
+- **`http`/`https`** - Remote content via HTTP
+- **`ssm`** - AWS Systems Manager Parameter Store (via plugin)
+- **`cfn`** - CloudFormation stack outputs (via plugin)
 
-- **`file`** - Include content from files
-- **`http/https`** - Fetch from HTTP endpoints
-- **`env`** - Environment variables (shown above)
-- **`ssm`** - AWS Systems Manager Parameter Store
-- **`cfn`** - CloudFormation stack outputs
-- **Custom resolvers** - Write your own!
+You can even write your own custom resolvers in Python!
 
-All resolvers support the framework-level parameters (`default=` and `sensitive=`), so you can use the same patterns everywhere.
-
-For detailed information on each resolver and resolver-specific parameters, see the [Resolvers](resolvers.md) section.
+For detailed information on all available resolvers, their specific features, and advanced capabilities like defaults and sensitive value handling, see the [Resolvers](resolvers.md) section.
 
 ## Escaping Literal Dollars
 
@@ -533,26 +251,22 @@ The backslash tells HoloConf not to interpret this as interpolation:
 | `${.sibling}` | Self-reference (current level) | `${.port}` |
 | `${..parent}` | Self-reference (parent level) | `${..shared.timeout}` |
 | `${...grandparent}` | Self-reference (grandparent level) | `${...company.name}` |
-| `${resolver:arg}` | Call a resolver | `${env:DB_HOST}` |
-| `${resolver:arg,default=val}` | With default | `${env:PORT,default=8080}` |
-| `${resolver:arg,sensitive=true}` | Mark as sensitive | `${env:API_KEY,sensitive=true}` |
+| `${resolver:arg}` | External value via resolver | `${env:DB_HOST}` |
 | `\${literal}` | Escape interpolation | `\${not_interpolated}` |
 
 ## What You've Learned
 
 You now understand:
 
+- **Interpolation basics** - Using `${...}` to avoid repeating values
 - **Self-references** - Referencing other config values (absolute and relative)
-- **Interpolation syntax** - `${resolver:argument,param=value}`
-- **Framework-level parameters** - `default=` and `sensitive=` work with all resolvers
 - **Relative references** - Using `.`, `..`, `...` to navigate the config tree
-- **Fallback chains** - Nested defaults for resilience
-- **Security** - Marking sensitive values for automatic redaction
-- **Escaping** - Using `\$` for literal dollar signs
+- **Resolvers** - Fetching values from external sources like environment variables
+- **Escaping** - Using `\${` for literal dollar signs
 
 ## Next Steps
 
-- **[Resolvers](resolvers.md)** - Explore all available resolvers and their specific features
+- **[Resolvers](resolvers.md)** - Deep dive into all available resolvers, defaults, sensitive values, and custom resolvers
 - **[Merging](merging.md)** - Combine multiple configuration files with layered overrides
 - **[Validation](validation.md)** - Catch configuration errors early with JSON Schema
 
