@@ -1,22 +1,6 @@
 # Getting Started
 
-Let's build your first hierarchical configuration from scratch. By the end of this guide, you'll understand why HoloConf exists and how to use it to make your configuration flexible and secure.
-
-## Why Hierarchical Configuration?
-
-Imagine you're building an application. You hardcode the database host as `localhost` during development. Everything works great. Then you deploy to production and... nothing works. You forgot to change the database host.
-
-So you use environment variables instead. Now your configuration is scattered across environment variable declarations, deployment scripts, and documentation. New team members struggle to understand what variables are needed.
-
-HoloConf solves this by letting you write configuration files that:
-
-- Show all possible settings in one place (self-documenting)
-- Pull values from environment variables and external sources (deployment flexibility)
-- Reference other config values to avoid duplication (DRY)
-- Merge multiple files for environment-specific overrides (layered configuration)
-- Validate against schemas to catch errors early (reliability)
-
-Let's see how this works in practice.
+HoloConf lets you write configuration files that pull values from environment variables, reference other config values to stay DRY, merge files for different environments, and validate against schemas. Let's see how it works.
 
 ## Installation
 
@@ -151,7 +135,8 @@ database:
 ```
 
 Notice three things here:
-- `${env:DB_HOST}` - Gets a value from an **external source** (environment variable)
+
+- `${env:DB_HOST}` - Gets a value from an **external source** (via the `env` resolver)
 - `${app.name}` - **Absolute reference** to a value elsewhere in the config
 - `${.host}` - **Relative reference** to a sibling value (keeps things DRY)
 
@@ -323,18 +308,6 @@ false
 Schemas catch typos and enforce type constraints before your application starts.
 
 **Learn more:** [Validation Guide](validation.md)
-
-## What You've Learned
-
-You now know how to:
-
-- **Load configuration** from YAML files
-- **Access values** with dot notation
-- **Use interpolation** to reference config values and pull from external sources
-- **Merge configurations** for environment-specific overrides
-- **Validate** with JSON Schema to catch errors early
-
-This covers the core concepts of HoloConf. Each of these topics has much more depth - check out the detailed guides to learn more!
 
 ## Next Steps
 
