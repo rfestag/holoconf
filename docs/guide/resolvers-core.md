@@ -420,6 +420,36 @@ password: ${file:../secrets/db-password.txt}
 
 The paths `database.yaml` and `../secrets/db-password.txt` are resolved relative to `config/app.yaml`, not where you run your program.
 
+### RFC 8089 File URI Syntax
+
+HoloConf supports RFC 8089 file: URI syntax for explicit absolute paths. This is useful when you want to be explicit about absolute paths:
+
+```yaml
+# RFC 8089 file: URIs (all equivalent for absolute paths)
+system_config: ${file:///etc/myapp/config.yaml}
+explicit_local: ${file://localhost/etc/myapp/config.yaml}
+minimal_form: ${file:/etc/myapp/config.yaml}
+```
+
+All three forms reference the same absolute path `/etc/myapp/config.yaml`. The resolver normalizes them to the appropriate path format.
+
+**Remote file URIs are rejected:**
+
+```yaml
+# This will error - remote file URIs not supported
+remote_file: ${file://server.example.com/path/to/file}
+```
+
+HoloConf only supports local file access for security reasons. Remote file URIs (with a non-localhost hostname) are rejected with a clear error message.
+
+!!! tip "When to Use RFC 8089 Syntax"
+    Use plain paths for most cases: `${file:./config.yaml}` or `${file:/etc/app/config.yaml}`.
+
+    Use RFC 8089 syntax when:
+    - Interoperating with systems that use file: URIs
+    - You want to be explicit about the path being absolute
+    - Your configuration documents the URI format for clarity
+
 ### Handling Missing Files
 
 What if the file doesn't exist?
@@ -472,10 +502,14 @@ For centralized configuration management, you can fetch values from HTTP endpoin
 - Loading shared defaults from a central location
 - Integrating with REST APIs
 
-Let's start with a simple example:
+HoloConf provides separate `http` and `https` resolvers that auto-prepend the appropriate protocol, making your configs cleaner:
 
 ```yaml
-feature_flags: ${https:https://config.example.com/flags.json}
+# Clean syntax - resolver auto-prepends https://
+feature_flags: ${https:config.example.com/flags.json}
+
+# Also works with http
+api_config: ${http:api.internal/config.json}
 ```
 
 But wait - HTTP fetching is disabled by default for security. You need to explicitly enable it:
@@ -541,7 +575,7 @@ Let's enable HTTP fetching:
 What happens if the HTTP request fails?
 
 ```yaml
-data: ${https:https://api.example.com/config}
+data: ${https:api.example.com/config}
 ```
 
 === "Python"
@@ -579,7 +613,7 @@ data: ${https:https://api.example.com/config}
 You can provide a fallback:
 
 ```yaml
-data: ${https:https://api.example.com/config,default={}}
+data: ${https:api.example.com/config,default={}}
 ```
 
 Now if the HTTP request fails, it uses the empty object instead of erroring.
@@ -631,7 +665,7 @@ First, let's try fetching from an internal service:
 
 ```yaml
 config:
-  data: ${https:https://internal.corp.com/config.json}
+  data: ${https:internal.corp.com/config.json}
 ```
 
 === "Python"
@@ -778,9 +812,9 @@ Here's a summary of all core resolvers:
 | Self-reference | `${path}` | Absolute reference | `${defaults.timeout}` |
 | Self-reference | `${.key}` | Sibling reference | `${.host}` |
 | Self-reference | `${..parent.key}` | Parent's sibling | `${..shared.timeout}` |
-| `file` | `${file:path}` | File content | `${file:secrets/key.pem}` |
-| `http` | `${http:url}` | HTTP GET | `${http:http://api.example.com/config}` |
-| `https` | `${https:url}` | HTTPS GET | `${https:https://api.example.com/config}` |
+| `file` | `${file:path}` | File content or RFC 8089 URI | `${file:secrets/key.pem}` |
+| `http` | `${http:url}` | HTTP GET (auto-prepends http://) | `${http:api.example.com/config}` |
+| `https` | `${https:url}` | HTTPS GET (auto-prepends https://) | `${https:api.example.com/config}` |
 
 All resolvers support:
 

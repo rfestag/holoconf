@@ -143,13 +143,13 @@ public_ref: ${secrets.api_key,sensitive=false}
 
 ### 3. File Resolver (`file`)
 
-Reads content from local files.
+Reads content from local files. Supports RFC 8089 file: URI syntax.
 
 **Arguments:**
 
 | Position | Name | Required | Description |
 |----------|------|----------|-------------|
-| 1 | path | Yes | Local file path (relative to config file directory) |
+| 1 | path | Yes | Local file path (relative to config file directory) or RFC 8089 file: URI |
 
 **Keyword Arguments:**
 
@@ -171,7 +171,15 @@ Reads content from local files.
 | `binary` | bytes | Return raw bytes (`bytes` in Python, `Vec<u8>` in Rust) |
 
 **Behavior:**
-- Paths are relative to the config file's directory
+- Paths are relative to the config file's directory by default
+- Supports RFC 8089 file: URI syntax for explicit path specifications:
+  - `file:///path/to/file` - Absolute path with empty authority (localhost)
+  - `file://localhost/path/to/file` - Absolute path with explicit localhost
+  - `file:/path/to/file` - Absolute path (minimal form)
+  - `file://remote/path` - Remote file URIs are **rejected** with an error
+- Plain paths (no `file://` prefix) work as before:
+  - Relative paths: `./config.yaml`, `../shared/data.json`
+  - Absolute paths: `/etc/app/config.yaml` (subject to `file_roots` security)
 - If file doesn't exist and no default provided, raises `ResolverError`
 - If file doesn't exist and default is provided, returns default
 - When `parse=auto`, format is detected by file extension
@@ -182,8 +190,14 @@ Reads content from local files.
 
 **Examples:**
 ```yaml
-# Auto-detect format by extension
+# Relative paths (traditional syntax)
 config: ${file:./extra.yaml}
+shared: ${file:../shared/common.yaml}
+
+# RFC 8089 file: URI syntax (absolute paths)
+system_config: ${file:///etc/myapp/config.yaml}
+local_file: ${file://localhost/var/lib/myapp/data.json}
+minimal_form: ${file:/opt/app/settings.yaml}
 
 # With default if file doesn't exist
 config: ${file:./optional.yaml,default={}}
@@ -248,13 +262,13 @@ config1.merge(config2)  # Now allows /app, /etc, /var/lib
 
 ### 4. HTTP Resolver (`http`)
 
-Fetches content from remote URLs.
+Fetches content from remote HTTP URLs.
 
 **Arguments:**
 
 | Position | Name | Required | Description |
 |----------|------|----------|-------------|
-| 1 | url | Yes | HTTP or HTTPS URL |
+| 1 | url | Yes | HTTP URL (auto-prepends `http://` if not present) |
 
 **Keyword Arguments:**
 
@@ -285,7 +299,9 @@ Fetches content from remote URLs.
 | `binary` | bytes | Return raw bytes (`bytes` in Python, `Vec<u8>` in Rust) |
 
 **Behavior:**
-- Supports `http://` and `https://` URLs
+- Auto-prepends `http://` scheme to the URL argument
+- Strips any existing `http://` or `https://` prefix before prepending
+- Strips leading `//` if present (e.g., `${http://example.com}` → `http://example.com`)
 - If request fails and no default provided, raises `ResolverError`
 - If request fails and default is provided, returns default
 - When `parse=auto`, format is detected by Content-Type header or URL extension
@@ -294,28 +310,43 @@ Fetches content from remote URLs.
 - Binary content returns raw bytes (useful for certificates, images)
 - Not sensitive by default; use `sensitive=true` for secrets
 
+**URL Normalization Examples:**
+```yaml
+# Clean syntax (recommended) - auto-prepends http://
+remote_config: ${http:example.com/config.yaml}
+# Resolves to: http://example.com/config.yaml
+
+# With protocol prefix (backwards compatible) - strips and re-prepends
+remote_config: ${http:http://example.com/config.yaml}
+# Resolves to: http://example.com/config.yaml
+
+# With double slashes (backwards compatible)
+remote_config: ${http://example.com/config.yaml}
+# Resolves to: http://example.com/config.yaml
+```
+
 **Examples:**
 ```yaml
 # Fetch remote config (auto-detect format)
-remote_config: ${http:https://config.example.com/shared.yaml}
+remote_config: ${http:example.com/shared.yaml}
 
 # With default if request fails
-remote_config: ${http:https://config.example.com/shared.yaml,default={}}
+remote_config: ${http:example.com/shared.yaml,default={}}
 
 # With timeout
-remote_config: ${http:https://config.example.com/shared.yaml,timeout=60}
+remote_config: ${http:example.com/shared.yaml,timeout=60}
 
 # With authentication header
-remote_config: ${http:https://config.example.com/shared.yaml,header=Authorization:Bearer ${env:API_TOKEN}}
+remote_config: ${http:api.example.com/config,header=Authorization:Bearer ${env:API_TOKEN}}
 
 # Explicit JSON parsing
-api_config: ${http:https://api.example.com/config,parse=json}
+api_config: ${http:api.example.com/config,parse=json}
 
 # Binary content (certificate from URL)
-ca_cert: ${http:https://pki.internal/ca.pem,parse=binary}
+ca_cert: ${http:pki.internal/ca.pem,parse=binary}
 
 # Mark as sensitive
-secret_config: ${http:https://vault.internal/config,sensitive=true}
+secret_config: ${http:vault.internal/config,sensitive=true}
 ```
 
 **Security:**
@@ -400,14 +431,97 @@ config = Config.load(
 
 ```yaml
 # Override proxy for specific request
-value: ${http:https://api.example.com/config,proxy=http://proxy:8080}
+value: ${https:api.example.com/config,proxy=http://proxy:8080}
 
 # mTLS for specific request
-value: ${http:https://secure.corp/config,client_cert=/path/cert.pem,client_key=/path/key.pem}
+value: ${https:secure.corp/config,client_cert=/path/cert.pem,client_key=/path/key.pem}
 
 # Custom CA for specific request
-value: ${http:https://internal.corp/config,extra_ca_bundle=/path/to/ca.pem}
+value: ${https:internal.corp/config,extra_ca_bundle=/path/to/ca.pem}
 ```
+
+### 5. HTTPS Resolver (`https`)
+
+Fetches content from remote HTTPS URLs. This resolver is nearly identical to the `http` resolver but auto-prepends `https://` instead of `http://`.
+
+**Arguments:**
+
+| Position | Name | Required | Description |
+|----------|------|----------|-------------|
+| 1 | url | Yes | HTTPS URL (auto-prepends `https://` if not present) |
+
+**Keyword Arguments:**
+
+Same as the `http` resolver - supports all the same kwargs for parsing, timeouts, headers, TLS configuration, proxies, and sensitivity.
+
+**Behavior:**
+- Auto-prepends `https://` scheme to the URL argument
+- Strips any existing `http://` or `https://` prefix before prepending
+- Strips leading `//` if present (e.g., `${https://example.com}` → `https://example.com`)
+- All other behavior identical to `http` resolver (defaults, parsing, etc.)
+
+**URL Normalization Examples:**
+```yaml
+# Clean syntax (recommended) - auto-prepends https://
+remote_config: ${https:api.example.com/config.yaml}
+# Resolves to: https://api.example.com/config.yaml
+
+# With protocol prefix (backwards compatible) - strips and re-prepends
+remote_config: ${https:https://api.example.com/config.yaml}
+# Resolves to: https://api.example.com/config.yaml
+
+# With double slashes (backwards compatible)
+remote_config: ${https://api.example.com/config.yaml}
+# Resolves to: https://api.example.com/config.yaml
+
+# Even strips wrong protocol and uses https
+remote_config: ${https:http://api.example.com/config.yaml}
+# Resolves to: https://api.example.com/config.yaml
+```
+
+**Examples:**
+```yaml
+# Fetch remote config (auto-detect format)
+remote_config: ${https:config.example.com/shared.yaml}
+
+# With default if request fails
+remote_config: ${https:api.example.com/config.json,default={}}
+
+# With timeout
+remote_config: ${https:api.example.com/config,timeout=60}
+
+# With authentication header
+api_token: ${https:vault.corp.com/token,header=Authorization:Bearer ${env:VAULT_TOKEN}}
+
+# Explicit YAML parsing
+settings: ${https:config.internal/app.yaml,parse=yaml}
+
+# Mark as sensitive (for secrets)
+database_password: ${https:secrets.internal/db-pass,sensitive=true}
+
+# mTLS for specific request
+secure_config: ${https:api.corp.com/config,client_cert=/path/cert.pem,client_key=/path/key.pem}
+```
+
+**Security:**
+- Same security model as `http` resolver
+- **Disabled by default** to prevent SSRF attacks
+- Must be explicitly enabled with `allow_http=True` (despite the name, this enables both http and https)
+- URL allowlists apply to both http and https resolvers
+
+```python
+# Enable HTTPS resolver (same as HTTP)
+config = Config.load("config.yaml", allow_http=True)
+
+# With URL allowlist (recommended for production)
+config = Config.load(
+    "config.yaml",
+    allow_http=True,
+    http_allowlist=["https://config.internal/*", "https://api.example.com/*"]
+)
+```
+
+**Note:** While the http and https resolvers are separate, they share the same configuration settings (`allow_http`, `http_allowlist`, `http_proxy`, TLS options, etc.). The only difference is which protocol scheme is prepended to the URL.
 
 ## API Surface
 
@@ -544,13 +658,13 @@ ResolverError: File not found
 ### HTTP Request Error
 
 ```yaml
-config: ${http:https://example.com/config.yaml}
+config: ${https:example.com/config.yaml}
 ```
 
 ```
 ResolverError: Failed to fetch remote configuration
-  Resolver: http
-  Key: https://example.com/config.yaml
+  Resolver: https
+  Key: example.com/config.yaml
   Path: config
   Cause: HTTP 404 Not Found
   Help: Check the URL is correct and accessible
@@ -559,27 +673,27 @@ ResolverError: Failed to fetch remote configuration
 ### HTTP Resolver Disabled
 
 ```yaml
-config: ${http:https://example.com/config.yaml}
+config: ${https:example.com/config.yaml}
 ```
 
 ```
-ResolverError: HTTP resolver is disabled
-  Resolver: http
-  Key: https://example.com/config.yaml
+ResolverError: HTTPS resolver is disabled
+  Resolver: https
+  Key: example.com/config.yaml
   Path: config
-  Help: Enable HTTP resolver with Config.load(..., allow_http=True)
+  Help: Enable HTTPS resolver with Config.load(..., allow_http=True)
 ```
 
 ### HTTP URL Not in Allowlist
 
 ```yaml
-config: ${http:https://untrusted.com/config.yaml}
+config: ${https:untrusted.com/config.yaml}
 ```
 
 ```
 ResolverError: URL not in allowlist
-  Resolver: http
-  Key: https://untrusted.com/config.yaml
+  Resolver: https
+  Key: untrusted.com/config.yaml
   Path: config
   Allowlist: https://config.internal/*, https://api.example.com/config/*
   Help: Add the URL to http_allowlist or check for typos
@@ -656,11 +770,11 @@ pool_size: 10
 ```yaml
 # config.yaml
 # Fetch shared config from config server
-shared: ${http:https://config.internal/shared/v1.yaml}
+shared: ${https:config.internal/shared/v1.yaml}
 
 # Override with local values
 local:
-  feature_flags: ${http:https://config.internal/flags/${env:APP_ENV}.json}
+  feature_flags: ${https:config.internal/flags/${env:APP_ENV}.json}
 ```
 
 ```python

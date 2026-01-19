@@ -124,3 +124,30 @@ tests:
       error:
         type: ResolverError
         message_contains: "allowed"
+
+  # RFC 8089 file: URI Compliance Tests
+  # Note: Absolute path tests (file:///, file://localhost, file:/) require
+  # test framework support for file_roots configuration. For now, we test
+  # the parsing and error handling logic.
+
+  - name: rfc8089_reject_remote_hostname
+    given:
+      config: |
+        value: ${file://server.example.com/share/config.yaml}
+    when:
+      access: value
+    then:
+      error:
+        type: ResolverError
+        message_contains: "Remote file URIs not supported"
+
+  - name: rfc8089_relative_path_unchanged
+    given:
+      files:
+        data.txt: "relative path test"
+      config: |
+        value: ${file:data.txt}
+    when:
+      access: value
+    then:
+      value: "relative path test"

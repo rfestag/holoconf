@@ -209,7 +209,7 @@ Here's something important: resolvers are invoked **lazily** - values are only r
 
 ```yaml
 expensive:
-  data: ${http:https://slow-api.example.com/data}  # Not fetched during load
+  data: ${https:slow-api.example.com/data}  # Not fetched during load
 cached:
   value: ${env:CACHE_KEY}  # Not read during load
 ```
@@ -273,7 +273,8 @@ Here's a handy table of the most common resolver patterns:
 | `${.sibling}` | Self-reference (relative) | `${.port}` |
 | `${..parent.value}` | Self-reference (parent) | `${..shared.timeout}` |
 | `${file:path}` | Include file content | `${file:./secrets.yaml}` |
-| `${http:url}` | Fetch from HTTP | `${http:https://config.example.com/settings}` |
+| `${http:url}` | Fetch from HTTP (auto-prepends http://) | `${http:api.example.com/settings}` |
+| `${https:url}` | Fetch from HTTPS (auto-prepends https://) | `${https:config.example.com/settings}` |
 | `${ssm:/path}` | AWS SSM Parameter | `${ssm:/app/prod/db-password}` |
 | `\${literal}` | Escape interpolation | `\${not_interpolated}` |
 

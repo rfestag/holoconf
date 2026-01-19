@@ -334,14 +334,21 @@ impl ResolverRegistry {
         registry
     }
 
-    /// Register the built-in resolvers (env, file, http)
+    /// Register the built-in resolvers (env, file, http, https)
     fn register_builtin_resolvers(&mut self) {
         // Environment variable resolver
         self.register(Arc::new(FnResolver::new("env", env_resolver)));
         // File resolver
         self.register(Arc::new(FnResolver::new("file", file_resolver)));
-        // HTTP resolver (disabled by default for security)
-        self.register(Arc::new(FnResolver::new("http", http_resolver)));
+
+        // HTTP/HTTPS resolvers (only available with http feature)
+        #[cfg(feature = "http")]
+        {
+            // HTTP resolver (disabled by default for security)
+            self.register(Arc::new(FnResolver::new("http", http_resolver)));
+            // HTTPS resolver (disabled by default for security)
+            self.register(Arc::new(FnResolver::new("https", https_resolver)));
+        }
     }
 
     /// Register a resolver
@@ -469,10 +476,64 @@ fn env_resolver(
     }
 }
 
+/// Normalize file path according to RFC 8089 file: URI scheme
+///
+/// RFC 8089 defines these valid formats:
+///   file:///path      - Local file (empty authority)
+///   file://localhost/path - Local file (explicit localhost)
+///   file:/path        - Local file (minimal form)
+///   file://host/path  - Remote file (not supported, returns error)
+///   path              - HoloConf relative path (not RFC, but supported)
+///
+/// Returns (normalized_path, is_relative)
+fn normalize_file_path(arg: &str) -> Result<(String, bool)> {
+    if arg.starts_with("//") {
+        // file://... format - Parse as RFC 8089 file: URL
+        // Remove exactly two leading slashes to get the authority+path
+        let after_slashes = &arg[2..];
+
+        // Check if this is file:/// (third slash means empty authority)
+        if after_slashes.starts_with('/') {
+            // file:/// - empty authority means localhost
+            // The rest is the absolute path (already starts with /)
+            Ok((after_slashes.to_string(), false))
+        } else {
+            // file://hostname/path or file://hostname format
+            let parts: Vec<&str> = after_slashes.splitn(2, '/').collect();
+            let hostname = parts[0];
+
+            if hostname.eq_ignore_ascii_case("localhost") {
+                // file://localhost/path - explicit localhost
+                let path = parts.get(1).map(|s| format!("/{}", s)).unwrap_or_else(|| "/".to_string());
+                Ok((path, false))
+            } else {
+                // file://hostname/path - remote file (not supported)
+                Err(Error::resolver_custom(
+                    "file",
+                    format!(
+                        "Remote file URIs not supported: file://{}\n\
+                         HoloConf only supports local files. Use file:///path for absolute paths or file:path for relative paths.",
+                        arg
+                    ),
+                ))
+            }
+        }
+    } else if arg.starts_with('/') {
+        // file:/path - RFC 8089 local absolute (no authority)
+        Ok((arg.to_string(), false))
+    } else {
+        // No leading slashes: relative path (HoloConf convention)
+        Ok((arg.to_string(), true))
+    }
+}
+
 /// Built-in file resolver
 ///
 /// Usage:
-///   ${file:path/to/file}                    - Read file as text (UTF-8)
+///   ${file:path/to/file}                    - Read file as text (UTF-8), relative to config
+///   ${file:///absolute/path}                - Absolute path (RFC 8089)
+///   ${file://localhost/absolute/path}       - Absolute path (RFC 8089, explicit localhost)
+///   ${file:/absolute/path}                  - Absolute path (RFC 8089 minimal form)
 ///   ${file:path/to/file,parse=yaml}         - Parse as YAML
 ///   ${file:path/to/file,parse=json}         - Parse as JSON
 ///   ${file:path/to/file,parse=text}         - Read as text (explicit)
@@ -490,30 +551,32 @@ fn file_resolver(
     kwargs: &HashMap<String, String>,
     ctx: &ResolverContext,
 ) -> Result<ResolvedValue> {
-    use std::path::Path;
-
     if args.is_empty() {
         return Err(
             Error::parse("file resolver requires a file path").with_path(ctx.config_path.clone())
         );
     }
 
-    let file_path_str = &args[0];
+    let file_path_arg = &args[0];
     let parse_mode = kwargs.get("parse").map(|s| s.as_str()).unwrap_or("auto");
     let encoding = kwargs
         .get("encoding")
         .map(|s| s.as_str())
         .unwrap_or("utf-8");
 
+    // Normalize file path according to RFC 8089
+    let (normalized_path, is_relative) = normalize_file_path(file_path_arg)?;
+
     // Resolve relative paths based on context base path
-    let file_path = if Path::new(file_path_str).is_relative() {
+    let file_path = if is_relative {
         if let Some(base) = &ctx.base_path {
-            base.join(file_path_str)
+            base.join(&normalized_path)
         } else {
-            std::path::PathBuf::from(file_path_str)
+            std::path::PathBuf::from(&normalized_path)
         }
     } else {
-        std::path::PathBuf::from(file_path_str)
+        // Absolute path from RFC 8089 file: URI
+        std::path::PathBuf::from(&normalized_path)
     };
 
     // Validate path is within allowed roots (path traversal protection)
@@ -534,7 +597,7 @@ fn file_resolver(
     let canonical_path = file_path.canonicalize().map_err(|e| {
         // Check if this is a "not found" error for better error message
         if e.kind() == std::io::ErrorKind::NotFound {
-            return Error::file_not_found(file_path_str, Some(ctx.config_path.clone()));
+            return Error::file_not_found(file_path_arg, Some(ctx.config_path.clone()));
         }
         Error::resolver_custom("file", format!("Failed to resolve file path: {}", e))
             .with_path(ctx.config_path.clone())
@@ -584,7 +647,7 @@ fn file_resolver(
     // Handle binary encoding separately - returns Value::Bytes directly
     if encoding == "binary" {
         let bytes = std::fs::read(&file_path)
-            .map_err(|_| Error::file_not_found(file_path_str, Some(ctx.config_path.clone())))?;
+            .map_err(|_| Error::file_not_found(file_path_arg, Some(ctx.config_path.clone())))?;
         return Ok(ResolvedValue::new(Value::Bytes(bytes)));
     }
 
@@ -594,19 +657,19 @@ fn file_resolver(
             // Read as binary and base64 encode
             use base64::{engine::general_purpose::STANDARD, Engine as _};
             let bytes = std::fs::read(&file_path)
-                .map_err(|_| Error::file_not_found(file_path_str, Some(ctx.config_path.clone())))?;
+                .map_err(|_| Error::file_not_found(file_path_arg, Some(ctx.config_path.clone())))?;
             STANDARD.encode(bytes)
         }
         "ascii" => {
             // Read as UTF-8 but strip non-ASCII characters
             let raw = std::fs::read_to_string(&file_path)
-                .map_err(|_| Error::file_not_found(file_path_str, Some(ctx.config_path.clone())))?;
+                .map_err(|_| Error::file_not_found(file_path_arg, Some(ctx.config_path.clone())))?;
             raw.chars().filter(|c| c.is_ascii()).collect()
         }
         _ => {
             // Default to UTF-8 (including explicit "utf-8")
             std::fs::read_to_string(&file_path)
-                .map_err(|_| Error::file_not_found(file_path_str, Some(ctx.config_path.clone())))?
+                .map_err(|_| Error::file_not_found(file_path_arg, Some(ctx.config_path.clone())))?
         }
     };
 
@@ -650,20 +713,44 @@ fn file_resolver(
     }
 }
 
+/// Normalize HTTP/HTTPS URL by stripping existing scheme and prepending the correct one
+///
+/// This allows flexible syntax like:
+///   ${https://example.com}    → https://example.com
+///   ${https:example.com}      → https://example.com
+///   ${https:https://example}  → https://example.com (backwards compatible)
+#[cfg(feature = "http")]
+fn normalize_http_url(scheme: &str, arg: &str) -> String {
+    // Strip any existing http:// or https:// prefix
+    let clean = arg
+        .strip_prefix("http://")
+        .or_else(|| arg.strip_prefix("https://"))
+        .unwrap_or(arg);
+
+    // Strip leading // if present (handles ${https://example.com} syntax)
+    let clean = clean.strip_prefix("//").unwrap_or(clean);
+
+    // Prepend the correct scheme
+    format!("{}://{}", scheme, clean)
+}
+
 /// Built-in HTTP resolver
 ///
 /// Fetches content from remote URLs.
 ///
 /// Usage:
-///   ${http:https://example.com/config.yaml}           - Auto-detect parse mode
-///   ${http:https://example.com/config,parse=yaml}     - Parse as YAML
-///   ${http:https://example.com/config,parse=json}     - Parse as JSON
-///   ${http:https://example.com/config,parse=text}     - Read as text
-///   ${http:https://example.com/config,parse=binary}   - Read as binary
-///   ${http:https://example.com/config,timeout=60}     - Timeout in seconds
-///   ${http:https://example.com/config,header=Auth:Bearer token} - Add header
-///   ${http:https://example.com/config,default={}}     - Default if request fails
-///   ${http:https://example.com/config,sensitive=true} - Mark as sensitive
+///   ${http://example.com/config.yaml}                 - Auto-detect parse mode
+///   ${http:example.com/config,parse=yaml}             - Parse as YAML
+///   ${http://example.com/config,parse=json}           - Parse as JSON
+///   ${http://example.com/config,parse=text}           - Read as text
+///   ${http://example.com/config,parse=binary}         - Read as binary
+///   ${http://example.com/config,timeout=60}           - Timeout in seconds
+///   ${http://example.com/config,header=Auth:Bearer token} - Add header
+///   ${http://example.com/config,default={}}           - Default if request fails
+///   ${http://example.com/config,sensitive=true}       - Mark as sensitive
+///
+/// Backwards compatible:
+///   ${http:https://example.com}                       - Still works (for http/https mixing)
 ///
 /// Security:
 /// - Disabled by default (requires allow_http=true in ConfigOptions)
@@ -677,11 +764,12 @@ fn http_resolver(
         return Err(Error::parse("http resolver requires a URL").with_path(ctx.config_path.clone()));
     }
 
-    let url = &args[0];
-
     // Perform the actual HTTP request
     #[cfg(feature = "http")]
     {
+        // Normalize URL to prepend http:// scheme
+        let url = normalize_http_url("http", &args[0]);
+
         // Check if HTTP is enabled
         if !ctx.allow_http {
             return Err(Error {
@@ -701,17 +789,17 @@ fn http_resolver(
             let url_allowed = ctx
                 .http_allowlist
                 .iter()
-                .any(|pattern| url_matches_pattern(url, pattern));
+                .any(|pattern| url_matches_pattern(&url, pattern));
             if !url_allowed {
                 return Err(Error::http_not_in_allowlist(
-                    url,
+                    &url,
                     &ctx.http_allowlist,
                     Some(ctx.config_path.clone()),
                 ));
             }
         }
 
-        http_fetch(url, kwargs, ctx)
+        http_fetch(&url, kwargs, ctx)
     }
 
     #[cfg(not(feature = "http"))]
@@ -722,6 +810,86 @@ fn http_resolver(
         Err(Error::resolver_custom(
             "http",
             "HTTP support not compiled in. Rebuild with --features http",
+        ))
+    }
+}
+
+/// Built-in HTTPS resolver
+///
+/// Fetches content from remote HTTPS URLs. Same as http_resolver but prepends https:// scheme.
+///
+/// Usage:
+///   ${https://example.com/config.yaml}                - Auto-detect parse mode
+///   ${https:example.com/config,parse=yaml}            - Parse as YAML
+///   ${https://example.com/config,parse=json}          - Parse as JSON
+///   ${https://example.com/config,parse=text}          - Read as text
+///   ${https://example.com/config,parse=binary}        - Read as binary
+///   ${https://example.com/config,timeout=60}          - Timeout in seconds
+///   ${https://example.com/config,header=Auth:Bearer token} - Add header
+///   ${https://example.com/config,default={}}          - Default if request fails
+///   ${https://example.com/config,sensitive=true}      - Mark as sensitive
+///
+/// Backwards compatible:
+///   ${https:https://example.com}                      - Still works
+///
+/// Security:
+/// - Disabled by default (requires allow_http=true in ConfigOptions)
+/// - URL allowlist can restrict which URLs are accessible
+fn https_resolver(
+    args: &[String],
+    kwargs: &HashMap<String, String>,
+    ctx: &ResolverContext,
+) -> Result<ResolvedValue> {
+    if args.is_empty() {
+        return Err(Error::parse("https resolver requires a URL").with_path(ctx.config_path.clone()));
+    }
+
+    // Perform the actual HTTP request
+    #[cfg(feature = "http")]
+    {
+        // Normalize URL to prepend https:// scheme
+        let url = normalize_http_url("https", &args[0]);
+
+        // Check if HTTP is enabled
+        if !ctx.allow_http {
+            return Err(Error {
+                kind: crate::error::ErrorKind::Resolver(crate::error::ResolverErrorKind::HttpDisabled),
+                path: Some(ctx.config_path.clone()),
+                source_location: None,
+                help: Some(
+                    "HTTPS resolver is disabled. The URL specified by this config path cannot be fetched.\n\
+                     Enable with Config.load(..., allow_http=True)".to_string()
+                ),
+                cause: None,
+            });
+        }
+
+        // Check URL against allowlist if configured
+        if !ctx.http_allowlist.is_empty() {
+            let url_allowed = ctx
+                .http_allowlist
+                .iter()
+                .any(|pattern| url_matches_pattern(&url, pattern));
+            if !url_allowed {
+                return Err(Error::http_not_in_allowlist(
+                    &url,
+                    &ctx.http_allowlist,
+                    Some(ctx.config_path.clone()),
+                ));
+            }
+        }
+
+        http_fetch(&url, kwargs, ctx)
+    }
+
+    #[cfg(not(feature = "http"))]
+    {
+        // If compiled without HTTP feature, return an error
+        let _ = kwargs; // Suppress unused warning
+        let _ = ctx; // Suppress unused warning
+        Err(Error::resolver_custom(
+            "https",
+            "HTTPS support not compiled in. Rebuild with --features http",
         ))
     }
 }
@@ -1489,6 +1657,13 @@ mod tests {
     fn test_registry_with_http() {
         let registry = ResolverRegistry::with_builtins();
         assert!(registry.contains("http"));
+    }
+
+    #[test]
+    #[cfg(feature = "http")]
+    fn test_registry_with_https() {
+        let registry = ResolverRegistry::with_builtins();
+        assert!(registry.contains("https"), "https resolver should be registered when http feature is enabled");
     }
 
     // Additional edge case tests for improved coverage

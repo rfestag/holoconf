@@ -34,7 +34,7 @@ let mut options = ConfigOptions::default();
 options.allow_http = true;
 
 let config = Config::from_yaml_with_options(r#"
-api_key: ${http:https://config.example.com/api-key}
+api_key: ${https:config.example.com/api-key}
 "#, options)?;
 ```
 
