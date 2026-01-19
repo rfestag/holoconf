@@ -7,6 +7,7 @@ Let's learn how to split your configuration intelligently and merge it back toge
 ## Why Split Configuration?
 
 Imagine you're working on a web application. You have:
+
 - Base settings that everyone shares (app name, API endpoints structure)
 - Production settings (production database, external services)
 - Your local development overrides (point database at localhost, enable debug mode)
@@ -62,15 +63,15 @@ Notice production only includes what's different. Let's merge them:
     config.merge(production)
 
     # Now config contains the merged result
-    db_host = config.get("database.host")
+    db_host = config.database.host
     print(f"Database: {db_host}")
     # Database: prod-db.example.com
 
-    db_port = config.get("database.port")
+    db_port = config.database.port
     print(f"Port: {db_port}")
     # Port: 5432 (from base.yaml)
 
-    pool_size = config.get("database.pool_size")
+    pool_size = config.database.pool_size
     print(f"Pool size: {pool_size}")
     # Pool size: 50 (overridden by production.yaml)
     ```
@@ -97,11 +98,17 @@ Notice production only includes what's different. Let's merge them:
 === "CLI"
 
     ```bash
-    # The CLI doesn't support merge directly, but you can use glob patterns
-    # (we'll cover this later)
+    # Merge multiple files by listing them
+    $ holoconf get config/base.yaml config/production.yaml database.host
+    prod-db.example.com
+
+    # All files are merged left-to-right, later values override earlier ones
+    $ holoconf get config/base.yaml config/production.yaml database.port
+    5432
     ```
 
 Let's understand what happened:
+
 - `database.host` was overridden to `prod-db.example.com`
 - `database.port` kept its value from base (`5432`) because production didn't override it
 - `database.pool_size` was overridden to `50`
@@ -183,7 +190,7 @@ Load the right config based on environment:
     config.merge(env_config)
 
     # Now use the merged config
-    db_host = config.get("database.host")
+    db_host = config.database.host
     print(f"Running in {env} with database {db_host}")
     ```
 
@@ -209,6 +216,7 @@ Load the right config based on environment:
     ```
 
 This pattern gives you:
+
 - Shared defaults in `base.yaml`
 - Environment-specific overrides in `development.yaml`, `production.yaml`, etc.
 - One simple switch (`APP_ENV`) to control which config is loaded
@@ -384,7 +392,7 @@ app:
     config = Config.load("config/*.yaml")
 
     # Files merged in order: 00-base, 10-database, 99-local
-    timeout = config.get("app.timeout")
+    timeout = config.app.timeout
     print(f"Timeout: {timeout}")
     # Timeout: 60 (from 99-local.yaml)
     ```
@@ -437,6 +445,17 @@ Use `Config.optional()` to return an empty config instead:
     config.merge(overrides);
     ```
 
+=== "CLI"
+
+    ```bash
+    # Mix required and optional files with --optional flag
+    $ holoconf get config/base.yaml --optional config/local.yaml database.host
+    localhost
+
+    # If config/local.yaml exists, its values override base.yaml
+    # If it doesn't exist, no error - just uses base.yaml
+    ```
+
 ## Putting It All Together
 
 Here's a complete example using everything we've learned:
@@ -475,8 +494,8 @@ config/
 
     # Now use the fully merged config
     print(f"Running in {env} environment")
-    print(f"Database: {config.get('database.host')}")
-    print(f"Log level: {config.get('logging.level')}")
+    print(f"Database: {config.database.host}")
+    print(f"Log level: {config.logging.level}")
     ```
 
 === "Rust"
@@ -503,6 +522,7 @@ config/
     ```
 
 This gives you maximum flexibility:
+
 - Shared defaults in numbered files
 - Environment-specific overrides
 - Personal local overrides
