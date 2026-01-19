@@ -19,6 +19,10 @@ path = "src/lib.rs"
 name = "holoconf"
 path = "src/main.rs"
 
+[features]
+default = ["http"]
+http = ["holoconf-core/http"]
+
 [dependencies]
 holoconf-core.workspace = true
 clap = { version = "4.5", features = ["derive"] }

@@ -37,6 +37,92 @@ tests:
         type: ResolverError
         message_contains: "requires a URL"
 
+  # === HTTPS Resolver ===
+  # Tests for the https resolver (auto-prepends https:// scheme)
+
+  - name: https_resolver_disabled_by_default
+    given:
+      config: |
+        remote: ${https://example.com/config.yaml}
+    when:
+      access: remote
+    then:
+      error:
+        type: ResolverError
+        message_contains: "HTTPS resolver is disabled"
+
+  - name: https_resolver_disabled_error_includes_help
+    given:
+      config: |
+        remote: ${https:config.internal/app.yaml}
+    when:
+      access: remote
+    then:
+      error:
+        message_contains: "allow_http"
+
+  - name: https_no_url_error
+    given:
+      config: |
+        bad: ${https:}
+    when:
+      access: bad
+    then:
+      error:
+        type: ResolverError
+        message_contains: "requires a URL"
+
+  # === URL Normalization ===
+  # Tests that verify URL scheme auto-insertion works correctly
+
+  - name: http_accepts_url_without_slashes
+    given:
+      config: |
+        remote: ${http:example.com/config.yaml}
+    when:
+      access: remote
+    then:
+      error:
+        type: ResolverError
+        # Should still fail because HTTP is disabled, but URL is normalized
+        message_contains: "HTTP resolver is disabled"
+
+  - name: https_accepts_url_without_slashes
+    given:
+      config: |
+        remote: ${https:example.com/config.yaml}
+    when:
+      access: remote
+    then:
+      error:
+        type: ResolverError
+        # Should still fail because HTTPS is disabled, but URL is normalized
+        message_contains: "HTTPS resolver is disabled"
+
+  - name: http_accepts_url_with_https_prefix
+    given:
+      config: |
+        remote: ${http:https://example.com/config.yaml}
+    when:
+      access: remote
+    then:
+      error:
+        type: ResolverError
+        # Should normalize to http://example.com/config.yaml
+        message_contains: "HTTP resolver is disabled"
+
+  - name: https_accepts_url_with_http_prefix
+    given:
+      config: |
+        remote: ${https:http://example.com/config.yaml}
+    when:
+      access: remote
+    then:
+      error:
+        type: ResolverError
+        # Should normalize to https://example.com/config.yaml
+        message_contains: "HTTPS resolver is disabled"
+
   # Note: Tests for actual HTTP functionality (fetching, parsing, headers, timeouts,
   # allowlists) require HTTP mocking and are implemented as Rust unit tests in
   # crates/holoconf-core/src/resolver.rs using the mockito crate.
