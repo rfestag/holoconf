@@ -20,6 +20,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `${file:/absolute/path}` - Absolute path (minimal form)
   - Remote file URIs (`file://hostname/path`) are rejected with clear error
   - Plain paths continue to work as before
+- **Certificate Variables for HTTPS**: HTTPS resolver now accepts certificate/key content from variables, not just file paths (#39)
+  - Pass PEM certificates directly from environment variables or other resolvers
+  - Support for P12/PFX binary certificates via `parse=binary` from file resolver
+  - Auto-detection: `-----BEGIN` marker = PEM content, otherwise = file path
+  - P12 binary content auto-detected when passed as bytes
+  - Fully backwards compatible - existing file paths continue to work
+  - Example: `${https:api.com/config,client_cert=${env:CERT_PEM},client_key=${env:KEY_PEM}}`
+  - Example: `${https:api.com/config,client_cert=${file:./id.p12,parse=binary}}`
 
 ### Changed
 - **HTTP/HTTPS URL Normalization**: HTTP and HTTPS resolvers now auto-prepend protocol schemes (#43)

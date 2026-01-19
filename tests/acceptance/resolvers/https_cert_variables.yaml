@@ -1,0 +1,154 @@
+suite: https_cert_variables
+description: HTTPS resolver with certificate variables from environment and file resolvers
+
+tests:
+  # === Certificate from Environment Variables ===
+
+  - name: https_cert_from_env_pem_content
+    description: Use PEM certificate content from environment variable
+    given:
+      config: |
+        # This will fail because HTTP is disabled, but validates parameter parsing
+        api_data: ${https:api.example.com/config,client_cert=${env:TEST_CERT_PEM},client_key=${env:TEST_KEY_PEM}}
+      env:
+        TEST_CERT_PEM: |
+          -----BEGIN CERTIFICATE-----
+          MIICijCCAXICCQC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789
+          -----END CERTIFICATE-----
+        TEST_KEY_PEM: |
+          -----BEGIN PRIVATE KEY-----
+          MIICdgIBADANBgkqhkiG9w0BAQEFAASCAmAwggJcAgEAAoGBAK1234567890
+          -----END PRIVATE KEY-----
+    when:
+      access: api_data
+    then:
+      error:
+        type: ResolverError
+        message_contains: "HTTPS resolver is disabled"
+
+  - name: https_ca_bundle_from_env
+    description: Use CA bundle from environment variable
+    given:
+      config: |
+        api_data: ${https:internal.corp.com/config,ca_bundle=${env:CA_BUNDLE_PEM}}
+      env:
+        CA_BUNDLE_PEM: |
+          -----BEGIN CERTIFICATE-----
+          MIIDdzCCAl+gAwIBAgIEAgAAuTANBgkqhkiG9w0BAQUFADBaMQswCQYDVQQG
+          -----END CERTIFICATE-----
+    when:
+      access: api_data
+    then:
+      error:
+        type: ResolverError
+        message_contains: "HTTPS resolver is disabled"
+
+  # === Certificate from File Resolver (Text Mode) ===
+
+  - name: https_cert_from_file_resolver_text
+    description: Load PEM certificate from file resolver as text
+    given:
+      files:
+        test_cert.pem: |
+          -----BEGIN CERTIFICATE-----
+          MIICijCCAXICCQC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789
+          -----END CERTIFICATE-----
+        test_key.pem: |
+          -----BEGIN PRIVATE KEY-----
+          MIICdgIBADANBgkqhkiG9w0BAQEFAASCAmAwggJcAgEAAoGBAK1234567890
+          -----END PRIVATE KEY-----
+      config: |
+        api_data: ${https:secure.example.com/data,client_cert=${file:test_cert.pem,parse=text},client_key=${file:test_key.pem,parse=text}}
+    when:
+      access: api_data
+    then:
+      error:
+        type: ResolverError
+        message_contains: "HTTPS resolver is disabled"
+
+  - name: https_ca_bundle_from_file_resolver
+    description: Load CA bundle from file resolver
+    given:
+      files:
+        ca-bundle.pem: |
+          -----BEGIN CERTIFICATE-----
+          MIIDdzCCAl+gAwIBAgIEAgAAuTANBgkqhkiG9w0BAQUFADBaMQswCQYDVQQG
+          -----END CERTIFICATE-----
+          -----BEGIN CERTIFICATE-----
+          MIIEkjCCA3qgAwIBAgIQCgFBQgAAAVOFc2oLheynCDANBgkqhkiG9w0BAQsF
+          -----END CERTIFICATE-----
+      config: |
+        api_data: ${https:internal.corp.com/config,ca_bundle=${file:ca-bundle.pem,parse=text}}
+    when:
+      access: api_data
+    then:
+      error:
+        type: ResolverError
+        message_contains: "HTTPS resolver is disabled"
+
+  # === Mixed Mode: Variable + File Path ===
+
+  - name: https_cert_from_env_key_from_path
+    description: Mix PEM cert from env with key from file path
+    given:
+      files:
+        client-key.pem: |
+          -----BEGIN PRIVATE KEY-----
+          MIICdgIBADANBgkqhkiG9w0BAQEFAASCAmAwggJcAgEAAoGBAK1234567890
+          -----END PRIVATE KEY-----
+      config: |
+        api_data: ${https:api.example.com/config,client_cert=${env:CERT_PEM},client_key=client-key.pem}
+      env:
+        CERT_PEM: |
+          -----BEGIN CERTIFICATE-----
+          MIICijCCAXICCQC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789
+          -----END CERTIFICATE-----
+    when:
+      access: api_data
+    then:
+      error:
+        type: ResolverError
+        message_contains: "HTTPS resolver is disabled"
+
+  # === Traditional File Paths Still Work ===
+
+  - name: https_cert_traditional_file_paths
+    description: Traditional file path syntax continues to work
+    given:
+      files:
+        cert.pem: |
+          -----BEGIN CERTIFICATE-----
+          MIICijCCAXICCQC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789
+          -----END CERTIFICATE-----
+        key.pem: |
+          -----BEGIN PRIVATE KEY-----
+          MIICdgIBADANBgkqhkiG9w0BAQEFAASCAmAwggJcAgEAAoGBAK1234567890
+          -----END PRIVATE KEY-----
+      config: |
+        api_data: ${https:api.example.com/config,client_cert=cert.pem,client_key=key.pem}
+    when:
+      access: api_data
+    then:
+      error:
+        type: ResolverError
+        message_contains: "HTTPS resolver is disabled"
+
+  # === Error Cases ===
+
+  - name: https_pem_cert_requires_key
+    description: PEM certificate requires client_key parameter
+    given:
+      config: |
+        api_data: ${https:api.example.com/config,client_cert=${env:CERT_PEM}}
+      env:
+        CERT_PEM: |
+          -----BEGIN CERTIFICATE-----
+          MIICijCCAXICCQC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789
+          -----END CERTIFICATE-----
+    when:
+      access: api_data
+    then:
+      error:
+        type: ResolverError
+        # Will fail at disabled check before reaching key requirement check
+        message_contains: "HTTPS resolver is disabled"

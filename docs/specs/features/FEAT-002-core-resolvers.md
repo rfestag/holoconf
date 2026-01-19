@@ -281,10 +281,10 @@ Fetches content from remote HTTP URLs.
 | `header` | string | - | HTTP header to include as `Name:Value` (repeatable) |
 | `sensitive` | bool | `false` | Mark the resolved value as sensitive |
 | `proxy` | string | - | HTTP or SOCKS proxy URL (overrides config-level `http_proxy`) |
-| `ca_bundle` | string | - | Path to CA bundle (replaces default roots, overrides `http_ca_bundle`) |
-| `extra_ca_bundle` | string | - | Path to extra CA (adds to default roots, overrides `http_extra_ca_bundle`) |
-| `client_cert` | string | - | Path to client certificate (PEM or P12/PFX) |
-| `client_key` | string | - | Path to client private key (PEM) |
+| `ca_bundle` | string | - | CA bundle file path or PEM content (replaces default roots, overrides `http_ca_bundle`) |
+| `extra_ca_bundle` | string | - | Extra CA file path or PEM content (adds to default roots, overrides `http_extra_ca_bundle`) |
+| `client_cert` | string/bytes | - | Client cert file path, PEM content, or P12/PFX binary |
+| `client_key` | string | - | Client key file path or PEM content (not needed for P12/PFX) |
 | `key_password` | string | - | Password for encrypted key or P12/PFX |
 | `insecure` | bool | `false` | Skip TLS verification (DANGEROUS, dev only) |
 
@@ -374,19 +374,32 @@ Config-level options apply to all HTTP requests. Per-request kwargs override con
 |--------|------|-------------|
 | `http_proxy` | string | HTTP or SOCKS proxy URL (e.g., `http://proxy:8080`, `socks5://proxy:1080`) |
 | `http_proxy_from_env` | bool | Auto-detect proxy from `HTTP_PROXY`/`HTTPS_PROXY` environment variables |
-| `http_ca_bundle` | path | Replace default root certificates with custom CA bundle |
-| `http_extra_ca_bundle` | path | Add extra CA certificates to default root certificates |
-| `http_client_cert` | path | Client certificate for mTLS (PEM or P12/PFX format) |
-| `http_client_key` | path | Client private key for mTLS (PEM format, not needed for P12/PFX) |
+| `http_ca_bundle` | str/bytes | CA bundle file path or PEM content (replaces default root certificates) |
+| `http_extra_ca_bundle` | str/bytes | Extra CA file path or PEM content (adds to default root certificates) |
+| `http_client_cert` | str/bytes | Client cert file path, PEM content, or P12/PFX binary for mTLS |
+| `http_client_key` | str/bytes | Client key file path or PEM content for mTLS (not needed for P12/PFX) |
 | `http_client_key_password` | string | Password for encrypted private key or P12/PFX bundle |
 | `http_insecure` | bool | Skip TLS verification (DANGEROUS, dev only) |
 
 **Supported Key/Certificate Formats:**
-- Unencrypted PEM certificate and key files
-- Encrypted PKCS#8 PEM private keys (password protected)
-- P12/PFX bundles containing certificate and key (password protected)
+- Unencrypted PEM certificate and key files (file paths or content)
+- Encrypted PKCS#8 PEM private keys (password protected, file paths or content)
+- P12/PFX bundles containing certificate and key (password protected, file paths or binary content)
+
+**Certificate/Key Input Types:**
+- **File paths** (str): `/path/to/cert.pem`, `./relative/key.pem`, `/path/to/identity.p12`
+- **PEM content** (str): String containing `-----BEGIN CERTIFICATE-----` or `-----BEGIN PRIVATE KEY-----`
+- **P12/PFX binary** (bytes): Binary P12/PFX data (Python only via `bytes` type)
+
+**Auto-Detection:**
+- String with `-----BEGIN` → Parsed as PEM content
+- String ending in `.p12`/`.pfx` → Read as P12 file
+- Bytes → Parsed as P12 binary
+- Otherwise → Read as file path
 
 ```python
+# === Traditional File Paths ===
+
 # mTLS with PEM files
 config = Config.load(
     "config.yaml",
@@ -419,6 +432,42 @@ config = Config.load(
     http_extra_ca_bundle="/etc/ssl/certs/internal-ca.pem"
 )
 
+# === Certificate Variables (PEM Content) ===
+
+import os
+
+# PEM certificate from environment variable
+cert_pem = os.getenv("CLIENT_CERT_PEM")  # Contains -----BEGIN CERTIFICATE-----
+key_pem = os.getenv("CLIENT_KEY_PEM")    # Contains -----BEGIN PRIVATE KEY-----
+
+config = Config.load(
+    "config.yaml",
+    allow_http=True,
+    http_client_cert=cert_pem,  # Auto-detected as PEM content
+    http_client_key=key_pem      # Auto-detected as PEM content
+)
+
+# CA bundle from environment variable
+ca_bundle_pem = os.getenv("INTERNAL_CA_BUNDLE")
+config = Config.load(
+    "config.yaml",
+    allow_http=True,
+    http_extra_ca_bundle=ca_bundle_pem  # Auto-detected as PEM content
+)
+
+# === Certificate Variables (P12 Binary) ===
+
+# P12 from binary (Python only)
+with open("/path/to/identity.p12", "rb") as f:
+    p12_bytes = f.read()
+
+config = Config.load(
+    "config.yaml",
+    allow_http=True,
+    http_client_cert=p12_bytes,  # Auto-detected as P12 binary
+    http_client_key_password="secret"
+)
+
 # Proxy configuration
 config = Config.load(
     "config.yaml",
@@ -433,11 +482,25 @@ config = Config.load(
 # Override proxy for specific request
 value: ${https:api.example.com/config,proxy=http://proxy:8080}
 
-# mTLS for specific request
+# mTLS for specific request (file paths)
 value: ${https:secure.corp/config,client_cert=/path/cert.pem,client_key=/path/key.pem}
 
 # Custom CA for specific request
 value: ${https:internal.corp/config,extra_ca_bundle=/path/to/ca.pem}
+
+# === Certificate Variables ===
+
+# mTLS with PEM from environment variables
+secure_api: ${https:api.corp.com/config,client_cert=${env:CLIENT_CERT_PEM},client_key=${env:CLIENT_KEY_PEM}}
+
+# CA bundle from file resolver
+internal_config: ${https:internal.corp/config,ca_bundle=${file:./ca-bundle.pem,parse=text}}
+
+# P12 binary from file resolver (Python only)
+identity_data: ${https:secure.example.com/data,client_cert=${file:./identity.p12,parse=binary},key_password=${env:P12_PASSWORD}}
+
+# Mixed: PEM cert from env + key from file path
+mixed_mode: ${https:api.example.com/config,client_cert=${env:CERT_PEM},client_key=/etc/ssl/private/key.pem}
 ```
 
 ### 5. HTTPS Resolver (`https`)
@@ -499,8 +562,11 @@ settings: ${https:config.internal/app.yaml,parse=yaml}
 # Mark as sensitive (for secrets)
 database_password: ${https:secrets.internal/db-pass,sensitive=true}
 
-# mTLS for specific request
+# mTLS with file paths
 secure_config: ${https:api.corp.com/config,client_cert=/path/cert.pem,client_key=/path/key.pem}
+
+# mTLS with certificate variables
+secure_api: ${https:api.corp.com/data,client_cert=${env:CLIENT_CERT_PEM},client_key=${env:CLIENT_KEY_PEM}}
 ```
 
 **Security:**

@@ -44,14 +44,14 @@ pub struct ConfigOptions {
     pub http_proxy: Option<String>,
     /// Whether to auto-detect proxy from environment variables (HTTP_PROXY, HTTPS_PROXY)
     pub http_proxy_from_env: bool,
-    /// Path to CA bundle PEM file (replaces default webpki-roots)
-    pub http_ca_bundle: Option<PathBuf>,
-    /// Path to extra CA bundle PEM file (appends to webpki-roots)
-    pub http_extra_ca_bundle: Option<PathBuf>,
-    /// Path to client certificate PEM or P12/PFX file (for mTLS)
-    pub http_client_cert: Option<PathBuf>,
-    /// Path to client private key PEM file (for mTLS, not needed for P12/PFX)
-    pub http_client_key: Option<PathBuf>,
+    /// CA bundle (file path or PEM content) - replaces default webpki-roots
+    pub http_ca_bundle: Option<crate::resolver::CertInput>,
+    /// Extra CA bundle (file path or PEM content) - appends to webpki-roots
+    pub http_extra_ca_bundle: Option<crate::resolver::CertInput>,
+    /// Client certificate for mTLS (file path, PEM content, or P12/PFX binary)
+    pub http_client_cert: Option<crate::resolver::CertInput>,
+    /// Client private key for mTLS (file path or PEM content, not needed for P12/PFX)
+    pub http_client_key: Option<crate::resolver::CertInput>,
     /// Password for encrypted private key or P12/PFX file
     pub http_client_key_password: Option<String>,
     // NOTE: http_insecure was removed in v0.3.0 for security reasons.
