@@ -2359,7 +2359,7 @@
 <h2 id="lazy-resolution">Lazy Resolution<a class="headerlink" href="#lazy-resolution" title="Permanent link">&para;</a></h2>
 <p>Here's something important: resolvers are invoked <strong>lazily</strong> - values are only resolved when you access them, not when the configuration is loaded.</p>
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="nt">expensive</span><span class="p">:</span>
-</span><span id="__span-16-2"><a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="w">  </span><span class="nt">data</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${http:https://slow-api.example.com/data}</span><span class="w">  </span><span class="c1"># Not fetched during load</span>
+</span><span id="__span-16-2"><a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="w">  </span><span class="nt">data</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${https:slow-api.example.com/data}</span><span class="w">  </span><span class="c1"># Not fetched during load</span>
 </span><span id="__span-16-3"><a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="nt">cached</span><span class="p">:</span>
 </span><span id="__span-16-4"><a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="w">  </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${env:CACHE_KEY}</span><span class="w">  </span><span class="c1"># Not read during load</span>
 </span></code></pre></div>
@@ -2453,8 +2453,13 @@
 </tr>
 <tr>
 <td><code>${http:url}</code></td>
-<td>Fetch from HTTP</td>
-<td><code>${http:https://config.example.com/settings}</code></td>
+<td>Fetch from HTTP (auto-prepends http://)</td>
+<td><code>${http:api.example.com/settings}</code></td>
+</tr>
+<tr>
+<td><code>${https:url}</code></td>
+<td>Fetch from HTTPS (auto-prepends https://)</td>
+<td><code>${https:config.example.com/settings}</code></td>
 </tr>
 <tr>
 <td><code>${ssm:/path}</code></td>
