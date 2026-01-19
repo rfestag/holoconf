@@ -504,7 +504,10 @@ fn normalize_file_path(arg: &str) -> Result<(String, bool)> {
 
             if hostname.eq_ignore_ascii_case("localhost") {
                 // file://localhost/path - explicit localhost
-                let path = parts.get(1).map(|s| format!("/{}", s)).unwrap_or_else(|| "/".to_string());
+                let path = parts
+                    .get(1)
+                    .map(|s| format!("/{}", s))
+                    .unwrap_or_else(|| "/".to_string());
                 Ok((path, false))
             } else {
                 // file://hostname/path - remote file (not supported)
@@ -841,7 +844,9 @@ fn https_resolver(
     ctx: &ResolverContext,
 ) -> Result<ResolvedValue> {
     if args.is_empty() {
-        return Err(Error::parse("https resolver requires a URL").with_path(ctx.config_path.clone()));
+        return Err(
+            Error::parse("https resolver requires a URL").with_path(ctx.config_path.clone())
+        );
     }
 
     // Perform the actual HTTP request
@@ -1663,7 +1668,10 @@ mod tests {
     #[cfg(feature = "http")]
     fn test_registry_with_https() {
         let registry = ResolverRegistry::with_builtins();
-        assert!(registry.contains("https"), "https resolver should be registered when http feature is enabled");
+        assert!(
+            registry.contains("https"),
+            "https resolver should be registered when http feature is enabled"
+        );
     }
 
     // Additional edge case tests for improved coverage
