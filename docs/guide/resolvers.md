@@ -242,9 +242,9 @@ HoloConf provides several built-in resolvers:
 Always available, no extra installation needed:
 
 - **[env](resolvers-core.md#environment-variables)** - Environment variables
-- **[Self-references](resolvers-core.md#self-references)** - Reference other config values (absolute and relative paths)
-- **[file](resolvers-core.md#file-includes)** - Include content from files
-- **[http/https](resolvers-core.md#http-fetching)** - Fetch from HTTP endpoints
+- **[Self-references](resolvers-core.md#self-references-avoiding-duplication)** - Reference other config values (absolute and relative paths)
+- **[file](resolvers-core.md#file-includes-splitting-large-configurations)** - Include content from files
+- **[http/https](resolvers-core.md#httphttps-remote-configuration)** - Fetch from HTTP endpoints
 
 ### AWS Resolvers
 

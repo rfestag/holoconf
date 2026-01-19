@@ -21,7 +21,7 @@ theme:
     - content.code.annotate    # Code annotations
     - navigation.instant       # Preserves tab state on navigation
     - navigation.tabs          # Top-level sections as tabs
-    - navigation.sections      # Collapsible sections in sidebar
+    - navigation.indexes       # Section index pages (incompatible with navigation.sections)
     - navigation.top           # Back to top button
     - search.highlight         # Highlight search terms
     - search.suggest           # Search suggestions
@@ -81,6 +81,7 @@ hooks:
 
 plugins:
   - search
+  - section-index
   - mkdocstrings:
       default_handler: python
       handlers:
@@ -88,6 +89,7 @@ plugins:
           paths:
             - packages/python/holoconf/src
           options:
+            allow_inspection: false  # Use .pyi stubs only, don't inspect compiled .so module
             show_source: false
             show_bases: true
             show_root_heading: true
@@ -122,7 +124,7 @@ nav:
       - Getting Started: guide/getting-started.md
       - Interpolation: guide/interpolation.md
       - Resolvers:
-          - Overview: guide/resolvers.md
+          - guide/resolvers.md
           - Core Resolvers: guide/resolvers-core.md
           - AWS Resolvers: guide/resolvers-aws.md
           - Custom Resolvers: guide/resolvers-custom.md
