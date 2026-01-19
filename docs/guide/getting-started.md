@@ -135,7 +135,7 @@ This works, but the configuration is completely static. Let's make it dynamic!
 
 ## Interpolation: Dynamic Values
 
-Real configurations need to reference other values and pull data from external sources. HoloConf uses **interpolation** with the `${...}` syntax to make this easy.
+Real configurations need to reference other values (using absolute or relative paths) and pull data from external sources. HoloConf uses **interpolation** with the `${...}` syntax to make this easy.
 
 Let's update our configuration to show different types of interpolation:
 
@@ -208,23 +208,13 @@ Now let's use it:
     postgres://prod-db.example.com:5432/my-application
     ```
 
-HoloConf supports many types of interpolation:
-- **Self-references** - `${database.host}` (absolute) or `${.sibling}` (relative)
-- **Environment variables** - `${env:VAR_NAME}`
-- **File contents** - `${file:path/to/file}`
-- **HTTP requests** - `${https://api.example.com/config}`
-- **AWS resources** - `${ssm:/param/path}`, `${cfn:stack.Output}`
-- **Custom resolvers** - Write your own in Python!
-
-You can also provide defaults, mark values as sensitive, create fallback chains, and more.
-
 **Learn more:** [Interpolation Guide](interpolation.md) | [Resolvers Guide](resolvers.md)
 
 ## Merging: Environment-Specific Configuration
 
-Most applications need different settings for development, staging, and production. Instead of maintaining separate complete configuration files, you can create a base configuration and merge environment-specific overrides.
+Many applications have configuration overrides for different environments. With HoloConf, you can merge configs.
 
-Create a base configuration (`base.yaml`):
+`base.yaml`:
 
 ```yaml
 app:
@@ -236,7 +226,7 @@ database:
   port: 5432
 ```
 
-And a development override (`dev.yaml`):
+`dev.yaml`:
 
 ```yaml
 app:
@@ -246,51 +236,19 @@ database:
   host: localhost
 ```
 
-Now merge them:
+Merge them with the CLI:
 
-=== "Python"
+```bash
+$ holoconf dump base.yaml dev.yaml
+app:
+  name: my-application
+  debug: true          # From dev.yaml
+database:
+  host: localhost      # From dev.yaml
+  port: 5432           # From base.yaml
+```
 
-    ```python
-    from holoconf import Config
-
-    base = Config.load("base.yaml")
-    dev = Config.load("dev.yaml")
-
-    # Merge dev settings into base
-    base.merge(dev)
-
-    print(base.app.debug)      # true (from dev)
-    print(base.database.host)  # localhost (from dev)
-    print(base.database.port)  # 5432 (from base)
-    ```
-
-=== "Rust"
-
-    ```rust
-    use holoconf::Config;
-
-    let mut base = Config::load("base.yaml")?;
-    let dev = Config::load("dev.yaml")?;
-
-    base.merge(dev)?;
-
-    let debug: bool = base.get("app.debug")?;
-    println!("{}", debug);  // true (from dev)
-    ```
-
-=== "CLI"
-
-    ```bash
-    # Merge by listing files (later files override earlier ones)
-    $ holoconf get base.yaml dev.yaml app.debug
-    true
-    ```
-
-This lets you:
-- Keep common settings in one place
-- Override only what changes per environment
-- Use optional files that may not exist (like `local.yaml`)
-- Layer multiple configurations together
+Later files override earlier ones, letting you layer environment-specific settings on top of a base configuration.
 
 **Learn more:** [Merging Guide](merging.md)
 
@@ -298,71 +256,71 @@ This lets you:
 
 Typos in configuration can cause runtime failures. JSON Schema validation catches these errors before your application starts.
 
-Create a schema (`schema.json`):
+Create a schema in JSON or YAML:
 
-```json
-{
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "type": "object",
-  "required": ["app", "database"],
-  "properties": {
-    "app": {
+=== "JSON"
+
+    `schema.json`:
+    ```json
+    {
+      "$schema": "http://json-schema.org/draft-07/schema#",
       "type": "object",
+      "required": ["app", "database"],
       "properties": {
-        "name": { "type": "string" },
-        "debug": { "type": "boolean", "default": false }
-      }
-    },
-    "database": {
-      "type": "object",
-      "required": ["host", "port"],
-      "properties": {
-        "host": { "type": "string" },
-        "port": { "type": "integer", "default": 5432 }
+        "app": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "debug": { "type": "boolean", "default": false }
+          }
+        },
+        "database": {
+          "type": "object",
+          "required": ["host", "port"],
+          "properties": {
+            "host": { "type": "string" },
+            "port": { "type": "integer", "default": 5432 }
+          }
+        }
       }
     }
-  }
-}
+    ```
+
+=== "YAML"
+
+    `schema.yaml`:
+    ```yaml
+    $schema: http://json-schema.org/draft-07/schema#
+    type: object
+    required: [app, database]
+    properties:
+      app:
+        type: object
+        properties:
+          name:
+            type: string
+          debug:
+            type: boolean
+            default: false
+      database:
+        type: object
+        required: [host, port]
+        properties:
+          host:
+            type: string
+          port:
+            type: integer
+            default: 5432
+    ```
+
+Load your config with the schema:
+
+```bash
+$ holoconf get config.yaml app.debug --schema schema.yaml
+false
 ```
 
-Now load your config with the schema:
-
-=== "Python"
-
-    ```python
-    from holoconf import Config
-
-    # Load with schema - validates automatically
-    config = Config.load("config.yaml", schema="schema.json")
-
-    # Schema provides defaults for missing values
-    debug = config.app.debug
-    print(debug)  # false (from schema default)
-    ```
-
-=== "Rust"
-
-    ```rust
-    use holoconf::Config;
-
-    let config = Config::load_with_schema("config.yaml", "schema.json")?;
-
-    let debug: bool = config.get("app.debug")?;
-    println!("{}", debug);  // false (from schema default)
-    ```
-
-=== "CLI"
-
-    ```bash
-    $ holoconf get config.yaml app.debug --schema schema.json
-    false
-    ```
-
-Schemas help you:
-- Catch typos and missing required fields
-- Enforce type constraints (string, integer, etc.)
-- Provide default values
-- Document your configuration structure
+Schemas catch typos and enforce type constraints before your application starts.
 
 **Learn more:** [Validation Guide](validation.md)
 
