@@ -1,0 +1,38 @@
+<svg viewBox="30 10 140 160" xmlns="http://www.w3.org/2000/svg">
+  <!-- HoloConf Logo - Bold header version (white for dark header) -->
+
+  <!-- Back layer (defaults) - lightest -->
+  <polygon points="100,30 150,80 100,130 50,80"
+           fill="none" stroke="#ffffff" stroke-width="5" opacity="0.3"
+           transform="translate(0, 30)"/>
+
+  <!-- Middle layer (file config) -->
+  <polygon points="100,30 150,80 100,130 50,80"
+           fill="none" stroke="#ffffff" stroke-width="5" opacity="0.5"
+           transform="translate(0, 15)"/>
+
+  <!-- Front layer (overrides) - boldest -->
+  <polygon points="100,30 150,80 100,130 50,80"
+           fill="none" stroke="#ffffff" stroke-width="7"/>
+
+  <!-- Lines from edge midpoints perpendicular to center -->
+  <g stroke="#ffffff" stroke-width="4" opacity="0.5">
+    <!-- Vertical line from top vertex through center -->
+    <line x1="100" y1="30" x2="100" y2="130"/>
+
+    <!-- From top-left edge midpoint to center -->
+    <line x1="75" y1="55" x2="100" y2="80"/>
+
+    <!-- From top-right edge midpoint to center -->
+    <line x1="125" y1="55" x2="100" y2="80"/>
+
+    <!-- From bottom-left edge midpoint to center -->
+    <line x1="75" y1="105" x2="100" y2="80"/>
+
+    <!-- From bottom-right edge midpoint to center -->
+    <line x1="125" y1="105" x2="100" y2="80"/>
+  </g>
+
+  <!-- Center dot representing resolved config -->
+  <circle cx="100" cy="80" r="12" fill="#ffffff"/>
+</svg>
