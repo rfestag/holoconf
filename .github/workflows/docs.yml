@@ -38,7 +38,7 @@ jobs:
         run: |
           python -m venv .venv
           source .venv/bin/activate
-          pip install mkdocs-material mike "mkdocstrings[python]" maturin pyyaml
+          pip install mkdocs-material mike "mkdocstrings[python]" mkdocs-section-index maturin pyyaml
           pip install -e ".[dev]"
           maturin develop
 
