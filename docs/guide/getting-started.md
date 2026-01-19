@@ -1,6 +1,15 @@
 # Getting Started
 
-HoloConf lets you write configuration files that pull values from environment variables, reference other config values to stay DRY, merge files for different environments, and validate against schemas. Let's see how it works.
+Configuration management gets messy quickly. You copy-paste the same database host into multiple places, then forget to update one when it changes. You maintain separate config files for each environment with 90% duplicated content. Your team struggles to understand what settings are available and which ones are required.
+
+HoloConf solves these problems:
+
+- **Stay DRY** - Reference values instead of repeating them. Change the database host once, and every connection string updates automatically.
+- **Merge configurations** - Define common settings once, then layer environment-specific overrides on top. Your dev, staging, and production configs share a single base.
+- **Pull from external sources** - Read values from environment variables, files, web APIs, or cloud services like AWS Parameter Store. Keep secrets out of your config files.
+- **Validate with schemas** - Define what your configuration should look like. Catch typos and missing values before deployment, not in production.
+
+Let's see how it works.
 
 ## Installation
 
