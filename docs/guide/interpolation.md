@@ -135,6 +135,135 @@ When accessed:
 !!! tip "When to Use Relative vs Absolute"
     Use **absolute** references when you need a specific value regardless of where you are in the config. Use **relative** references when you want to keep sections self-contained and easier to refactor.
 
+## Optional Values with Defaults
+
+Sometimes you want to reference a configuration value that might not exist - like optional feature flags or environment-specific settings. By default, referencing a missing path throws an error:
+
+```yaml
+features:
+  beta: true
+  # No 'experimental' flag defined
+
+app:
+  experimental_enabled: ${features.experimental}  # ERROR: Path not found!
+```
+
+To handle optional values gracefully, use the `default=` parameter:
+
+```yaml
+features:
+  beta: true
+
+app:
+  # Returns 'false' if features.experimental doesn't exist
+  experimental_enabled: ${features.experimental,default=false}
+
+  # Returns default even if the value is null
+  timeout: ${custom.timeout,default=30}
+```
+
+=== "Python"
+
+    ```python
+    from holoconf import Config
+
+    config = Config.load("config.yaml")
+
+    print(config.app.experimental_enabled)
+    # false (from default, since features.experimental doesn't exist)
+
+    print(config.app.timeout)
+    # 30 (from default)
+    ```
+
+=== "Rust"
+
+    ```rust
+    use holoconf::Config;
+
+    let config = Config::load("config.yaml")?;
+
+    let enabled: bool = config.get("app.experimental_enabled")?;
+    println!("{}", enabled);
+    // false
+
+    let timeout: i64 = config.get("app.timeout")?;
+    println!("{}", timeout);
+    // 30
+    ```
+
+=== "CLI"
+
+    ```bash
+    $ holoconf get config.yaml app.experimental_enabled
+    false
+
+    $ holoconf get config.yaml app.timeout
+    30
+    ```
+
+### When Defaults Are Used
+
+The `default=` parameter is used when:
+
+- The path doesn't exist in the configuration
+- The value exists but is explicitly `null`
+
+If the value exists and is not null, the actual value is used (the default is ignored).
+
+### Defaults Can Reference Other Values
+
+Your default value can itself be an interpolation:
+
+```yaml
+defaults:
+  timeout: 30
+  retry_count: 3
+
+service:
+  # Uses service-specific timeout if defined, otherwise falls back to default
+  timeout: ${service.custom_timeout,default=${defaults.timeout}}
+  retries: ${service.custom_retries,default=${defaults.retry_count}}
+```
+
+### Explicit `ref:` Resolver
+
+Under the hood, self-references like `${path}` are actually using a special `ref:` resolver. You can write this explicitly if you prefer:
+
+```yaml
+# These are equivalent:
+value1: ${database.host,default=localhost}
+value2: ${ref:database.host,default=localhost}
+```
+
+The explicit form can be clearer when you're already using other resolvers and want consistency.
+
+### Marking References as Sensitive
+
+Like other resolvers, `ref` supports the `sensitive` flag to mark values as sensitive (they'll be redacted in logs and output):
+
+```yaml
+secrets:
+  api_key: prod-key-12345
+
+# Mark the referenced value as sensitive
+app:
+  key: ${secrets.api_key,sensitive=true}
+  # Can combine with default
+  backup_key: ${secrets.backup_key,default=dev-key,sensitive=true}
+```
+
+This is useful when referencing secrets stored elsewhere in your configuration.
+
+!!! tip "When to Use Defaults"
+    Use defaults for:
+
+    - **Optional feature flags** that may not be defined in all environments
+    - **Environment-specific overrides** that only exist in some deployments
+    - **Graceful degradation** when optional configuration sections are missing
+
+    Avoid defaults for **required configuration** - let errors surface early!
+
 ## Resolvers: Getting Values from External Sources
 
 Self-references are powerful, but sometimes you need values from **outside** your configuration file - like environment variables, files, external services, or cloud provider APIs. This is where **resolvers** come in.
@@ -248,10 +377,14 @@ The backslash tells HoloConf not to interpret this as interpolation:
 | Syntax | Description | Example |
 |--------|-------------|---------|
 | `${path.to.value}` | Self-reference (absolute) | `${database.host}` |
+| `${path,default=value}` | Self-reference with default | `${features.beta,default=false}` |
+| `${path,sensitive=true}` | Mark reference as sensitive | `${secrets.key,sensitive=true}` |
 | `${.sibling}` | Self-reference (current level) | `${.port}` |
 | `${..parent}` | Self-reference (parent level) | `${..shared.timeout}` |
 | `${...grandparent}` | Self-reference (grandparent level) | `${...company.name}` |
 | `${resolver:arg}` | External value via resolver | `${env:DB_HOST}` |
+| `${resolver:arg,default=value}` | Resolver with default | `${env:API_KEY,default=dev-key}` |
+| `${ref:path}` | Explicit self-reference | `${ref:database.host}` |
 | `\${literal}` | Escape interpolation | `\${not_interpolated}` |
 
 ## What You've Learned
@@ -261,6 +394,7 @@ You now understand:
 - **Interpolation basics** - Using `${...}` to avoid repeating values
 - **Self-references** - Referencing other config values (absolute and relative)
 - **Relative references** - Using `.`, `..`, `...` to navigate the config tree
+- **Optional values** - Using `default=` to handle missing or null values gracefully
 - **Resolvers** - Fetching values from external sources like environment variables
 - **Escaping** - Using `\${` for literal dollar signs
 

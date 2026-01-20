@@ -745,6 +745,79 @@ impl Config {
             Interpolation::Literal(s) => Ok(ResolvedValue::new(Value::String(s.clone()))),
 
             Interpolation::Resolver { name, args, kwargs } => {
+                // Special handling for "ref" resolver (config path references)
+                if name == "ref" {
+                    // Get the path from first argument
+                    let ref_path = args
+                        .get(0)
+                        .and_then(|arg| arg.as_literal())
+                        .ok_or_else(|| Error::parse("ref resolver requires a path argument"))?;
+
+                    // Check for circular reference
+                    if resolution_stack.contains(&ref_path.to_string()) {
+                        let mut chain = resolution_stack.clone();
+                        chain.push(ref_path.to_string());
+                        return Err(Error::circular_reference(path, chain));
+                    }
+
+                    // Try to get the value from config
+                    let value_result = self.raw.get_path(ref_path);
+                    let use_default =
+                        value_result.is_err() || value_result.as_ref().unwrap().is_null();
+
+                    if use_default {
+                        // Path missing or null - try defaults
+
+                        // 1. User-provided default (highest priority, never errors)
+                        if let Some(default_arg) = kwargs.get("default") {
+                            let default_str = self.resolve_arg(default_arg, path, resolution_stack)?;
+                            let is_sensitive = kwargs
+                                .get("sensitive")
+                                .and_then(|arg| arg.as_literal())
+                                .map(|v| v.eq_ignore_ascii_case("true"))
+                                .unwrap_or(false);
+                            return if is_sensitive {
+                                Ok(ResolvedValue::sensitive(Value::String(default_str)))
+                            } else {
+                                Ok(ResolvedValue::new(Value::String(default_str)))
+                            };
+                        }
+
+                        // 2. Schema default (if available)
+                        if let Some(schema) = &self.schema {
+                            if let Some(default_value) = schema.get_default(ref_path) {
+                                return Ok(ResolvedValue::new(default_value));
+                            }
+                        }
+
+                        // 3. No defaults - return error
+                        return match value_result {
+                            Err(e) => Err(e),
+                            Ok(_) => Err(Error::path_not_found(ref_path)), // Was null but no default
+                        };
+                    }
+
+                    // Value exists and not null - resolve it recursively
+                    let ref_value = value_result.unwrap();
+                    resolution_stack.push(ref_path.to_string());
+                    let mut result = self.resolve_value(ref_value, ref_path, resolution_stack)?;
+                    resolution_stack.pop();
+
+                    // Apply sensitive flag if present
+                    let is_sensitive = kwargs
+                        .get("sensitive")
+                        .and_then(|arg| arg.as_literal())
+                        .map(|v| v.eq_ignore_ascii_case("true"))
+                        .unwrap_or(false);
+
+                    if is_sensitive {
+                        result.sensitive = true;
+                    }
+
+                    return Ok(result);
+                }
+
+                // Normal resolver handling (for non-ref resolvers)
                 // Create resolver context with all options
                 let mut ctx = ResolverContext::new(path);
                 ctx.config_root = Some(Arc::clone(&self.raw));

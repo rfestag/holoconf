@@ -1,6 +1,150 @@
 # Core Resolvers
 
-HoloConf ships with four essential resolvers that cover the most common configuration needs. Let's explore each one and see how they solve real-world problems.
+HoloConf ships with essential resolvers that cover the most common configuration needs. Let's explore each one and see how they solve real-world problems.
+
+## Config References (`ref`)
+
+The `ref` resolver lets you reference other values within your configuration. While you typically use the shorthand `${path}` syntax, you can also write it explicitly as `${ref:path}`.
+
+### Basic Usage
+
+```yaml
+defaults:
+  timeout: 30
+  retries: 3
+
+service_a:
+  timeout: ${defaults.timeout}    # Shorthand
+  retries: ${ref:defaults.retries}  # Explicit
+
+service_b:
+  timeout: ${defaults.timeout}
+  retries: ${defaults.retries}
+```
+
+Both forms work identically - use whichever feels clearer in your configuration.
+
+### Optional References with Defaults
+
+The real power of `ref` comes from the `default=` parameter. This lets you gracefully handle optional configuration that might not exist:
+
+```yaml
+features:
+  beta: true
+  # No 'experimental' flag defined
+
+app:
+  # Returns false if features.experimental doesn't exist
+  experimental_enabled: ${features.experimental,default=false}
+
+  # Returns 30 if custom_timeout is missing or null
+  timeout: ${config.custom_timeout,default=30}
+```
+
+=== "Python"
+
+    ```python
+    from holoconf import Config
+
+    config = Config.load("config.yaml")
+
+    # No error - uses default since path doesn't exist
+    enabled = config.app.experimental_enabled
+    print(f"Experimental: {enabled}")
+    # Experimental: false
+
+    timeout = config.app.timeout
+    print(f"Timeout: {timeout}")
+    # Timeout: 30
+    ```
+
+=== "Rust"
+
+    ```rust
+    use holoconf::Config;
+
+    let config = Config::load("config.yaml")?;
+
+    let enabled: bool = config.get("app.experimental_enabled")?;
+    println!("Experimental: {}", enabled);
+    // Experimental: false
+
+    let timeout: i64 = config.get("app.timeout")?;
+    println!("Timeout: {}", timeout);
+    // Timeout: 30
+    ```
+
+=== "CLI"
+
+    ```bash
+    $ holoconf get config.yaml app.experimental_enabled
+    false
+
+    $ holoconf get config.yaml app.timeout
+    30
+    ```
+
+### When Defaults Are Applied
+
+The `default=` parameter is used when:
+
+- **Path doesn't exist** in the configuration
+- **Value is explicitly `null`**
+
+If the value exists and is not null, the actual value is used (default is ignored).
+
+### Defaults Can Be Interpolations
+
+Your default value can itself reference other configuration:
+
+```yaml
+defaults:
+  timeout: 30
+  host: localhost
+
+service_a:
+  # Uses service_a.custom_host if defined, otherwise defaults.host
+  host: ${service_a.custom_host,default=${defaults.host}}
+  # Uses service_a.custom_timeout if defined, otherwise defaults.timeout
+  timeout: ${service_a.custom_timeout,default=${defaults.timeout}}
+
+service_b:
+  custom_host: prod.example.com
+  # service_b has custom host, falls back to default timeout
+  host: ${service_b.custom_host,default=${defaults.host}}
+  timeout: ${service_b.custom_timeout,default=${defaults.timeout}}
+```
+
+!!! tip "Use Cases for Optional References"
+    The `default=` parameter is perfect for:
+
+    - **Feature flags** that may not be defined in all environments
+    - **Optional overrides** that only exist in specific deployments
+    - **Environment-specific settings** with sensible defaults
+    - **Graceful degradation** when configuration sections are optional
+
+!!! warning "Required vs Optional Configuration"
+    Don't use defaults for truly **required** configuration - let errors surface early! Only use `default=` when a missing value is genuinely acceptable.
+
+### Marking References as Sensitive
+
+The `ref` resolver supports the `sensitive=true` flag to mark values as sensitive:
+
+```yaml
+secrets:
+  database_password: super-secret-password
+  api_key: prod-api-key-12345
+
+app:
+  # Mark referenced secrets as sensitive (redacted in logs)
+  db_pass: ${secrets.database_password,sensitive=true}
+  api_key: ${secrets.api_key,sensitive=true}
+
+  # Can combine with default
+  backup_key: ${secrets.backup_key,default=dev-key,sensitive=true}
+```
+
+When marked as sensitive, values are redacted in log output and the `dump` command.
 
 ## Environment Variables
 

@@ -1,0 +1,167 @@
+suite: ref_resolver_defaults
+description: Test ref resolver with default parameter for optional chaining
+
+tests:
+  - name: basic_ref_without_default
+    description: Reference an existing path without default parameter
+    given:
+      config: |
+        database:
+          host: localhost
+        value: ${database.host}
+    when:
+      access: value
+    then:
+      value: localhost
+
+  - name: ref_with_default_path_exists
+    description: Default parameter is ignored when path exists
+    given:
+      config: |
+        database:
+          host: prod-db
+        value: ${database.host,default=fallback}
+    when:
+      access: value
+    then:
+      value: prod-db
+
+  - name: ref_with_default_path_missing
+    description: Default parameter is used when path doesn't exist
+    given:
+      config: |
+        database:
+          host: localhost
+        value: ${database.port,default=5432}
+    when:
+      access: value
+    then:
+      value: "5432"
+
+  - name: ref_with_default_null_value
+    description: Default parameter is used when value is null
+    given:
+      config: |
+        database:
+          host: localhost
+          port: null
+        value: ${database.port,default=3000}
+    when:
+      access: value
+    then:
+      value: "3000"
+
+  - name: explicit_ref_resolver
+    description: Explicit ref resolver syntax works
+    given:
+      config: |
+        database:
+          host: localhost
+        value: ${ref:database.host}
+    when:
+      access: value
+    then:
+      value: localhost
+
+  - name: explicit_ref_with_default
+    description: Explicit ref resolver with default parameter
+    given:
+      config: |
+        database:
+          host: localhost
+        value: ${ref:database.missing,default=fallback}
+    when:
+      access: value
+    then:
+      value: fallback
+
+  - name: nested_default_value
+    description: Default can reference another config value
+    given:
+      config: |
+        defaults:
+          timeout: 30
+        database:
+          host: localhost
+        value: ${database.timeout,default=${defaults.timeout}}
+    when:
+      access: value
+    then:
+      value: 30
+
+  - name: deep_path_missing_with_default
+    description: Default works with deeply nested missing paths
+    given:
+      config: |
+        app:
+          name: myapp
+        value: ${app.config.database.timeout,default=60}
+    when:
+      access: value
+    then:
+      value: "60"
+
+  - name: error_without_default_missing_path
+    description: PathNotFoundError when path missing and no default
+    given:
+      config: |
+        database:
+          host: localhost
+        value: ${database.port}
+    when:
+      access: value
+    then:
+      error:
+        type: PathNotFoundError
+
+  - name: error_without_default_null_value
+    description: PathNotFoundError when value is null and no default
+    given:
+      config: |
+        database:
+          port: null
+        value: ${database.port}
+    when:
+      access: value
+    then:
+      error:
+        type: PathNotFoundError
+
+  - name: default_with_sensitive_flag
+    description: Default works together with sensitive flag
+    given:
+      config: |
+        secrets:
+          api_key: null
+        value: ${secrets.api_key,default=dev-key,sensitive=true}
+    when:
+      access: value
+    then:
+      value: dev-key
+      sensitive: true
+
+  - name: sensitive_flag_on_existing_value
+    description: Sensitive flag marks existing value as sensitive
+    given:
+      config: |
+        secrets:
+          api_key: production-key-12345
+        value: ${secrets.api_key,sensitive=true}
+    when:
+      access: value
+    then:
+      value: production-key-12345
+      sensitive: true
+
+  - name: sensitive_flag_without_default
+    description: Sensitive flag works on normal references
+    given:
+      config: |
+        database:
+          password: my-secret-password
+        connection: ${database.password,sensitive=true}
+    when:
+      access: connection
+    then:
+      value: my-secret-password
+      sensitive: true
