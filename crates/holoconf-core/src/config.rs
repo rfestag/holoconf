@@ -749,7 +749,7 @@ impl Config {
                 if name == "ref" {
                     // Get the path from first argument
                     let ref_path = args
-                        .get(0)
+                        .first()
                         .and_then(|arg| arg.as_literal())
                         .ok_or_else(|| Error::parse("ref resolver requires a path argument"))?;
 
