@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Supports nested defaults: `${config.timeout,default=${defaults.timeout}}`
   - Honors schema defaults as fallback when no explicit default provided
   - Framework-level `sensitive=` flag also supported for consistency
-  - See [Interpolation Guide](docs/guide/interpolation.md) for full details
+  - See [Interpolation Guide](guide/interpolation.md) for full details
 
 ## [0.4.0] - 2026-01-19
 
