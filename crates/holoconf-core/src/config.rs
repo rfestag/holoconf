@@ -770,7 +770,8 @@ impl Config {
 
                         // 1. User-provided default (highest priority, never errors)
                         if let Some(default_arg) = kwargs.get("default") {
-                            let default_str = self.resolve_arg(default_arg, path, resolution_stack)?;
+                            let default_str =
+                                self.resolve_arg(default_arg, path, resolution_stack)?;
                             let is_sensitive = kwargs
                                 .get("sensitive")
                                 .and_then(|arg| arg.as_literal())
