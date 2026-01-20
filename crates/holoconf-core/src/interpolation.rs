@@ -205,19 +205,19 @@ impl<'a> InterpolationParser<'a> {
             }
             Some('}') => {
                 // This is a simple self-reference: ${path.to.value}
+                // Convert to ref resolver: ${ref:path}
                 self.advance(); // skip }
-                Ok(Interpolation::SelfRef {
-                    path: identifier,
-                    relative: false,
+                Ok(Interpolation::Resolver {
+                    name: "ref".to_string(),
+                    args: vec![InterpolationArg::Literal(identifier)],
+                    kwargs: HashMap::new(),
                 })
             }
             Some(',') => {
-                // Could be a self-reference with default? Not supported in standard syntax.
-                // Treat as resolver with empty name - will fail at resolution time
-                Err(Error::parse(format!(
-                    "Unexpected ',' after identifier '{}'. Did you mean to use a resolver?",
-                    identifier
-                )))
+                // Self-reference with kwargs: ${path,default=value}
+                // Convert to ref resolver: ${ref:path,default=value}
+                self.advance(); // skip comma
+                self.parse_resolver_call_with_first_arg("ref".to_string(), identifier)
             }
             Some(c) => Err(Error::parse(format!(
                 "Unexpected character '{}' in interpolation",
@@ -285,6 +285,64 @@ impl<'a> InterpolationParser<'a> {
                 // Parse as positional argument
                 let arg = self.parse_argument()?;
                 args.push(arg);
+            }
+        }
+
+        Ok(Interpolation::Resolver { name, args, kwargs })
+    }
+
+    /// Parse a resolver call with a pre-parsed first argument
+    /// Used for ${path,kwargs} syntax which becomes ${ref:path,kwargs}
+    fn parse_resolver_call_with_first_arg(
+        &mut self,
+        name: String,
+        first_arg: String,
+    ) -> Result<Interpolation> {
+        let mut args = vec![InterpolationArg::Literal(first_arg)];
+        let mut kwargs = HashMap::new();
+
+        // Parse remaining arguments/kwargs separated by commas
+        loop {
+            self.skip_whitespace();
+
+            if self.current() == Some('}') {
+                self.advance();
+                break;
+            }
+
+            // We already consumed the first comma, expect more args/kwargs
+            self.skip_whitespace();
+
+            // Try to parse as kwarg first (key=value)
+            if let Some((key, value_arg)) = self.try_parse_kwarg()? {
+                kwargs.insert(key, value_arg);
+            } else {
+                // Parse as positional argument
+                let arg = self.parse_argument()?;
+                args.push(arg);
+            }
+
+            self.skip_whitespace();
+
+            // Check for comma or end
+            match self.current() {
+                Some(',') => {
+                    self.advance();
+                    continue;
+                }
+                Some('}') => {
+                    // Will be handled at start of loop
+                    continue;
+                }
+                Some(c) => {
+                    return Err(Error::parse(format!(
+                        "Expected ',' or '}}' but found '{}'",
+                        c
+                    )));
+                }
+                None => {
+                    return Err(Error::parse("Unexpected end of input in interpolation"));
+                }
             }
         }
 
@@ -519,11 +577,13 @@ mod tests {
     #[test]
     fn test_parse_self_reference() {
         let result = parse("${database.host}").unwrap();
+        // Non-relative self-references are now converted to ref resolver
         assert_eq!(
             result,
-            Interpolation::SelfRef {
-                path: "database.host".into(),
-                relative: false,
+            Interpolation::Resolver {
+                name: "ref".into(),
+                args: vec![InterpolationArg::Literal("database.host".into())],
+                kwargs: HashMap::new(),
             }
         );
     }
@@ -544,11 +604,13 @@ mod tests {
     #[test]
     fn test_parse_array_access() {
         let result = parse("${servers[0].host}").unwrap();
+        // Non-relative paths are now converted to ref resolver
         assert_eq!(
             result,
-            Interpolation::SelfRef {
-                path: "servers[0].host".into(),
-                relative: false,
+            Interpolation::Resolver {
+                name: "ref".into(),
+                args: vec![InterpolationArg::Literal("servers[0].host".into())],
+                kwargs: HashMap::new(),
             }
         );
     }
@@ -694,41 +756,49 @@ mod tests {
     #[test]
     fn test_parse_deeply_nested_path() {
         let result = parse("${a.b.c.d.e.f.g.h}").unwrap();
-        if let Interpolation::SelfRef { path, relative } = result {
-            assert_eq!(path, "a.b.c.d.e.f.g.h");
-            assert!(!relative);
+        // Non-relative paths now become ref resolver
+        if let Interpolation::Resolver { name, args, .. } = result {
+            assert_eq!(name, "ref");
+            assert_eq!(args.len(), 1);
+            assert_eq!(args[0].as_literal(), Some("a.b.c.d.e.f.g.h"));
         } else {
-            panic!("Expected SelfRef");
+            panic!("Expected Resolver");
         }
     }
 
     #[test]
     fn test_parse_multiple_array_indices() {
         let result = parse("${matrix[0][1][2]}").unwrap();
-        if let Interpolation::SelfRef { path, .. } = result {
-            assert_eq!(path, "matrix[0][1][2]");
+        // Non-relative paths now become ref resolver
+        if let Interpolation::Resolver { name, args, .. } = result {
+            assert_eq!(name, "ref");
+            assert_eq!(args[0].as_literal(), Some("matrix[0][1][2]"));
         } else {
-            panic!("Expected SelfRef");
+            panic!("Expected Resolver");
         }
     }
 
     #[test]
     fn test_parse_mixed_path_and_array() {
         let result = parse("${data.items[0].nested[1].value}").unwrap();
-        if let Interpolation::SelfRef { path, .. } = result {
-            assert_eq!(path, "data.items[0].nested[1].value");
+        // Non-relative paths now become ref resolver
+        if let Interpolation::Resolver { name, args, .. } = result {
+            assert_eq!(name, "ref");
+            assert_eq!(args[0].as_literal(), Some("data.items[0].nested[1].value"));
         } else {
-            panic!("Expected SelfRef");
+            panic!("Expected Resolver");
         }
     }
 
     #[test]
     fn test_parse_underscore_in_identifiers() {
         let result = parse("${my_var.some_path}").unwrap();
-        if let Interpolation::SelfRef { path, .. } = result {
-            assert_eq!(path, "my_var.some_path");
+        // Non-relative paths now become ref resolver
+        if let Interpolation::Resolver { name, args, .. } = result {
+            assert_eq!(name, "ref");
+            assert_eq!(args[0].as_literal(), Some("my_var.some_path"));
         } else {
-            panic!("Expected SelfRef");
+            panic!("Expected Resolver");
         }
     }
 
