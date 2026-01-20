@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Config Reference Defaults**: Config references now support optional `default=` parameter for handling missing values (#25)
+  - Use `${path.to.value,default=fallback}` to provide a fallback when path doesn't exist
+  - Works with explicit `${ref:path,default=fallback}` syntax as well
+  - Defaults only apply when path is missing or null
+  - Supports nested defaults: `${config.timeout,default=${defaults.timeout}}`
+  - Honors schema defaults as fallback when no explicit default provided
+  - Framework-level `sensitive=` flag also supported for consistency
+  - See [Interpolation Guide](docs/guide/interpolation.md) for full details
+
 ## [0.4.0] - 2026-01-19
 
 ### Added

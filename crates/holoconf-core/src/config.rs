@@ -12,6 +12,9 @@ use crate::interpolation::{self, Interpolation, InterpolationArg};
 use crate::resolver::{global_registry, ResolvedValue, ResolverContext, ResolverRegistry};
 use crate::value::Value;
 
+/// Maximum depth for nested interpolation resolution to prevent stack overflow
+const MAX_RESOLUTION_DEPTH: usize = 100;
+
 /// Check if a path string contains glob metacharacters
 fn is_glob_pattern(path: &str) -> bool {
     path.contains('*') || path.contains('?') || path.contains('[')
@@ -741,6 +744,15 @@ impl Config {
         path: &str,
         resolution_stack: &mut Vec<String>,
     ) -> Result<ResolvedValue> {
+        // Check recursion depth to prevent stack overflow from deeply nested defaults
+        if resolution_stack.len() >= MAX_RESOLUTION_DEPTH {
+            return Err(Error::parse(format!(
+                "Maximum interpolation depth ({}) exceeded at path '{}'. \
+                 This may indicate deeply nested defaults or a complex reference chain.",
+                MAX_RESOLUTION_DEPTH, path
+            )));
+        }
+
         match interp {
             Interpolation::Literal(s) => Ok(ResolvedValue::new(Value::String(s.clone()))),
 
@@ -762,8 +774,10 @@ impl Config {
 
                     // Try to get the value from config
                     let value_result = self.raw.get_path(ref_path);
-                    let use_default =
-                        value_result.is_err() || value_result.as_ref().unwrap().is_null();
+                    let use_default = match &value_result {
+                        Ok(val) => val.is_null(),
+                        Err(_) => true,
+                    };
 
                     if use_default {
                         // Path missing or null - try defaults
@@ -799,12 +813,15 @@ impl Config {
                     }
 
                     // Value exists and not null - resolve it recursively
-                    let ref_value = value_result.unwrap();
+                    // Safety: we know value_result is Ok and not null because use_default is false
+                    let ref_value =
+                        value_result.expect("value must exist when use_default is false");
                     resolution_stack.push(ref_path.to_string());
                     let mut result = self.resolve_value(ref_value, ref_path, resolution_stack)?;
                     resolution_stack.pop();
 
-                    // Apply sensitive flag if present
+                    // Apply sensitive flag if present (can only make more sensitive, not less)
+                    // Once a value is marked sensitive by a lower layer, it cannot be unmarked
                     let is_sensitive = kwargs
                         .get("sensitive")
                         .and_then(|arg| arg.as_literal())
@@ -814,6 +831,8 @@ impl Config {
                     if is_sensitive {
                         result.sensitive = true;
                     }
+                    // Note: if result.sensitive is already true from referenced value,
+                    // it remains true even if sensitive= is not specified or is false
 
                     return Ok(result);
                 }
@@ -2476,5 +2495,188 @@ properties:
 
         // Schema should now be attached
         assert!(config.get_schema().is_some());
+    }
+
+    #[test]
+    fn test_ref_with_default_missing_path() {
+        let yaml = r#"
+app:
+  name: myapp
+  # No 'timeout' defined
+  effective_timeout: ${app.timeout,default=30}
+"#;
+        let config = Config::from_yaml(yaml).unwrap();
+        assert_eq!(
+            config.get("app.effective_timeout").unwrap().as_str(),
+            Some("30")
+        );
+    }
+
+    #[test]
+    fn test_ref_with_default_null_value() {
+        let yaml = r#"
+app:
+  timeout: null
+  effective_timeout: ${app.timeout,default=30}
+"#;
+        let config = Config::from_yaml(yaml).unwrap();
+        assert_eq!(
+            config.get("app.effective_timeout").unwrap().as_str(),
+            Some("30")
+        );
+    }
+
+    #[test]
+    fn test_ref_with_default_value_exists() {
+        let yaml = r#"
+app:
+  timeout: 60
+  effective_timeout: ${app.timeout,default=30}
+"#;
+        let config = Config::from_yaml(yaml).unwrap();
+        // Should use actual value, not default
+        assert_eq!(
+            config.get("app.effective_timeout").unwrap().as_i64(),
+            Some(60)
+        );
+    }
+
+    #[test]
+    fn test_ref_without_default_missing_errors() {
+        let yaml = r#"
+app:
+  name: myapp
+  timeout: ${app.missing}
+"#;
+        let config = Config::from_yaml(yaml).unwrap();
+        let result = config.get("app.timeout");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_ref_nested_defaults() {
+        let yaml = r#"
+defaults:
+  timeout: 30
+app:
+  timeout: ${custom.timeout,default=${defaults.timeout}}
+"#;
+        let config = Config::from_yaml(yaml).unwrap();
+        assert_eq!(config.get("app.timeout").unwrap().as_str(), Some("30"));
+    }
+
+    #[test]
+    fn test_ref_explicit_syntax() {
+        let yaml = r#"
+database:
+  host: localhost
+app:
+  db_host: ${ref:database.host}
+"#;
+        let config = Config::from_yaml(yaml).unwrap();
+        assert_eq!(
+            config.get("app.db_host").unwrap().as_str(),
+            Some("localhost")
+        );
+    }
+
+    #[test]
+    fn test_ref_explicit_syntax_with_default() {
+        let yaml = r#"
+app:
+  timeout: ${ref:custom.timeout,default=30}
+"#;
+        let config = Config::from_yaml(yaml).unwrap();
+        assert_eq!(config.get("app.timeout").unwrap().as_str(), Some("30"));
+    }
+
+    #[test]
+    fn test_ref_sensitive_flag_on_default() {
+        let yaml = r#"
+app:
+  password: ${custom.password,default=dev-password,sensitive=true}
+"#;
+        let config = Config::from_yaml(yaml).unwrap();
+        let dumped_yaml = config.to_yaml(true, true).unwrap();
+        // Should be redacted in the output
+        assert!(dumped_yaml.contains("[REDACTED]"));
+        assert!(!dumped_yaml.contains("dev-password"));
+    }
+
+    #[test]
+    fn test_ref_sensitive_flag_inheritance() {
+        use crate::resolver::{FnResolver, ResolverRegistry};
+        use std::sync::Arc;
+
+        let mut registry = ResolverRegistry::new();
+        registry.register(Arc::new(FnResolver::new(
+            "sensitive_test",
+            |_args, _kwargs, _ctx| {
+                Ok(ResolvedValue::sensitive(Value::String(
+                    "secret-value".to_string(),
+                )))
+            },
+        )));
+
+        let yaml = r#"
+secret:
+  password: ${sensitive_test:foo}
+app:
+  # Reference to sensitive value should inherit sensitivity
+  db_password: ${secret.password}
+"#;
+        let value: Value = serde_yaml::from_str(yaml).unwrap();
+        let config = Config::with_resolvers(value, registry);
+        let dumped_yaml = config.to_yaml(true, true).unwrap();
+        // Should be redacted in the output
+        assert!(dumped_yaml.contains("[REDACTED]"));
+        assert!(!dumped_yaml.contains("secret-value"));
+    }
+
+    #[test]
+    fn test_ref_sensitive_cannot_be_unmarked() {
+        use crate::resolver::{FnResolver, ResolverRegistry};
+        use std::sync::Arc;
+
+        let mut registry = ResolverRegistry::new();
+        registry.register(Arc::new(FnResolver::new(
+            "sensitive_test",
+            |_args, _kwargs, _ctx| {
+                Ok(ResolvedValue::sensitive(Value::String(
+                    "secret-value".to_string(),
+                )))
+            },
+        )));
+
+        let yaml = r#"
+secret:
+  password: ${sensitive_test:foo}
+app:
+  # Even with sensitive=false, should stay sensitive
+  db_password: ${secret.password,sensitive=false}
+"#;
+        let value: Value = serde_yaml::from_str(yaml).unwrap();
+        let config = Config::with_resolvers(value, registry);
+        let dumped_yaml = config.to_yaml(true, true).unwrap();
+        // Should still be redacted even though sensitive=false
+        assert!(dumped_yaml.contains("[REDACTED]"));
+        assert!(!dumped_yaml.contains("secret-value"));
+    }
+
+    #[test]
+    fn test_max_resolution_depth() {
+        // Create a config with nested references approaching the limit
+        // Build a chain: a -> b -> c -> ... (each references the next)
+        let mut yaml_parts = vec!["root: ${level1}".to_string()];
+        for i in 1..95 {
+            yaml_parts.push(format!("level{}: ${{level{}}}", i, i + 1));
+        }
+        yaml_parts.push("level95: final_value".to_string());
+
+        let yaml = yaml_parts.join("\n");
+        let config = Config::from_yaml(&yaml).unwrap();
+
+        // Should succeed with depth under MAX_RESOLUTION_DEPTH (100)
+        assert_eq!(config.get("root").unwrap().as_str(), Some("final_value"));
     }
 }
