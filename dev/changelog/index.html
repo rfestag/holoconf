@@ -1998,6 +1998,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Unreleased">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2013,7 +2030,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#added" class="md-nav__link">
+  <a href="#added_1" class="md-nav__link">
     <span class="md-ellipsis">
       
         Added
@@ -2158,7 +2175,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#added_1" class="md-nav__link">
+  <a href="#added_2" class="md-nav__link">
     <span class="md-ellipsis">
       
         Added
@@ -2335,7 +2352,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#added_2" class="md-nav__link">
+  <a href="#added_3" class="md-nav__link">
     <span class="md-ellipsis">
       
         Added
@@ -2564,6 +2581,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Unreleased">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2579,7 +2613,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#added" class="md-nav__link">
+  <a href="#added_1" class="md-nav__link">
     <span class="md-ellipsis">
       
         Added
@@ -2724,7 +2758,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#added_1" class="md-nav__link">
+  <a href="#added_2" class="md-nav__link">
     <span class="md-ellipsis">
       
         Added
@@ -2901,7 +2935,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#added_2" class="md-nav__link">
+  <a href="#added_3" class="md-nav__link">
     <span class="md-ellipsis">
       
         Added
@@ -3112,8 +3146,19 @@
 <p>The format is based on <a href="https://keepachangelog.com/en/1.1.0/">Keep a Changelog</a>,
 and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semantic Versioning</a>.</p>
 <h2 id="unreleased"><a href="https://github.com/holoconf/holoconf/compare/v0.1.0...HEAD">Unreleased</a><a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
-<h2 id="040-2026-01-19">[0.4.0] - 2026-01-19<a class="headerlink" href="#040-2026-01-19" title="Permanent link">&para;</a></h2>
 <h3 id="added">Added<a class="headerlink" href="#added" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Config Reference Defaults</strong>: Config references now support optional <code>default=</code> parameter for handling missing values (#25)</li>
+<li>Use <code>${path.to.value,default=fallback}</code> to provide a fallback when path doesn't exist</li>
+<li>Works with explicit <code>${ref:path,default=fallback}</code> syntax as well</li>
+<li>Defaults only apply when path is missing or null</li>
+<li>Supports nested defaults: <code>${config.timeout,default=${defaults.timeout}}</code></li>
+<li>Honors schema defaults as fallback when no explicit default provided</li>
+<li>Framework-level <code>sensitive=</code> flag also supported for consistency</li>
+<li>See <a href="../guide/interpolation/">Interpolation Guide</a> for full details</li>
+</ul>
+<h2 id="040-2026-01-19">[0.4.0] - 2026-01-19<a class="headerlink" href="#040-2026-01-19" title="Permanent link">&para;</a></h2>
+<h3 id="added_1">Added<a class="headerlink" href="#added_1" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong>HTTPS Resolver</strong>: New <code>https</code> resolver that auto-prepends <code>https://</code> to URLs (#43)</li>
 <li>Use <code>${https:example.com/config}</code> instead of <code>${http:https://example.com/config}</code></li>
@@ -3195,7 +3240,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <li>Works with any resolver: <code>${file:./config.yaml,default={}}</code>, <code>${http:...,default=fallback}</code></li>
 <li>Sensitive marking propagates correctly through resolution chain</li>
 </ul>
-<h3 id="added_1">Added<a class="headerlink" href="#added_1" title="Permanent link">&para;</a></h3>
+<h3 id="added_2">Added<a class="headerlink" href="#added_2" title="Permanent link">&para;</a></h3>
 <h4 id="http-resolver-tlsproxy-enhancements">HTTP Resolver TLS/Proxy Enhancements<a class="headerlink" href="#http-resolver-tlsproxy-enhancements" title="Permanent link">&para;</a></h4>
 <ul>
 <li><strong>Proxy support</strong> - Configure HTTP/SOCKS proxies for HTTP resolver requests</li>
@@ -3353,7 +3398,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <p>No change, debugging release process</p>
 <h2 id="012-2026-01-08">[0.1.2] - 2026-01-08<a class="headerlink" href="#012-2026-01-08" title="Permanent link">&para;</a></h2>
 <p>No change, debugging release process</p>
-<h3 id="added_2">Added<a class="headerlink" href="#added_2" title="Permanent link">&para;</a></h3>
+<h3 id="added_3">Added<a class="headerlink" href="#added_3" title="Permanent link">&para;</a></h3>
 <h4 id="configuration-loading-parsing">Configuration Loading &amp; Parsing<a class="headerlink" href="#configuration-loading-parsing" title="Permanent link">&para;</a></h4>
 <ul>
 <li>Load configuration from YAML and JSON files with automatic format detection</li>
