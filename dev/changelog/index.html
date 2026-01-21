@@ -2012,6 +2012,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#changed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2041,7 +2052,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#changed" class="md-nav__link">
+  <a href="#changed_1" class="md-nav__link">
     <span class="md-ellipsis">
       
         Changed
@@ -2136,7 +2147,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#changed_1" class="md-nav__link">
+  <a href="#changed_2" class="md-nav__link">
     <span class="md-ellipsis">
       
         Changed
@@ -2595,6 +2606,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#changed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2624,7 +2646,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#changed" class="md-nav__link">
+  <a href="#changed_1" class="md-nav__link">
     <span class="md-ellipsis">
       
         Changed
@@ -2719,7 +2741,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#changed_1" class="md-nav__link">
+  <a href="#changed_2" class="md-nav__link">
     <span class="md-ellipsis">
       
         Changed
@@ -3156,6 +3178,38 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <li>Honors schema defaults as fallback when no explicit default provided</li>
 <li>Framework-level <code>sensitive=</code> flag also supported for consistency</li>
 <li>See <a href="../guide/interpolation/">Interpolation Guide</a> for full details</li>
+<li><strong>Transformation Resolvers</strong>: New resolvers for parsing structured data (#26)</li>
+<li><code>${json:text}</code> - Parse JSON strings into structured data</li>
+<li><code>${yaml:text}</code> - Parse YAML strings into structured data</li>
+<li><code>${split:text}</code> - Split strings into arrays with customizable delimiters</li>
+<li><code>${csv:text}</code> - Parse CSV data with header support</li>
+<li><code>${base64:text}</code> - Decode base64-encoded strings (auto-detects UTF-8 vs binary)</li>
+<li>All transformation resolvers support chaining: <code>${json:${file:config.json}}</code></li>
+<li>CSV values returned as strings (use schema validation for type coercion)</li>
+<li>Base64 automatically returns UTF-8 strings when possible, falls back to bytes for binary data</li>
+</ul>
+<h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>BREAKING: File Resolver Auto-Parsing Removed</strong>: File resolver no longer automatically parses JSON/YAML based on file extension (#26)</li>
+<li>Old behavior: <code>${file:config.json}</code> → automatically parsed as JSON</li>
+<li>New behavior: <code>${file:config.json}</code> → returns JSON as a string</li>
+<li>Migration: Use transformation resolvers: <code>${json:${file:config.json}}</code></li>
+<li><code>parse=text</code> is now the default (explicit text, no parsing)</li>
+<li><code>parse=none</code> returns raw bytes (alias for <code>encoding=binary</code>)</li>
+<li><code>parse=json</code> and <code>parse=yaml</code> parameters removed</li>
+<li><code>parse=auto</code> parameter removed (no longer auto-detects from extension)</li>
+<li><strong>BREAKING: HTTP/HTTPS Resolver Auto-Parsing Removed</strong>: HTTP/HTTPS resolvers no longer automatically parse JSON/YAML (#26)</li>
+<li>Old behavior: Content-Type header or URL extension triggered auto-parsing</li>
+<li>New behavior: Always returns response body as text</li>
+<li>Migration: Use transformation resolvers: <code>${json:${http:api.com/data}}</code></li>
+<li><code>parse=text</code> is now the default</li>
+<li><code>parse=binary</code> still supported for binary content</li>
+<li><code>parse=json</code> and <code>parse=yaml</code> parameters removed</li>
+<li><code>parse=auto</code> parameter removed (no longer auto-detects)</li>
+<li><strong>Nested Path Access</strong>: Config paths now work with transformation resolver output (#26)</li>
+<li><code>data: ${json:${env:CONFIG}}</code> followed by <code>config.get("data.name")</code> now works correctly</li>
+<li>Paths like <code>users[0].email</code> navigate into resolved structures seamlessly</li>
+<li>Enables natural access patterns for transformed data</li>
 </ul>
 <h2 id="040-2026-01-19">[0.4.0] - 2026-01-19<a class="headerlink" href="#040-2026-01-19" title="Permanent link">&para;</a></h2>
 <h3 id="added_1">Added<a class="headerlink" href="#added_1" title="Permanent link">&para;</a></h3>
@@ -3181,7 +3235,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <li>Example: <code>${https:api.com/config,client_cert=${env:CERT_PEM},client_key=${env:KEY_PEM}}</code></li>
 <li>Example: <code>${https:api.com/config,client_cert=${file:./id.p12,parse=binary}}</code></li>
 </ul>
-<h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
+<h3 id="changed_1">Changed<a class="headerlink" href="#changed_1" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong>HTTP/HTTPS URL Normalization</strong>: HTTP and HTTPS resolvers now auto-prepend protocol schemes (#43)</li>
 <li>Old syntax still works: <code>${http:https://example.com}</code> → <code>http://example.com</code></li>
@@ -3215,7 +3269,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <li><strong>Breaking change</strong>: Configs that reference files outside their directory will now fail unless <code>file_roots</code> is specified</li>
 </ul>
 <h2 id="020-2026-01-17">[0.2.0] - 2026-01-17<a class="headerlink" href="#020-2026-01-17" title="Permanent link">&para;</a></h2>
-<h3 id="changed_1">Changed<a class="headerlink" href="#changed_1" title="Permanent link">&para;</a></h3>
+<h3 id="changed_2">Changed<a class="headerlink" href="#changed_2" title="Permanent link">&para;</a></h3>
 <h4 id="simplified-config-loading-api-breaking-change">Simplified Config Loading API (Breaking Change)<a class="headerlink" href="#simplified-config-loading-api-breaking-change" title="Permanent link">&para;</a></h4>
 <ul>
 <li><strong>Removed <code>FileSpec</code> from public API</strong> - <code>FileSpec</code> was a Rust-ism that leaked to Python; the concept is now internal</li>

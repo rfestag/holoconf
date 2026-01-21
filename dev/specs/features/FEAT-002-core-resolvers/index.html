@@ -2664,14 +2664,14 @@
 <tr>
 <td><code>parse</code></td>
 <td>string</td>
-<td><code>auto</code></td>
-<td>How to interpret content: <code>auto</code>, <code>yaml</code>, <code>json</code>, <code>text</code>, <code>binary</code></td>
+<td><code>text</code></td>
+<td>How to interpret content: <code>text</code> or <code>binary</code></td>
 </tr>
 <tr>
 <td><code>encoding</code></td>
 <td>string</td>
 <td><code>utf-8</code></td>
-<td>Text encoding: <code>utf-8</code>, <code>ascii</code>, <code>latin-1</code> (ignored for <code>binary</code>)</td>
+<td>Text encoding: <code>utf-8</code>, <code>ascii</code>, <code>latin-1</code>, <code>base64</code> (ignored for <code>binary</code>)</td>
 </tr>
 <tr>
 <td><code>sensitive</code></td>
@@ -2692,24 +2692,9 @@
 </thead>
 <tbody>
 <tr>
-<td><code>auto</code></td>
-<td>varies</td>
-<td>Detect by file extension (<code>.yaml</code>, <code>.yml</code>, <code>.json</code> → parsed; else → text)</td>
-</tr>
-<tr>
-<td><code>yaml</code></td>
-<td>structured data</td>
-<td>Parse as YAML, accessible via dot notation</td>
-</tr>
-<tr>
-<td><code>json</code></td>
-<td>structured data</td>
-<td>Parse as JSON, accessible via dot notation</td>
-</tr>
-<tr>
 <td><code>text</code></td>
 <td>string</td>
-<td>Return raw text content</td>
+<td>Return raw text content (default)</td>
 </tr>
 <tr>
 <td><code>binary</code></td>
@@ -2718,6 +2703,10 @@
 </tr>
 </tbody>
 </table>
+<p><strong>For structured data parsing, use transformation resolvers:</strong>
+- JSON: <code>${json:${file:config.json}}</code>
+- YAML: <code>${yaml:${file:config.yaml}}</code>
+- CSV: <code>${csv:${file:data.csv}}</code></p>
 <p><strong>Behavior:</strong>
 - Paths are relative to the config file's directory by default
 - Supports RFC 8089 file: URI syntax for explicit path specifications:
@@ -2730,10 +2719,9 @@
   - Absolute paths: <code>/etc/app/config.yaml</code> (subject to <code>file_roots</code> security)
 - If file doesn't exist and no default provided, raises <code>ResolverError</code>
 - If file doesn't exist and default is provided, returns default
-- When <code>parse=auto</code>, format is detected by file extension
-- Parsed content (YAML/JSON) returns a Config object for nested access
-- Text content returns a string
-- Binary content returns raw bytes (useful for certificates, keys, images)
+- Returns text content as string by default (<code>parse=text</code>)
+- Returns raw bytes when <code>parse=binary</code> (useful for certificates, keys, images)
+- For structured data (YAML/JSON/CSV), chain with transformation resolvers
 - Not sensitive by default; use <code>sensitive=true</code> for secrets</p>
 <p><strong>Examples:</strong>
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># Relative paths (traditional syntax)</span>
@@ -2832,8 +2820,8 @@
 <tr>
 <td><code>parse</code></td>
 <td>string</td>
-<td><code>auto</code></td>
-<td>How to interpret content: <code>auto</code>, <code>yaml</code>, <code>json</code>, <code>text</code>, <code>binary</code></td>
+<td><code>text</code></td>
+<td>How to interpret content: <code>text</code> or <code>binary</code></td>
 </tr>
 <tr>
 <td><code>encoding</code></td>
@@ -2914,24 +2902,9 @@
 </thead>
 <tbody>
 <tr>
-<td><code>auto</code></td>
-<td>varies</td>
-<td>Detect by Content-Type header or URL extension</td>
-</tr>
-<tr>
-<td><code>yaml</code></td>
-<td>structured data</td>
-<td>Parse as YAML, accessible via dot notation</td>
-</tr>
-<tr>
-<td><code>json</code></td>
-<td>structured data</td>
-<td>Parse as JSON, accessible via dot notation</td>
-</tr>
-<tr>
 <td><code>text</code></td>
 <td>string</td>
-<td>Return raw text content</td>
+<td>Return raw text content (default)</td>
 </tr>
 <tr>
 <td><code>binary</code></td>
@@ -2940,16 +2913,19 @@
 </tr>
 </tbody>
 </table>
+<p><strong>For structured data parsing, use transformation resolvers:</strong>
+- JSON: <code>${json:${http:api.example.com/config.json}}</code>
+- YAML: <code>${yaml:${http:api.example.com/config.yaml}}</code>
+- CSV: <code>${csv:${http:data.example.com/export.csv}}</code></p>
 <p><strong>Behavior:</strong>
 - Auto-prepends <code>http://</code> scheme to the URL argument
 - Strips any existing <code>http://</code> or <code>https://</code> prefix before prepending
 - Strips leading <code>//</code> if present (e.g., <code>${http://example.com}</code> → <code>http://example.com</code>)
 - If request fails and no default provided, raises <code>ResolverError</code>
 - If request fails and default is provided, returns default
-- When <code>parse=auto</code>, format is detected by Content-Type header or URL extension
-- Parsed content (YAML/JSON) returns a Config object for nested access
-- Text content returns a string
-- Binary content returns raw bytes (useful for certificates, images)
+- Returns text content as string by default (<code>parse=text</code>)
+- Returns raw bytes when <code>parse=binary</code> (useful for certificates, images)
+- For structured data (JSON/YAML/CSV), chain with transformation resolvers
 - Not sensitive by default; use <code>sensitive=true</code> for secrets</p>
 <p><strong>URL Normalization Examples:</strong>
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c1"># Clean syntax (recommended) - auto-prepends http://</span>
@@ -2977,8 +2953,8 @@
 </span><span id="__span-10-10"><a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a><span class="c1"># With authentication header</span>
 </span><span id="__span-10-11"><a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a><span class="nt">remote_config</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${http:api.example.com/config,header=Authorization:Bearer ${env:API_TOKEN}}</span>
 </span><span id="__span-10-12"><a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a>
-</span><span id="__span-10-13"><a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a><span class="c1"># Explicit JSON parsing</span>
-</span><span id="__span-10-14"><a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a><span class="nt">api_config</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${http:api.example.com/config,parse=json}</span>
+</span><span id="__span-10-13"><a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a><span class="c1"># Parse JSON response using transformation resolver</span>
+</span><span id="__span-10-14"><a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a><span class="nt">api_config</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${json:${http:api.example.com/config}}</span>
 </span><span id="__span-10-15"><a id="__codelineno-10-15" name="__codelineno-10-15" href="#__codelineno-10-15"></a>
 </span><span id="__span-10-16"><a id="__codelineno-10-16" name="__codelineno-10-16" href="#__codelineno-10-16"></a><span class="c1"># Binary content (certificate from URL)</span>
 </span><span id="__span-10-17"><a id="__codelineno-10-17" name="__codelineno-10-17" href="#__codelineno-10-17"></a><span class="nt">ca_cert</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${http:pki.internal/ca.pem,parse=binary}</span>
@@ -3213,7 +3189,7 @@
 </span><span id="__span-14-15"><a id="__codelineno-14-15" name="__codelineno-14-15" href="#__codelineno-14-15"></a><span class="c1"># Resolves to: https://api.example.com/config.yaml</span>
 </span></code></pre></div></p>
 <p><strong>Examples:</strong>
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="c1"># Fetch remote config (auto-detect format)</span>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="c1"># Fetch remote config as text</span>
 </span><span id="__span-15-2"><a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="nt">remote_config</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${https:config.example.com/shared.yaml}</span>
 </span><span id="__span-15-3"><a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>
 </span><span id="__span-15-4"><a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="c1"># With default if request fails</span>
@@ -3225,8 +3201,8 @@
 </span><span id="__span-15-10"><a id="__codelineno-15-10" name="__codelineno-15-10" href="#__codelineno-15-10"></a><span class="c1"># With authentication header</span>
 </span><span id="__span-15-11"><a id="__codelineno-15-11" name="__codelineno-15-11" href="#__codelineno-15-11"></a><span class="nt">api_token</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${https:vault.corp.com/token,header=Authorization:Bearer ${env:VAULT_TOKEN}}</span>
 </span><span id="__span-15-12"><a id="__codelineno-15-12" name="__codelineno-15-12" href="#__codelineno-15-12"></a>
-</span><span id="__span-15-13"><a id="__codelineno-15-13" name="__codelineno-15-13" href="#__codelineno-15-13"></a><span class="c1"># Explicit YAML parsing</span>
-</span><span id="__span-15-14"><a id="__codelineno-15-14" name="__codelineno-15-14" href="#__codelineno-15-14"></a><span class="nt">settings</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${https:config.internal/app.yaml,parse=yaml}</span>
+</span><span id="__span-15-13"><a id="__codelineno-15-13" name="__codelineno-15-13" href="#__codelineno-15-13"></a><span class="c1"># Parse YAML response using transformation resolver</span>
+</span><span id="__span-15-14"><a id="__codelineno-15-14" name="__codelineno-15-14" href="#__codelineno-15-14"></a><span class="nt">settings</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${yaml:${https:config.internal/app.yaml}}</span>
 </span><span id="__span-15-15"><a id="__codelineno-15-15" name="__codelineno-15-15" href="#__codelineno-15-15"></a>
 </span><span id="__span-15-16"><a id="__codelineno-15-16" name="__codelineno-15-16" href="#__codelineno-15-16"></a><span class="c1"># Mark as sensitive (for secrets)</span>
 </span><span id="__span-15-17"><a id="__codelineno-15-17" name="__codelineno-15-17" href="#__codelineno-15-17"></a><span class="nt">database_password</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${https:secrets.internal/db-pass,sensitive=true}</span>
