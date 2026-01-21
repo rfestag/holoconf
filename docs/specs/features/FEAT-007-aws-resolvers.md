@@ -347,6 +347,7 @@ AWS resolvers support two levels of configuration for testing and advanced use c
 
 Set default region and profile for all AWS services:
 
+**Python:**
 ```python
 import holoconf_aws
 
@@ -357,12 +358,24 @@ holoconf_aws.configure(
 )
 ```
 
+**Rust:**
+```rust
+use holoconf_aws;
+
+// Configure defaults for all AWS services
+holoconf_aws::configure(
+    Some("us-east-1".to_string()),    // Default region
+    Some("prod".to_string()),          // Default AWS profile
+);
+```
+
 **Note:** Global configuration only supports `region` and `profile`. Endpoints are service-specific (see below).
 
 ### Service-Specific Configuration
 
 Override defaults for individual services, including endpoints:
 
+**Python:**
 ```python
 # S3-specific configuration
 holoconf_aws.s3(
@@ -382,12 +395,44 @@ holoconf_aws.cfn(
 )
 ```
 
+**Rust:**
+```rust
+use holoconf_aws;
+
+// S3-specific configuration
+holoconf_aws::configure_s3(
+    Some("http://localhost:5000".to_string()),  // For moto/LocalStack
+    Some("us-west-2".to_string()),              // Override global region
+    Some("dev".to_string()),                    // Override global profile
+);
+
+// SSM-specific configuration
+holoconf_aws::configure_ssm(
+    Some("http://localhost:5001".to_string()),
+    None,
+    None,
+);
+
+// CloudFormation-specific configuration
+holoconf_aws::configure_cfn(
+    None,
+    None,
+    Some("testing".to_string()),
+);
+```
+
 ### Reset Configuration
 
 Clear all configuration and client cache:
 
+**Python:**
 ```python
 holoconf_aws.reset()
+```
+
+**Rust:**
+```rust
+holoconf_aws::reset();
 ```
 
 ### Precedence
@@ -400,6 +445,8 @@ Configuration follows this precedence chain (highest to lowest):
 4. **AWS SDK defaults** - Environment variables, credentials file, IMDS
 
 **Example:**
+
+**Python:**
 ```python
 # Set global default
 holoconf_aws.configure(region="us-east-1")
@@ -407,6 +454,17 @@ holoconf_aws.configure(region="us-east-1")
 # Override for S3
 holoconf_aws.s3(region="us-west-2")
 ```
+
+**Rust:**
+```rust
+// Set global default
+holoconf_aws::configure(Some("us-east-1".to_string()), None);
+
+// Override for S3
+holoconf_aws::configure_s3(None, Some("us-west-2".to_string()), None);
+```
+
+**Configuration file (applies to both Python and Rust):**
 ```yaml
 # Uses us-west-2 (service config)
 s3_value: ${s3:bucket/file}

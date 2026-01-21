@@ -37,6 +37,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Security:** Warn users about weak ZipCrypto encryption (prefer AES or GPG)
   - Requires `archive` feature flag (enabled by default in Python package)
   - Feature adds dependencies: `tar`, `zip`, `flate2`, `infer`
+- **AWS Resolver Configuration API**: Two-tier configuration system for AWS resolvers (#27)
+  - Global configuration: `holoconf_aws.configure(region="us-east-1", profile="prod")` sets defaults for all AWS services
+  - Service-specific configuration: `holoconf_aws.s3(endpoint="http://localhost:5000")` overrides for individual services
+  - `holoconf_aws.reset()` clears all configuration and client cache (useful for test isolation)
+  - Four-level precedence: resolver kwargs > service config > global config > AWS SDK defaults
+  - All AWS resolvers now support `endpoint=` kwarg for per-call endpoint overrides
+  - Enables testing with moto/LocalStack via custom endpoint URLs
+  - Configuration is additive: calling `configure(region=None)` leaves existing values unchanged
+  - See [Configuration API guide](guide/resolvers-aws.md#configuration-api) for full details
 
 ### Changed
 - **BREAKING: File Resolver Auto-Parsing Removed**: File resolver no longer automatically parses JSON/YAML based on file extension (#26)

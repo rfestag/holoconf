@@ -570,6 +570,403 @@ S3 resolvers use the same AWS credential chain as SSM resolvers. Your credential
 }
 ```
 
+## Configuration API
+
+When you need to set defaults for AWS resolvers across your application, the configuration API provides a two-tier system: global configuration that applies to all AWS services, and service-specific configuration for fine-grained control.
+
+### Why Use the Configuration API?
+
+Before diving into the API, let's understand when and why you'd use it:
+
+- **Testing with moto or LocalStack** - Point AWS services to local endpoints for integration tests
+- **Multi-region applications** - Set a default region without adding `region=` to every resolver call
+- **Environment-based profiles** - Use different AWS profiles for dev, staging, and production
+- **Test isolation** - Clean up configuration between test runs
+
+### Global Configuration
+
+Set defaults that apply to all AWS resolvers:
+
+=== "Python"
+
+    ```python
+    import holoconf_aws
+
+    # Set defaults for all AWS services (S3, SSM, CloudFormation)
+    holoconf_aws.configure(
+        region="us-east-1",   # Default region
+        profile="prod"        # Default AWS profile
+    )
+    ```
+
+=== "Rust"
+
+    ```rust
+    use holoconf_aws;
+
+    // Set defaults for all AWS services
+    holoconf_aws::configure(
+        Some("us-east-1".to_string()),
+        Some("prod".to_string())
+    );
+    ```
+
+Now all AWS resolvers will use `us-east-1` and the `prod` profile by default:
+
+```yaml
+# All three use us-east-1 and prod profile
+database:
+  password: ${ssm:/myapp/db-password}
+  endpoint: ${cfn:my-stack.DatabaseEndpoint}
+  schema: ${s3:my-bucket/schema.sql}
+```
+
+### Service-Specific Configuration
+
+Override global defaults for individual services. This is particularly useful for setting custom endpoints when testing with moto or LocalStack:
+
+=== "Python"
+
+    ```python
+    import holoconf_aws
+
+    # Configure S3 to use LocalStack
+    holoconf_aws.s3(
+        endpoint="http://localhost:4566",
+        region="us-west-2"    # Can override global region
+    )
+
+    # Configure SSM separately
+    holoconf_aws.ssm(
+        endpoint="http://localhost:4566",
+        profile="testing"     # Can override global profile
+    )
+
+    # Configure CloudFormation
+    holoconf_aws.cfn(
+        endpoint="http://localhost:4566"
+    )
+    ```
+
+=== "Rust"
+
+    ```rust
+    use holoconf_aws;
+
+    // Configure S3 for LocalStack
+    holoconf_aws::configure_s3(
+        Some("http://localhost:4566".to_string()),
+        Some("us-west-2".to_string()),
+        None
+    );
+
+    // Configure SSM separately
+    holoconf_aws::configure_ssm(
+        Some("http://localhost:4566".to_string()),
+        None,
+        Some("testing".to_string())
+    );
+
+    // Configure CloudFormation
+    holoconf_aws::configure_cfn(
+        Some("http://localhost:4566".to_string()),
+        None,
+        None
+    );
+    ```
+
+### Configuration Precedence
+
+Configuration follows a four-level precedence chain from highest to lowest priority:
+
+1. **Resolver kwargs** - Explicit overrides in your config file
+2. **Service configuration** - Set via `holoconf_aws.s3()`, `ssm()`, or `cfn()`
+3. **Global configuration** - Set via `holoconf_aws.configure()`
+4. **AWS SDK defaults** - Environment variables, credentials file, IAM roles
+
+Here's how precedence works in practice:
+
+=== "Python"
+
+    ```python
+    import holoconf_aws
+
+    # 3. Set global default
+    holoconf_aws.configure(region="us-east-1")
+
+    # 2. Override S3 specifically
+    holoconf_aws.s3(region="us-west-2")
+    ```
+
+```yaml
+# Uses us-west-2 (service config overrides global)
+config: ${s3:bucket/config.yaml}
+
+# Uses eu-west-1 (resolver kwargs override everything)
+europe: ${s3:bucket/eu-config.yaml,region=eu-west-1}
+
+# Uses us-east-1 (global config, no SSM-specific override)
+password: ${ssm:/myapp/password}
+
+# 4. AWS SDK default (no configuration set)
+# Falls back to AWS_REGION environment variable or ~/.aws/config
+```
+
+### Additive Configuration
+
+Configuration calls are **additive** - passing `None` leaves existing values unchanged:
+
+=== "Python"
+
+    ```python
+    import holoconf_aws
+
+    # Set both region and profile
+    holoconf_aws.configure(region="us-east-1", profile="prod")
+
+    # Later, update only the region - profile remains "prod"
+    holoconf_aws.configure(region="us-west-2")
+
+    # Or update only the profile - region remains "us-west-2"
+    holoconf_aws.configure(profile="staging")
+    ```
+
+=== "Rust"
+
+    ```rust
+    use holoconf_aws;
+
+    // Set both region and profile
+    holoconf_aws::configure(
+        Some("us-east-1".to_string()),
+        Some("prod".to_string())
+    );
+
+    // Update only region - profile remains "prod"
+    holoconf_aws::configure(
+        Some("us-west-2".to_string()),
+        None
+    );
+
+    // Update only profile - region remains "us-west-2"
+    holoconf_aws::configure(
+        None,
+        Some("staging".to_string())
+    );
+    ```
+
+### Resetting Configuration
+
+To clear all configuration and start fresh, use `reset()`:
+
+=== "Python"
+
+    ```python
+    import holoconf_aws
+
+    # Configure for testing
+    holoconf_aws.s3(endpoint="http://localhost:4566")
+    holoconf_aws.configure(region="us-east-1")
+
+    # ... run tests ...
+
+    # Clean up for next test
+    holoconf_aws.reset()
+
+    # All configuration is cleared
+    # Client cache is also cleared
+    ```
+
+=== "Rust"
+
+    ```rust
+    use holoconf_aws;
+
+    // Configure for testing
+    holoconf_aws::configure_s3(
+        Some("http://localhost:4566".to_string()),
+        None,
+        None
+    );
+
+    // ... run tests ...
+
+    // Clean up for next test
+    holoconf_aws::reset();
+    ```
+
+The `reset()` function is particularly useful for test isolation - it clears both configuration and the internal AWS client cache.
+
+### Real-World Example: Testing with moto
+
+Let's see how to use the configuration API for testing with moto, the AWS service mocking library:
+
+=== "Python"
+
+    ```python
+    import pytest
+    import holoconf
+    import holoconf_aws
+    from moto import mock_aws
+
+    @pytest.fixture
+    def aws_config():
+        """Configure AWS resolvers for testing."""
+        # Point all AWS services to moto's mock endpoints
+        holoconf_aws.configure(region="us-east-1")
+
+        # Start moto mock
+        with mock_aws():
+            # Set up test data
+            import boto3
+            ssm = boto3.client("ssm", region_name="us-east-1")
+            ssm.put_parameter(
+                Name="/myapp/db-password",
+                Value="test-password",
+                Type="SecureString"
+            )
+
+            yield
+
+        # Clean up after test
+        holoconf_aws.reset()
+
+    def test_config_with_ssm(aws_config):
+        """Test that SSM parameters are resolved correctly."""
+        config = holoconf.Config.loads("""
+        database:
+          password: ${ssm:/myapp/db-password}
+        """)
+
+        assert config.database.password == "test-password"
+    ```
+
+=== "Rust"
+
+    ```rust
+    use holoconf_core::Config;
+    use holoconf_aws;
+
+    #[test]
+    fn test_config_with_localstack() {
+        // Configure for LocalStack
+        holoconf_aws::configure(
+            Some("us-east-1".to_string()),
+            None
+        );
+        holoconf_aws::configure_ssm(
+            Some("http://localhost:4566".to_string()),
+            None,
+            None
+        );
+
+        // Register resolvers
+        holoconf_aws::register_all();
+
+        // Load config that uses SSM
+        let config = Config::from_yaml_str(r#"
+            database:
+              password: ${ssm:/myapp/db-password}
+        "#).unwrap();
+
+        // ... test assertions ...
+
+        // Clean up
+        holoconf_aws::reset();
+    }
+    ```
+
+### Real-World Example: Multi-Region Application
+
+Here's how to handle an application deployed in multiple AWS regions:
+
+=== "Python"
+
+    ```python
+    import os
+    import holoconf
+    import holoconf_aws
+
+    # Set default region from environment
+    region = os.environ.get("AWS_REGION", "us-east-1")
+    holoconf_aws.configure(region=region)
+
+    # Load config - all AWS resolvers use the configured region
+    config = holoconf.Config.load("config.yaml")
+    ```
+
+```yaml
+# config.yaml - no need to specify region on every resolver
+database:
+  host: ${ssm:/myapp/db-host}
+  password: ${ssm:/myapp/db-password}
+
+cache:
+  endpoint: ${cfn:myapp-infra.CacheEndpoint}
+
+feature_flags: ${s3:myapp-config/features.yaml}
+```
+
+When you deploy to `us-west-2`, just set `AWS_REGION=us-west-2` and all resolvers automatically use the correct region.
+
+### Real-World Example: Environment-Based Profiles
+
+Use different AWS profiles for different environments:
+
+=== "Python"
+
+    ```python
+    import os
+    import holoconf
+    import holoconf_aws
+
+    # Configure based on environment
+    env = os.environ.get("ENV", "dev")
+
+    if env == "dev":
+        holoconf_aws.configure(profile="dev", region="us-east-1")
+    elif env == "staging":
+        holoconf_aws.configure(profile="staging", region="us-east-1")
+    elif env == "prod":
+        holoconf_aws.configure(profile="prod", region="us-east-1")
+
+    # Load config - uses the appropriate profile
+    config = holoconf.Config.load("config.yaml")
+    ```
+
+=== "Rust"
+
+    ```rust
+    use holoconf_core::Config;
+    use holoconf_aws;
+    use std::env;
+
+    // Register AWS resolvers
+    holoconf_aws::register_all();
+
+    // Configure based on environment
+    let environment = env::var("ENV").unwrap_or_else(|_| "dev".to_string());
+
+    match environment.as_str() {
+        "dev" => holoconf_aws::configure(
+            Some("us-east-1".to_string()),
+            Some("dev".to_string())
+        ),
+        "staging" => holoconf_aws::configure(
+            Some("us-east-1".to_string()),
+            Some("staging".to_string())
+        ),
+        "prod" => holoconf_aws::configure(
+            Some("us-east-1".to_string()),
+            Some("prod".to_string())
+        ),
+        _ => {}
+    }
+
+    // Load config - uses the appropriate profile
+    let config = Config::load("config.yaml")?;
+    ```
+
 ## AWS Authentication Summary
 
 All AWS resolvers (`ssm`, `cfn`, `s3`) use the standard AWS credential chain:
@@ -715,6 +1112,9 @@ You now understand:
 - Including S3 object content with `${s3:bucket/key}`
 - Cross-region and cross-account access
 - AWS authentication and credential chain
+- **Configuration API** for setting global and service-specific defaults
+- **Precedence chain** for configuration (kwargs > service > global > SDK)
+- **Test isolation** with `reset()` for cleaning up between tests
 - Caching and performance optimization
 
 ## Next Steps
