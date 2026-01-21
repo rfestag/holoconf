@@ -20,11 +20,11 @@ tests:
           timeout: 30
           retries: 3
       config: |
-        settings: ${file:settings.yaml}
+        settings: ${yaml:${file:settings.yaml}}
     when:
       access: settings
     then:
-      # The file resolver returns a mapping
+      # File resolver returns text, yaml resolver parses it
       value:
         timeout: 30
         retries: 3
@@ -34,11 +34,11 @@ tests:
       files:
         config.json: '{"host": "localhost", "port": 8080}'
       config: |
-        server: ${file:config.json}
+        server: ${json:${file:config.json}}
     when:
       access: server
     then:
-      # The file resolver returns a mapping
+      # File resolver returns text, json resolver parses it
       value:
         host: localhost
         port: 8080
