@@ -1761,9 +1761,9 @@ fn base64_resolver(
 
     // Try to decode as UTF-8 string (common for secrets, tokens, configs)
     // Fall back to bytes for binary data (images, certificates, etc.)
-    match String::from_utf8(decoded.clone()) {
+    match String::from_utf8(decoded) {
         Ok(s) => Ok(ResolvedValue::new(Value::String(s))),
-        Err(_) => Ok(ResolvedValue::new(Value::Bytes(decoded))),
+        Err(e) => Ok(ResolvedValue::new(Value::Bytes(e.into_bytes()))),
     }
 }
 
