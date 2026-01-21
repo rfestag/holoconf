@@ -598,7 +598,10 @@ mod tests {
             assert_eq!(args[0].as_literal(), Some("database.host"));
             assert_eq!(kwargs.len(), 1);
             assert!(kwargs.contains_key("default"));
-            assert_eq!(kwargs.get("default").and_then(|v| v.as_literal()), Some("fallback"));
+            assert_eq!(
+                kwargs.get("default").and_then(|v| v.as_literal()),
+                Some("fallback")
+            );
         } else {
             panic!("Expected Resolver");
         }
