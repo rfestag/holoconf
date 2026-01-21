@@ -1,7 +1,7 @@
 //! Shared AWS client cache for all resolvers.
 //!
 //! Caches actual service clients (not just SdkConfig) to enable connection pool reuse.
-//! Each unique (service, region, profile) combination gets its own cached client.
+//! Each unique (service, region, profile, endpoint) combination gets its own cached client.
 
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
@@ -10,8 +10,8 @@ use std::sync::RwLock;
 use aws_config::{BehaviorVersion, SdkConfig};
 use once_cell::sync::Lazy;
 
-/// Cache key: (service TypeId, region, profile)
-type CacheKey = (TypeId, Option<String>, Option<String>);
+/// Cache key: (service TypeId, region, profile, endpoint)
+type CacheKey = (TypeId, Option<String>, Option<String>, Option<String>);
 
 /// Global cache storing type-erased AWS clients.
 static CLIENT_CACHE: Lazy<RwLock<HashMap<CacheKey, Box<dyn Any + Send + Sync>>>> =
@@ -46,21 +46,36 @@ impl AwsClient for aws_sdk_s3::Client {
     }
 }
 
-/// Get or create an AWS client for the given region/profile.
+/// Get or create an AWS client for the given region/profile/endpoint.
 ///
 /// Clients are cached and reused, including their HTTP connection pools.
 /// The client type is inferred from the return type annotation.
 ///
+/// # Arguments
+///
+/// * `region` - AWS region (None uses SDK defaults)
+/// * `profile` - AWS profile name (None uses SDK defaults)
+/// * `endpoint` - Custom endpoint URL (for moto/LocalStack)
+///
 /// # Example
 ///
 /// ```ignore
-/// let client: aws_sdk_ssm::Client = get_client(Some("us-west-2"), None).await;
+/// let client: aws_sdk_ssm::Client = get_client(
+///     Some("us-west-2".to_string()),
+///     None,
+///     Some("http://localhost:5000"),
+/// ).await;
 /// ```
-pub async fn get_client<C: AwsClient>(region: Option<&str>, profile: Option<&str>) -> C {
+pub async fn get_client<C: AwsClient>(
+    region: Option<String>,
+    profile: Option<String>,
+    endpoint: Option<&str>,
+) -> C {
     let key = (
         TypeId::of::<C>(),
-        region.map(|s| s.to_string()),
-        profile.map(|s| s.to_string()),
+        region.clone(),
+        profile.clone(),
+        endpoint.map(|s| s.to_string()),
     );
 
     // Try read lock first (fast path for cached clients)
@@ -77,11 +92,15 @@ pub async fn get_client<C: AwsClient>(region: Option<&str>, profile: Option<&str
     let mut config_loader = aws_config::defaults(BehaviorVersion::latest());
 
     if let Some(region) = region {
-        config_loader = config_loader.region(aws_config::Region::new(region.to_string()));
+        config_loader = config_loader.region(aws_config::Region::new(region));
     }
 
     if let Some(profile) = profile {
-        config_loader = config_loader.profile_name(profile);
+        config_loader = config_loader.profile_name(&profile);
+    }
+
+    if let Some(endpoint) = endpoint {
+        config_loader = config_loader.endpoint_url(endpoint);
     }
 
     let sdk_config = config_loader.load().await;
@@ -97,6 +116,14 @@ pub async fn get_client<C: AwsClient>(region: Option<&str>, profile: Option<&str
     client
 }
 
+/// Clear the entire client cache.
+///
+/// Called by `reset()` to remove all cached clients.
+pub(crate) fn clear() {
+    let mut cache = CLIENT_CACHE.write().unwrap();
+    cache.clear();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -104,9 +131,9 @@ mod tests {
     #[tokio::test]
     async fn test_ssm_client_cached() {
         // First call creates the client
-        let client1: aws_sdk_ssm::Client = get_client(None, None).await;
+        let client1: aws_sdk_ssm::Client = get_client(None, None, None).await;
         // Second call should return cached client
-        let client2: aws_sdk_ssm::Client = get_client(None, None).await;
+        let client2: aws_sdk_ssm::Client = get_client(None, None, None).await;
 
         // Both should succeed - clients are cloned from cache
         // We can't directly compare clients, but we can verify they're valid
@@ -116,8 +143,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_different_regions_different_clients() {
-        let client1: aws_sdk_ssm::Client = get_client(Some("us-east-1"), None).await;
-        let client2: aws_sdk_ssm::Client = get_client(Some("us-west-2"), None).await;
+        let client1: aws_sdk_ssm::Client =
+            get_client(Some("us-east-1".to_string()), None, None).await;
+        let client2: aws_sdk_ssm::Client =
+            get_client(Some("us-west-2".to_string()), None, None).await;
 
         // Each should have the correct region
         assert_eq!(client1.config().region().unwrap().as_ref(), "us-east-1");
@@ -126,8 +155,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_same_region_same_client() {
-        let client1: aws_sdk_ssm::Client = get_client(Some("us-east-1"), None).await;
-        let client2: aws_sdk_ssm::Client = get_client(Some("us-east-1"), None).await;
+        let client1: aws_sdk_ssm::Client =
+            get_client(Some("us-east-1".to_string()), None, None).await;
+        let client2: aws_sdk_ssm::Client =
+            get_client(Some("us-east-1".to_string()), None, None).await;
 
         // Both should have the same region (cached)
         assert_eq!(client1.config().region().unwrap().as_ref(), "us-east-1");

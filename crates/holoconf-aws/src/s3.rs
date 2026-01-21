@@ -56,11 +56,12 @@ impl S3Resolver {
         &self,
         bucket: &str,
         key: &str,
-        region: Option<&str>,
-        profile: Option<&str>,
+        region: Option<String>,
+        profile: Option<String>,
+        endpoint: Option<&str>,
     ) -> Result<(Vec<u8>, Option<String>)> {
         // Get cached client (creates one if needed)
-        let client: aws_sdk_s3::Client = client_cache::get_client(region, profile).await;
+        let client: aws_sdk_s3::Client = client_cache::get_client(region, profile, endpoint).await;
 
         // Get the object
         let response = client
@@ -206,14 +207,23 @@ impl Resolver for S3Resolver {
             ));
         }
 
-        let region = kwargs.get("region").map(|s| s.as_str());
-        let profile = kwargs.get("profile").map(|s| s.as_str());
+        // Resolve configuration with precedence: kwargs > service config > global config
+        let (endpoint, region, profile) = crate::resolve_s3_config(
+            kwargs.get("endpoint").map(|s| s.as_str()),
+            kwargs.get("region").map(|s| s.as_str()),
+            kwargs.get("profile").map(|s| s.as_str()),
+        );
+
         let parse_kwarg = kwargs.get("parse").map(|s| s.as_str());
 
         // Fetch the object as raw bytes using the async runtime
-        let (bytes, content_type) = self
-            .runtime
-            .block_on(self.fetch_object_bytes(bucket, key, region, profile))?;
+        let (bytes, content_type) = self.runtime.block_on(self.fetch_object_bytes(
+            bucket,
+            key,
+            region,
+            profile,
+            endpoint.as_deref(),
+        ))?;
 
         // Determine parse mode and parse content
         let mode = self.determine_parse_mode(parse_kwarg, key, content_type.as_deref());

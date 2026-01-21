@@ -341,35 +341,89 @@ The default client (no region/profile overrides) uses key `(None, None)` and res
 
 ## Configuration API
 
-> **Note:** The `configure()` and `reset()` APIs described below are planned for future releases.
-> Currently, AWS configuration is handled via standard AWS SDK environment variables and config files.
+AWS resolvers support two levels of configuration for testing and advanced use cases:
 
-For testing and advanced use cases, the global AWS configuration can be overridden:
+### Global Configuration (All Services)
+
+Set default region and profile for all AWS services:
 
 ```python
 import holoconf_aws
 
-# Configure endpoint URL (for moto/LocalStack)
+# Configure defaults for all AWS services
 holoconf_aws.configure(
-    endpoint_url="http://localhost:5000",  # All services
+    region="us-east-1",   # Default region
+    profile="prod",       # Default AWS profile
+)
+```
+
+**Note:** Global configuration only supports `region` and `profile`. Endpoints are service-specific (see below).
+
+### Service-Specific Configuration
+
+Override defaults for individual services, including endpoints:
+
+```python
+# S3-specific configuration
+holoconf_aws.s3(
+    endpoint="http://localhost:5000",  # For moto/LocalStack
+    region="us-west-2",                # Override global region
+    profile="dev",                     # Override global profile
 )
 
-# Or per-service endpoints
-holoconf_aws.configure(
-    ssm_endpoint="http://localhost:5000",
-    s3_endpoint="http://localhost:5000",
-    cfn_endpoint="http://localhost:5000",
+# SSM-specific configuration
+holoconf_aws.ssm(
+    endpoint="http://localhost:5001",
 )
 
-# Override default region/profile
-holoconf_aws.configure(
-    region="us-east-1",
+# CloudFormation-specific configuration
+holoconf_aws.cfn(
     profile="testing",
 )
+```
 
-# Reset to defaults (clears client cache)
+### Reset Configuration
+
+Clear all configuration and client cache:
+
+```python
 holoconf_aws.reset()
 ```
+
+### Precedence
+
+Configuration follows this precedence chain (highest to lowest):
+
+1. **Resolver kwargs** - Per-call overrides in config file
+2. **Service configuration** - `holoconf_aws.s3()`, `ssm()`, `cfn()`
+3. **Global configuration** - `holoconf_aws.configure()`
+4. **AWS SDK defaults** - Environment variables, credentials file, IMDS
+
+**Example:**
+```python
+# Set global default
+holoconf_aws.configure(region="us-east-1")
+
+# Override for S3
+holoconf_aws.s3(region="us-west-2")
+```
+```yaml
+# Uses us-west-2 (service config)
+s3_value: ${s3:bucket/file}
+
+# Uses eu-west-1 (kwarg override)
+override: ${s3:bucket/file,region=eu-west-1}
+
+# Uses us-east-1 (global config, no SSM override)
+ssm_value: ${ssm:/path}
+```
+
+### Use Cases
+
+- **Testing with moto/LocalStack** - Point services to local endpoints
+- **Multi-region applications** - Set default region without per-call overrides
+- **Profile-based environments** - Use different AWS profiles per environment
+- **Test isolation** - Reset state between tests
 
 ## Testing with Mock Resolvers
 
