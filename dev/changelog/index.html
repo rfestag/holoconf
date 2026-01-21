@@ -3187,6 +3187,18 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <li>All transformation resolvers support chaining: <code>${json:${file:config.json}}</code></li>
 <li>CSV values returned as strings (use schema validation for type coercion)</li>
 <li>Base64 automatically returns UTF-8 strings when possible, falls back to bytes for binary data</li>
+<li><strong>Archive Extraction Resolver</strong>: New <code>extract</code> resolver for extracting files from archives</li>
+<li>Supports ZIP, TAR, and TAR.GZ formats with automatic format detection</li>
+<li>Syntax: <code>${extract:${file:archive.zip,encoding=binary},path=config.json}</code></li>
+<li>Extract specific files from archives by name (no filesystem extraction)</li>
+<li>Password support for encrypted ZIP files: <code>password=secret</code> (supports both ZipCrypto and AES)</li>
+<li>Returns extracted file contents as bytes</li>
+<li>Chain with transformation resolvers: <code>${json:${extract:${file:data.zip,encoding=binary},path=config.json}}</code></li>
+<li>Works with remote archives: <code>${extract:${https:releases.example.com/v1.0.0.tar.gz,parse=binary},path=config.json}</code></li>
+<li><strong>Security:</strong> Zip bomb protection with 10MB per-file limit and 100:1 compression ratio check</li>
+<li><strong>Security:</strong> Warn users about weak ZipCrypto encryption (prefer AES or GPG)</li>
+<li>Requires <code>archive</code> feature flag (enabled by default in Python package)</li>
+<li>Feature adds dependencies: <code>tar</code>, <code>zip</code>, <code>flate2</code>, <code>infer</code></li>
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
@@ -3206,6 +3218,12 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <li><code>parse=binary</code> still supported for binary content</li>
 <li><code>parse=json</code> and <code>parse=yaml</code> parameters removed</li>
 <li><code>parse=auto</code> parameter removed (no longer auto-detects)</li>
+<li><strong>Internal Optimization: Streaming Binary Data</strong> <em>(not user-facing)</em>: File and HTTP/HTTPS resolvers now use streaming for binary data transfer</li>
+<li>Implementation detail: Binary resolvers return streams internally, materialized before caching</li>
+<li>No API changes: Users always receive materialized <code>Value::Bytes</code>, never streams</li>
+<li>Significant memory efficiency: Defers I/O until needed, then reads in chunks</li>
+<li>Internal: <code>Value::Stream(Box&lt;dyn Read + Send + Sync&gt;)</code> variant added for resolver → cache pipeline</li>
+<li>Note: Streams are fully internal - they never escape to public API or Python bindings</li>
 <li><strong>Nested Path Access</strong>: Config paths now work with transformation resolver output (#26)</li>
 <li><code>data: ${json:${env:CONFIG}}</code> followed by <code>config.get("data.name")</code> now works correctly</li>
 <li>Paths like <code>users[0].email</code> navigate into resolved structures seamlessly</li>

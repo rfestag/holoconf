@@ -2388,6 +2388,56 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#8-csv-resolver-csv" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. CSV Resolver (csv)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#9-base64-resolver-base64" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Base64 Resolver (base64)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#archive-extraction-resolvers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Archive Extraction Resolvers
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Archive Extraction Resolvers">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#10-extract-resolver-extract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Extract Resolver (extract)
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -3651,6 +3701,251 @@
 </span><span id="__span-49-20"><a id="__codelineno-49-20" name="__codelineno-49-20" href="#__codelineno-49-20"></a><span class="w">  </span><span class="c1"># Result: [&quot;user&quot;, &quot;password&quot;, &quot;host&quot;, &quot;5432&quot;, &quot;database&quot;]</span>
 </span><span id="__span-49-21"><a id="__codelineno-49-21" name="__codelineno-49-21" href="#__codelineno-49-21"></a><span class="w">  </span><span class="c1"># Note: limit=4 means 4 splits, resulting in 5 elements max</span>
 </span></code></pre></div>
+<h3 id="8-csv-resolver-csv">8. CSV Resolver (<code>csv</code>)<a class="headerlink" href="#8-csv-resolver-csv" title="Permanent link">&para;</a></h3>
+<p>Parses CSV data into an array of objects.</p>
+<p><strong>Syntax:</strong>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-50-1"><a id="__codelineno-50-1" name="__codelineno-50-1" href="#__codelineno-50-1"></a><span class="c1"># Parse CSV from environment variable</span>
+</span><span id="__span-50-2"><a id="__codelineno-50-2" name="__codelineno-50-2" href="#__codelineno-50-2"></a><span class="nt">data</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${csv:${env:CSV_DATA}}</span>
+</span><span id="__span-50-3"><a id="__codelineno-50-3" name="__codelineno-50-3" href="#__codelineno-50-3"></a>
+</span><span id="__span-50-4"><a id="__codelineno-50-4" name="__codelineno-50-4" href="#__codelineno-50-4"></a><span class="c1"># Parse CSV from file</span>
+</span><span id="__span-50-5"><a id="__codelineno-50-5" name="__codelineno-50-5" href="#__codelineno-50-5"></a><span class="nt">users</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${csv:${file:./users.csv}}</span>
+</span></code></pre></div></p>
+<p><strong>Arguments:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Position</th>
+<th>Name</th>
+<th>Required</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>value</td>
+<td>Yes</td>
+<td>CSV string to parse</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Keyword Arguments:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Name</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>sensitive</code></td>
+<td>bool</td>
+<td>inherited</td>
+<td>Override sensitivity (inherits from input by default)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Behavior:</strong>
+- Parses CSV with headers from first row
+- Returns array of objects where keys are column names
+- Trims whitespace from headers and values
+- Sensitivity is inherited from the input value by default; can be overridden</p>
+<p><strong>Example:</strong>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-51-1"><a id="__codelineno-51-1" name="__codelineno-51-1" href="#__codelineno-51-1"></a><span class="c1"># Input: &quot;name,age\nAlice,30\nBob,25&quot;</span>
+</span><span id="__span-51-2"><a id="__codelineno-51-2" name="__codelineno-51-2" href="#__codelineno-51-2"></a><span class="nt">users</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${csv:${env:USER_DATA}}</span>
+</span><span id="__span-51-3"><a id="__codelineno-51-3" name="__codelineno-51-3" href="#__codelineno-51-3"></a><span class="c1"># Result: [{&quot;name&quot;: &quot;Alice&quot;, &quot;age&quot;: &quot;30&quot;}, {&quot;name&quot;: &quot;Bob&quot;, &quot;age&quot;: &quot;25&quot;}]</span>
+</span></code></pre></div></p>
+<h3 id="9-base64-resolver-base64">9. Base64 Resolver (<code>base64</code>)<a class="headerlink" href="#9-base64-resolver-base64" title="Permanent link">&para;</a></h3>
+<p>Encodes a string or bytes value to base64.</p>
+<p><strong>Syntax:</strong>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-52-1"><a id="__codelineno-52-1" name="__codelineno-52-1" href="#__codelineno-52-1"></a><span class="c1"># Encode string to base64</span>
+</span><span id="__span-52-2"><a id="__codelineno-52-2" name="__codelineno-52-2" href="#__codelineno-52-2"></a><span class="nt">encoded</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${base64:${env:SECRET}}</span>
+</span><span id="__span-52-3"><a id="__codelineno-52-3" name="__codelineno-52-3" href="#__codelineno-52-3"></a>
+</span><span id="__span-52-4"><a id="__codelineno-52-4" name="__codelineno-52-4" href="#__codelineno-52-4"></a><span class="c1"># Encode binary data to base64</span>
+</span><span id="__span-52-5"><a id="__codelineno-52-5" name="__codelineno-52-5" href="#__codelineno-52-5"></a><span class="nt">cert_b64</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${base64:${file:./cert.pem,parse=binary}}</span>
+</span></code></pre></div></p>
+<p><strong>Arguments:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Position</th>
+<th>Name</th>
+<th>Required</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>value</td>
+<td>Yes</td>
+<td>String or bytes to encode</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Keyword Arguments:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Name</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>sensitive</code></td>
+<td>bool</td>
+<td>inherited</td>
+<td>Override sensitivity (inherits from input by default)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Behavior:</strong>
+- Encodes input to base64 string
+- Accepts both string and bytes input
+- Sensitivity is inherited from the input value by default; can be overridden</p>
+<p><strong>Example:</strong>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-53-1"><a id="__codelineno-53-1" name="__codelineno-53-1" href="#__codelineno-53-1"></a><span class="nt">encoded_secret</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${base64:${env:API_KEY}}</span>
+</span></code></pre></div></p>
+<h2 id="archive-extraction-resolvers">Archive Extraction Resolvers<a class="headerlink" href="#archive-extraction-resolvers" title="Permanent link">&para;</a></h2>
+<p>These resolvers extract files from archive formats.</p>
+<h3 id="10-extract-resolver-extract">10. Extract Resolver (<code>extract</code>)<a class="headerlink" href="#10-extract-resolver-extract" title="Permanent link">&para;</a></h3>
+<p>Extracts a specific file from a ZIP, TAR, or TAR.GZ archive.</p>
+<p><strong>Syntax:</strong>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-54-1"><a id="__codelineno-54-1" name="__codelineno-54-1" href="#__codelineno-54-1"></a><span class="c1"># Extract from ZIP archive</span>
+</span><span id="__span-54-2"><a id="__codelineno-54-2" name="__codelineno-54-2" href="#__codelineno-54-2"></a><span class="nt">config</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${extract:${file:archive.zip,encoding=binary},path=config.json}</span>
+</span><span id="__span-54-3"><a id="__codelineno-54-3" name="__codelineno-54-3" href="#__codelineno-54-3"></a>
+</span><span id="__span-54-4"><a id="__codelineno-54-4" name="__codelineno-54-4" href="#__codelineno-54-4"></a><span class="c1"># Extract from TAR.GZ archive</span>
+</span><span id="__span-54-5"><a id="__codelineno-54-5" name="__codelineno-54-5" href="#__codelineno-54-5"></a><span class="nt">data</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${extract:${file:backup.tar.gz,encoding=binary},path=data/values.csv}</span>
+</span><span id="__span-54-6"><a id="__codelineno-54-6" name="__codelineno-54-6" href="#__codelineno-54-6"></a>
+</span><span id="__span-54-7"><a id="__codelineno-54-7" name="__codelineno-54-7" href="#__codelineno-54-7"></a><span class="c1"># Extract password-protected ZIP file</span>
+</span><span id="__span-54-8"><a id="__codelineno-54-8" name="__codelineno-54-8" href="#__codelineno-54-8"></a><span class="nt">secret</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${extract:${file:secure.zip,encoding=binary},path=secret.txt,password=mypassword}</span>
+</span><span id="__span-54-9"><a id="__codelineno-54-9" name="__codelineno-54-9" href="#__codelineno-54-9"></a>
+</span><span id="__span-54-10"><a id="__codelineno-54-10" name="__codelineno-54-10" href="#__codelineno-54-10"></a><span class="c1"># Chain with transformation resolvers</span>
+</span><span id="__span-54-11"><a id="__codelineno-54-11" name="__codelineno-54-11" href="#__codelineno-54-11"></a><span class="nt">parsed</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${json:${extract:${file:data.zip,encoding=binary},path=config.json}}</span>
+</span></code></pre></div></p>
+<p><strong>Arguments:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Position</th>
+<th>Name</th>
+<th>Required</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>data</td>
+<td>Yes</td>
+<td>Archive data as bytes (from file/http/https resolver with <code>encoding=binary</code>)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Keyword Arguments:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Name</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>path</code></td>
+<td>string</td>
+<td>-</td>
+<td><strong>Required.</strong> Path to file within archive to extract</td>
+</tr>
+<tr>
+<td><code>password</code></td>
+<td>string</td>
+<td>-</td>
+<td>Password for encrypted ZIP files</td>
+</tr>
+<tr>
+<td><code>sensitive</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td>Mark the extracted value as sensitive</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Supported Formats:</strong>
+- ZIP (<code>.zip</code>) - with optional password support
+- TAR (<code>.tar</code>)
+- TAR.GZ (<code>.tar.gz</code>, <code>.tgz</code>)</p>
+<p><strong>Behavior:</strong>
+- Auto-detects archive format using magic bytes
+- Streams archive data (does not load entire archive into memory)
+- Returns extracted file contents as bytes
+- For password-protected ZIPs, provide <code>password</code> kwarg
+- For encrypted files without password, returns error
+- If file not found in archive, raises <code>ResolverError</code>
+- Archive data must be provided as bytes (use <code>encoding=binary</code> with file/http/https resolvers)
+- Extracted data is always returned as bytes; use transformation resolvers to parse</p>
+<p><strong>Security:</strong>
+- Password-protected ZIP files use ZipCrypto (weak encryption, legacy support only)
+- Only localhost file access is supported (no remote file:// URIs)
+- Path traversal in archive member names (e.g., <code>../../etc/passwd</code>) is not prevented - extraction returns the member as-is</p>
+<p><strong>Examples:</strong>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-55-1"><a id="__codelineno-55-1" name="__codelineno-55-1" href="#__codelineno-55-1"></a><span class="c1"># Extract JSON config from ZIP and parse it</span>
+</span><span id="__span-55-2"><a id="__codelineno-55-2" name="__codelineno-55-2" href="#__codelineno-55-2"></a><span class="nt">app_config</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${json:${extract:${file:release.zip,encoding=binary},path=config.json}}</span>
+</span><span id="__span-55-3"><a id="__codelineno-55-3" name="__codelineno-55-3" href="#__codelineno-55-3"></a>
+</span><span id="__span-55-4"><a id="__codelineno-55-4" name="__codelineno-55-4" href="#__codelineno-55-4"></a><span class="c1"># Extract YAML from TAR.GZ</span>
+</span><span id="__span-55-5"><a id="__codelineno-55-5" name="__codelineno-55-5" href="#__codelineno-55-5"></a><span class="nt">settings</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${yaml:${extract:${file:backup.tar.gz,encoding=binary},path=settings.yaml}}</span>
+</span><span id="__span-55-6"><a id="__codelineno-55-6" name="__codelineno-55-6" href="#__codelineno-55-6"></a>
+</span><span id="__span-55-7"><a id="__codelineno-55-7" name="__codelineno-55-7" href="#__codelineno-55-7"></a><span class="c1"># Extract CSV and parse it</span>
+</span><span id="__span-55-8"><a id="__codelineno-55-8" name="__codelineno-55-8" href="#__codelineno-55-8"></a><span class="nt">data</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${csv:${extract:${file:archive.zip,encoding=binary},path=data.csv}}</span>
+</span><span id="__span-55-9"><a id="__codelineno-55-9" name="__codelineno-55-9" href="#__codelineno-55-9"></a>
+</span><span id="__span-55-10"><a id="__codelineno-55-10" name="__codelineno-55-10" href="#__codelineno-55-10"></a><span class="c1"># Extract binary file (certificate)</span>
+</span><span id="__span-55-11"><a id="__codelineno-55-11" name="__codelineno-55-11" href="#__codelineno-55-11"></a><span class="nt">ca_cert</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${extract:${file:certs.zip,encoding=binary},path=ca.pem}</span>
+</span><span id="__span-55-12"><a id="__codelineno-55-12" name="__codelineno-55-12" href="#__codelineno-55-12"></a>
+</span><span id="__span-55-13"><a id="__codelineno-55-13" name="__codelineno-55-13" href="#__codelineno-55-13"></a><span class="c1"># Extract from remote archive</span>
+</span><span id="__span-55-14"><a id="__codelineno-55-14" name="__codelineno-55-14" href="#__codelineno-55-14"></a><span class="nt">remote_config</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${json:${extract:${https:releases.example.com/v1.0.0.tar.gz,parse=binary},path=config.json}}</span>
+</span><span id="__span-55-15"><a id="__codelineno-55-15" name="__codelineno-55-15" href="#__codelineno-55-15"></a>
+</span><span id="__span-55-16"><a id="__codelineno-55-16" name="__codelineno-55-16" href="#__codelineno-55-16"></a><span class="c1"># Password-protected ZIP</span>
+</span><span id="__span-55-17"><a id="__codelineno-55-17" name="__codelineno-55-17" href="#__codelineno-55-17"></a><span class="nt">secret_key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${extract:${file:secure.zip,encoding=binary},path=private.key,password=${env:ARCHIVE_PASSWORD}}</span>
+</span></code></pre></div></p>
+<p><strong>Error Cases:</strong></p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-56-1"><a id="__codelineno-56-1" name="__codelineno-56-1" href="#__codelineno-56-1"></a><span class="c1"># Missing path argument</span>
+</span><span id="__span-56-2"><a id="__codelineno-56-2" name="__codelineno-56-2" href="#__codelineno-56-2"></a><span class="nt">invalid</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${extract:${file:archive.zip,encoding=binary}}</span>
+</span><span id="__span-56-3"><a id="__codelineno-56-3" name="__codelineno-56-3" href="#__codelineno-56-3"></a><span class="c1"># Error: extract resolver requires &#39;path&#39; kwarg specifying file to extract</span>
+</span><span id="__span-56-4"><a id="__codelineno-56-4" name="__codelineno-56-4" href="#__codelineno-56-4"></a>
+</span><span id="__span-56-5"><a id="__codelineno-56-5" name="__codelineno-56-5" href="#__codelineno-56-5"></a><span class="c1"># File not found in archive</span>
+</span><span id="__span-56-6"><a id="__codelineno-56-6" name="__codelineno-56-6" href="#__codelineno-56-6"></a><span class="nt">missing</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${extract:${file:archive.zip,encoding=binary},path=nonexistent.txt}</span>
+</span><span id="__span-56-7"><a id="__codelineno-56-7" name="__codelineno-56-7" href="#__codelineno-56-7"></a><span class="c1"># Error: File &#39;nonexistent.txt&#39; not found in archive</span>
+</span><span id="__span-56-8"><a id="__codelineno-56-8" name="__codelineno-56-8" href="#__codelineno-56-8"></a>
+</span><span id="__span-56-9"><a id="__codelineno-56-9" name="__codelineno-56-9" href="#__codelineno-56-9"></a><span class="c1"># Unsupported format</span>
+</span><span id="__span-56-10"><a id="__codelineno-56-10" name="__codelineno-56-10" href="#__codelineno-56-10"></a><span class="nt">invalid</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${extract:not-an-archive,path=file.txt}</span>
+</span><span id="__span-56-11"><a id="__codelineno-56-11" name="__codelineno-56-11" href="#__codelineno-56-11"></a><span class="c1"># Error: Unsupported or unrecognized archive format</span>
+</span><span id="__span-56-12"><a id="__codelineno-56-12" name="__codelineno-56-12" href="#__codelineno-56-12"></a>
+</span><span id="__span-56-13"><a id="__codelineno-56-13" name="__codelineno-56-13" href="#__codelineno-56-13"></a><span class="c1"># Encrypted ZIP without password</span>
+</span><span id="__span-56-14"><a id="__codelineno-56-14" name="__codelineno-56-14" href="#__codelineno-56-14"></a><span class="nt">encrypted</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${extract:${file:secure.zip,encoding=binary},path=secret.txt}</span>
+</span><span id="__span-56-15"><a id="__codelineno-56-15" name="__codelineno-56-15" href="#__codelineno-56-15"></a><span class="c1"># Error: File &#39;secret.txt&#39; requires a password but none was provided</span>
+</span><span id="__span-56-16"><a id="__codelineno-56-16" name="__codelineno-56-16" href="#__codelineno-56-16"></a>
+</span><span id="__span-56-17"><a id="__codelineno-56-17" name="__codelineno-56-17" href="#__codelineno-56-17"></a><span class="c1"># Wrong password</span>
+</span><span id="__span-56-18"><a id="__codelineno-56-18" name="__codelineno-56-18" href="#__codelineno-56-18"></a><span class="nt">wrong_pass</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${extract:${file:secure.zip,encoding=binary},path=secret.txt,password=wrong}</span>
+</span><span id="__span-56-19"><a id="__codelineno-56-19" name="__codelineno-56-19" href="#__codelineno-56-19"></a><span class="c1"># Error: Invalid password for file &#39;secret.txt&#39;</span>
+</span></code></pre></div>
+<p><strong>Feature Flag:</strong></p>
+<p>The extract resolver requires the <code>archive</code> feature flag to be enabled:</p>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-57-1"><a id="__codelineno-57-1" name="__codelineno-57-1" href="#__codelineno-57-1"></a><span class="c1"># Cargo.toml</span>
+</span><span id="__span-57-2"><a id="__codelineno-57-2" name="__codelineno-57-2" href="#__codelineno-57-2"></a><span class="n">holoconf-core</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">version</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;0.4&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">features</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;archive&quot;</span><span class="p">]</span><span class="w"> </span><span class="p">}</span>
+</span></code></pre></div>
+<p>This feature adds the following dependencies:
+- <code>tar</code> - TAR archive support
+- <code>zip</code> - ZIP archive support
+- <code>flate2</code> - GZIP compression support
+- <code>infer</code> - Format detection via magic bytes</p>
 <h2 id="implementation-notes">Implementation Notes<a class="headerlink" href="#implementation-notes" title="Permanent link">&para;</a></h2>
 <h3 id="rust-core">Rust Core<a class="headerlink" href="#rust-core" title="Permanent link">&para;</a></h3>
 <ul>
@@ -3661,6 +3956,9 @@
 <li><code>json</code> resolver: Use <code>serde_json::from_str</code></li>
 <li><code>yaml</code> resolver: Use <code>serde_yaml::from_str</code> (first document only)</li>
 <li><code>split</code> resolver: Use <code>str::split</code> with trim/filter options</li>
+<li><code>csv</code> resolver: Use <code>csv</code> crate with headers</li>
+<li><code>base64</code> resolver: Use <code>base64</code> crate</li>
+<li><code>extract</code> resolver: Use <code>zip</code>, <code>tar</code>, <code>flate2</code>, and <code>infer</code> crates</li>
 <li>Circular detection: Track resolution stack, error if path revisited</li>
 <li>Binary values: Represent as <code>Vec&lt;u8&gt;</code> in Rust, <code>bytes</code> in Python</li>
 </ul>
