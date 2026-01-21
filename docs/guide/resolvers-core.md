@@ -1373,16 +1373,67 @@ The `extract` resolver allows you to extract specific files from ZIP, TAR, and T
 
 ### extract - Extract Files from Archives
 
-```yaml
-# Extract a JSON config file from a ZIP archive
-release_config: ${json:${extract:${file:release-v1.0.0.zip,encoding=binary},path=config.json}}
+=== "YAML"
+    ```yaml
+    # Extract a JSON config file from a ZIP archive
+    release_config: ${json:${extract:${file:release-v1.0.0.zip,encoding=binary},path=config.json}}
 
-# Extract from TAR.GZ archive
-backup_data: ${yaml:${extract:${file:backup.tar.gz,encoding=binary},path=data/settings.yaml}}
+    # Extract from TAR.GZ archive
+    backup_data: ${yaml:${extract:${file:backup.tar.gz,encoding=binary},path=data/settings.yaml}}
 
-# Extract certificate from archive
-ca_cert: ${extract:${file:certificates.zip,encoding=binary},path=ca.pem}
-```
+    # Extract certificate from archive
+    ca_cert: ${extract:${file:certificates.zip,encoding=binary},path=ca.pem}
+    ```
+
+=== "Python"
+    ```python
+    from holoconf import Config
+
+    # Load config with archive extraction
+    config = Config.load("config.yaml")
+
+    # Access extracted and parsed JSON
+    release_config = config.release_config
+    print(f"App version: {release_config['version']}")
+
+    # Access extracted YAML data
+    backup_data = config.backup_data
+
+    # Access raw extracted bytes (certificate)
+    ca_cert_bytes = config.ca_cert
+    ```
+
+=== "Rust"
+    ```rust
+    use holoconf::Config;
+
+    let config = Config::load("config.yaml")?;
+
+    // Extracted JSON is automatically parsed
+    let version: String = config.get("release_config.version")?;
+    println!("App version: {}", version);
+
+    // Access extracted YAML data
+    let settings: serde_json::Value = config.get("backup_data")?;
+
+    // Access raw bytes (certificate)
+    let ca_cert: Vec<u8> = config.get("ca_cert")?;
+    ```
+
+=== "CLI"
+    ```bash
+    # Get value from extracted JSON
+    $ holoconf get config.yaml release_config.version
+    1.0.0
+
+    # Dump extracted YAML
+    $ holoconf get config.yaml backup_data --format json
+    {"host": "localhost", "port": 5432}
+
+    # Extract raw bytes (base64 encoded in output)
+    $ holoconf get config.yaml ca_cert
+    LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0t...
+    ```
 
 **Key Points:**
 
@@ -1391,6 +1442,7 @@ ca_cert: ${extract:${file:certificates.zip,encoding=binary},path=ca.pem}
 - Supports ZIP, TAR, and TAR.GZ formats (auto-detected)
 - Returns extracted file contents as bytes
 - Chain with transformation resolvers to parse extracted data
+- Size limits: 10MB per file (protects against zip bombs)
 
 ### Extracting from Local Archives
 
@@ -1442,7 +1494,33 @@ secure_archive:
   readme: ${extract:${file:secure.zip,encoding=binary},path=README.txt}
 ```
 
-**Security Note:** Password-protected ZIPs use ZipCrypto, which is a weak encryption standard. For sensitive data, prefer other encryption methods like GPG or encrypting files before archiving.
+!!! warning "Security: ZIP Password Encryption"
+    **ZipCrypto (Legacy Encryption):** Older password-protected ZIPs use ZipCrypto encryption, which is cryptographically weak:
+
+    - **Vulnerability:** Passwords can be cracked in seconds using known-plaintext attacks
+    - **Tools:** `bkcrack`, `pkcrack` can recover passwords from encrypted ZIPs
+    - **Not recommended:** Do not rely on ZIP passwords for strong security
+
+    **AES Encryption (Secure):** Newer ZIPs may use AES-256 encryption (created with 7-Zip, WinZip):
+
+    - **Secure:** Industry-standard AES encryption
+    - **Supported:** holoconf can extract AES-encrypted ZIPs
+    - **Recommended:** Use AES-encrypted ZIPs for new archives
+
+    **Better alternatives for sensitive data:**
+
+    - **GPG:** Encrypt files before archiving: `gpg -c sensitive.tar.gz`
+    - **Age:** Modern encryption: `age -e -o secrets.age < config.json`
+    - **AWS KMS:** Cloud-based encryption for AWS environments
+
+    **Creating AES-encrypted ZIPs:**
+    ```bash
+    # Using 7-Zip (AES-256)
+    7z a -p -mem=AES256 secure.zip config.json
+
+    # Using WinZip (AES-256) - GUI only
+    # Select "AES Encryption" when creating archive
+    ```
 
 ### Extracting Nested Paths
 

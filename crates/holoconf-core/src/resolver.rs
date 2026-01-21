@@ -1778,10 +1778,94 @@ fn base64_resolver(
 // Archive Extraction Resolver
 // =============================================================================
 
+#[cfg(feature = "archive")]
+mod archive_limits {
+    /// Maximum size for a single extracted file (10MB)
+    /// Rationale: Config files are typically < 1MB; 10MB is generous
+    pub const MAX_EXTRACTED_FILE_SIZE: u64 = 10 * 1024 * 1024;
+
+    /// Maximum compression ratio allowed (100:1)
+    /// Rationale: Legitimate compressed configs rarely exceed 10:1;
+    /// 100:1 allows for highly compressible data while blocking zip bombs
+    pub const MAX_COMPRESSION_RATIO: u64 = 100;
+}
+
+#[cfg(feature = "archive")]
+use archive_limits::*;
+
+/// Read from a stream with size limits to prevent zip bomb attacks
+///
+/// This function reads data in chunks and enforces a maximum size limit,
+/// preventing memory exhaustion from maliciously crafted archives.
+#[cfg(feature = "archive")]
+fn read_with_limits<R: std::io::Read>(
+    mut reader: R,
+    max_size: u64,
+    compressed_size: Option<u64>,
+) -> Result<Vec<u8>> {
+    use std::io::Read;
+
+    let mut contents = Vec::new();
+    let mut total_read = 0u64;
+    let mut buffer = [0u8; 8192];
+
+    loop {
+        match reader.read(&mut buffer) {
+            Ok(0) => break, // EOF
+            Ok(n) => {
+                total_read += n as u64;
+
+                // Check absolute size limit
+                if total_read > max_size {
+                    return Err(Error::resolver_custom(
+                        "extract",
+                        format!(
+                            "Extracted file exceeds size limit ({} bytes > {} bytes limit). \
+                             This may be a zip bomb or the file is too large for a config.",
+                            total_read, max_size
+                        ),
+                    ));
+                }
+
+                // Check compression ratio if known (zip bomb detection)
+                if let Some(compressed) = compressed_size {
+                    if compressed > 0 {
+                        let ratio = total_read / compressed;
+                        if ratio > MAX_COMPRESSION_RATIO {
+                            return Err(Error::resolver_custom(
+                                "extract",
+                                format!(
+                                    "Compression ratio too high ({}:1, max {}:1). \
+                                     This may be a zip bomb attack.",
+                                    ratio, MAX_COMPRESSION_RATIO
+                                ),
+                            ));
+                        }
+                    }
+                }
+
+                contents.extend_from_slice(&buffer[..n]);
+            }
+            Err(e) => {
+                return Err(Error::resolver_custom(
+                    "extract",
+                    format!("Failed to read from archive: {}", e),
+                ));
+            }
+        }
+    }
+
+    Ok(contents)
+}
+
 /// Extract a file from an archive (zip, tar, tar.gz)
 ///
 /// Automatically detects archive format using magic bytes.
-/// Supports streaming - does not load entire archive into memory.
+/// Includes zip bomb protection via size limits.
+///
+/// Security limits:
+/// - Max file size: 10MB per extracted file
+/// - Max compression ratio: 100:1
 ///
 /// Usage:
 ///   ${extract:${file:archive.tar.gz,encoding=binary},path=config.json}
@@ -1879,7 +1963,7 @@ fn extract_from_zip<R: std::io::Read + std::io::Seek>(
     })?;
 
     // Find the file in the archive
-    let mut file = if let Some(pwd) = password {
+    let file = if let Some(pwd) = password {
         // by_name_decrypt may return an error if file not found or password is wrong
         archive
             .by_name_decrypt(file_path, pwd.as_bytes())
@@ -1917,15 +2001,10 @@ fn extract_from_zip<R: std::io::Read + std::io::Seek>(
         })?
     };
 
-    // Read the file contents
-    let mut contents = Vec::new();
-    file.read_to_end(&mut contents).map_err(|e| {
-        Error::resolver_custom(
-            "extract",
-            format!("Failed to read '{}' from ZIP: {}", file_path, e),
-        )
-        .with_path(ctx.config_path.clone())
-    })?;
+    // Read the file contents with size limits (zip bomb protection)
+    let compressed_size = file.compressed_size();
+    let contents = read_with_limits(file, MAX_EXTRACTED_FILE_SIZE, Some(compressed_size))
+        .map_err(|e| e.with_path(ctx.config_path.clone()))?;
 
     Ok(ResolvedValue::new(Value::Bytes(contents)))
 }
@@ -1945,7 +2024,7 @@ fn extract_from_tar<R: std::io::Read>(
         Error::resolver_custom("extract", format!("Failed to read TAR archive: {}", e))
             .with_path(ctx.config_path.clone())
     })? {
-        let mut entry = entry_result.map_err(|e| {
+        let entry = entry_result.map_err(|e| {
             Error::resolver_custom("extract", format!("Failed to read TAR entry: {}", e))
                 .with_path(ctx.config_path.clone())
         })?;
@@ -1956,15 +2035,10 @@ fn extract_from_tar<R: std::io::Read>(
         })?;
 
         if path.to_string_lossy() == file_path {
-            // Found the file - read its contents
-            let mut contents = Vec::new();
-            entry.read_to_end(&mut contents).map_err(|e| {
-                Error::resolver_custom(
-                    "extract",
-                    format!("Failed to read '{}' from TAR: {}", file_path, e),
-                )
-                .with_path(ctx.config_path.clone())
-            })?;
+            // Found the file - read its contents with size limits (zip bomb protection)
+            // TAR doesn't store compressed size, so we can't check compression ratio
+            let contents = read_with_limits(entry, MAX_EXTRACTED_FILE_SIZE, None)
+                .map_err(|e| e.with_path(ctx.config_path.clone()))?;
 
             return Ok(ResolvedValue::new(Value::Bytes(contents)));
         }
@@ -2204,6 +2278,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "http")]
     fn test_http_resolver_disabled() {
         let ctx = ResolverContext::new("test.path");
         let args = vec!["example.com/config.yaml".to_string()];
@@ -2219,6 +2294,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "http")]
     fn test_registry_with_http() {
         let registry = ResolverRegistry::with_builtins();
         assert!(registry.contains("http"));

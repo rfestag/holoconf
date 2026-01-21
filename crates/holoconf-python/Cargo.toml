@@ -12,6 +12,6 @@ name = "_holoconf"
 crate-type = ["cdylib"]
 
 [dependencies]
-holoconf-core = { workspace = true, features = ["http"] }
+holoconf-core = { workspace = true, features = ["http", "archive"] }
 pyo3 = { version = "0.24", features = ["extension-module", "abi3-py38"] }
 indexmap = "2.7"
