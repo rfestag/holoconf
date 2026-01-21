@@ -156,19 +156,21 @@ Reads content from local files. Supports RFC 8089 file: URI syntax.
 | Name | Type | Default | Description |
 |------|------|---------|-------------|
 | `default` | any | none | Default value if file doesn't exist |
-| `parse` | string | `auto` | How to interpret content: `auto`, `yaml`, `json`, `text`, `binary` |
-| `encoding` | string | `utf-8` | Text encoding: `utf-8`, `ascii`, `latin-1` (ignored for `binary`) |
+| `parse` | string | `text` | How to interpret content: `text` or `binary` |
+| `encoding` | string | `utf-8` | Text encoding: `utf-8`, `ascii`, `latin-1`, `base64` (ignored for `binary`) |
 | `sensitive` | bool | `false` | Mark the resolved value as sensitive |
 
 **Parse Modes:**
 
 | Mode | Return Type | Description |
 |------|-------------|-------------|
-| `auto` | varies | Detect by file extension (`.yaml`, `.yml`, `.json` → parsed; else → text) |
-| `yaml` | structured data | Parse as YAML, accessible via dot notation |
-| `json` | structured data | Parse as JSON, accessible via dot notation |
-| `text` | string | Return raw text content |
+| `text` | string | Return raw text content (default) |
 | `binary` | bytes | Return raw bytes (`bytes` in Python, `Vec<u8>` in Rust) |
+
+**For structured data parsing, use transformation resolvers:**
+- JSON: `${json:${file:config.json}}`
+- YAML: `${yaml:${file:config.yaml}}`
+- CSV: `${csv:${file:data.csv}}`
 
 **Behavior:**
 - Paths are relative to the config file's directory by default
@@ -182,10 +184,9 @@ Reads content from local files. Supports RFC 8089 file: URI syntax.
   - Absolute paths: `/etc/app/config.yaml` (subject to `file_roots` security)
 - If file doesn't exist and no default provided, raises `ResolverError`
 - If file doesn't exist and default is provided, returns default
-- When `parse=auto`, format is detected by file extension
-- Parsed content (YAML/JSON) returns a Config object for nested access
-- Text content returns a string
-- Binary content returns raw bytes (useful for certificates, keys, images)
+- Returns text content as string by default (`parse=text`)
+- Returns raw bytes when `parse=binary` (useful for certificates, keys, images)
+- For structured data (YAML/JSON/CSV), chain with transformation resolvers
 - Not sensitive by default; use `sensitive=true` for secrets
 
 **Examples:**
@@ -275,7 +276,7 @@ Fetches content from remote HTTP URLs.
 | Name | Type | Default | Description |
 |------|------|---------|-------------|
 | `default` | any | none | Default value if request fails |
-| `parse` | string | `auto` | How to interpret content: `auto`, `yaml`, `json`, `text`, `binary` |
+| `parse` | string | `text` | How to interpret content: `text` or `binary` |
 | `encoding` | string | `utf-8` | Text encoding: `utf-8`, `ascii`, `latin-1` (ignored for `binary`) |
 | `timeout` | int | 30 | Request timeout in seconds |
 | `header` | string | - | HTTP header to include as `Name:Value` (repeatable) |
@@ -292,11 +293,13 @@ Fetches content from remote HTTP URLs.
 
 | Mode | Return Type | Description |
 |------|-------------|-------------|
-| `auto` | varies | Detect by Content-Type header or URL extension |
-| `yaml` | structured data | Parse as YAML, accessible via dot notation |
-| `json` | structured data | Parse as JSON, accessible via dot notation |
-| `text` | string | Return raw text content |
+| `text` | string | Return raw text content (default) |
 | `binary` | bytes | Return raw bytes (`bytes` in Python, `Vec<u8>` in Rust) |
+
+**For structured data parsing, use transformation resolvers:**
+- JSON: `${json:${http:api.example.com/config.json}}`
+- YAML: `${yaml:${http:api.example.com/config.yaml}}`
+- CSV: `${csv:${http:data.example.com/export.csv}}`
 
 **Behavior:**
 - Auto-prepends `http://` scheme to the URL argument
@@ -304,10 +307,9 @@ Fetches content from remote HTTP URLs.
 - Strips leading `//` if present (e.g., `${http://example.com}` → `http://example.com`)
 - If request fails and no default provided, raises `ResolverError`
 - If request fails and default is provided, returns default
-- When `parse=auto`, format is detected by Content-Type header or URL extension
-- Parsed content (YAML/JSON) returns a Config object for nested access
-- Text content returns a string
-- Binary content returns raw bytes (useful for certificates, images)
+- Returns text content as string by default (`parse=text`)
+- Returns raw bytes when `parse=binary` (useful for certificates, images)
+- For structured data (JSON/YAML/CSV), chain with transformation resolvers
 - Not sensitive by default; use `sensitive=true` for secrets
 
 **URL Normalization Examples:**
@@ -339,8 +341,8 @@ remote_config: ${http:example.com/shared.yaml,timeout=60}
 # With authentication header
 remote_config: ${http:api.example.com/config,header=Authorization:Bearer ${env:API_TOKEN}}
 
-# Explicit JSON parsing
-api_config: ${http:api.example.com/config,parse=json}
+# Parse JSON response using transformation resolver
+api_config: ${json:${http:api.example.com/config}}
 
 # Binary content (certificate from URL)
 ca_cert: ${http:pki.internal/ca.pem,parse=binary}
@@ -544,7 +546,7 @@ remote_config: ${https:http://api.example.com/config.yaml}
 
 **Examples:**
 ```yaml
-# Fetch remote config (auto-detect format)
+# Fetch remote config as text
 remote_config: ${https:config.example.com/shared.yaml}
 
 # With default if request fails
@@ -556,8 +558,8 @@ remote_config: ${https:api.example.com/config,timeout=60}
 # With authentication header
 api_token: ${https:vault.corp.com/token,header=Authorization:Bearer ${env:VAULT_TOKEN}}
 
-# Explicit YAML parsing
-settings: ${https:config.internal/app.yaml,parse=yaml}
+# Parse YAML response using transformation resolver
+settings: ${yaml:${https:config.internal/app.yaml}}
 
 # Mark as sensitive (for secrets)
 database_password: ${https:secrets.internal/db-pass,sensitive=true}

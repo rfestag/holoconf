@@ -16,6 +16,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Honors schema defaults as fallback when no explicit default provided
   - Framework-level `sensitive=` flag also supported for consistency
   - See [Interpolation Guide](guide/interpolation.md) for full details
+- **Transformation Resolvers**: New resolvers for parsing structured data (#26)
+  - `${json:text}` - Parse JSON strings into structured data
+  - `${yaml:text}` - Parse YAML strings into structured data
+  - `${split:text}` - Split strings into arrays with customizable delimiters
+  - `${csv:text}` - Parse CSV data with header support
+  - `${base64:text}` - Decode base64-encoded strings (auto-detects UTF-8 vs binary)
+  - All transformation resolvers support chaining: `${json:${file:config.json}}`
+  - CSV values returned as strings (use schema validation for type coercion)
+  - Base64 automatically returns UTF-8 strings when possible, falls back to bytes for binary data
+
+### Changed
+- **BREAKING: File Resolver Auto-Parsing Removed**: File resolver no longer automatically parses JSON/YAML based on file extension (#26)
+  - Old behavior: `${file:config.json}` → automatically parsed as JSON
+  - New behavior: `${file:config.json}` → returns JSON as a string
+  - Migration: Use transformation resolvers: `${json:${file:config.json}}`
+  - `parse=text` is now the default (explicit text, no parsing)
+  - `parse=none` returns raw bytes (alias for `encoding=binary`)
+  - `parse=json` and `parse=yaml` parameters removed
+  - `parse=auto` parameter removed (no longer auto-detects from extension)
+- **BREAKING: HTTP/HTTPS Resolver Auto-Parsing Removed**: HTTP/HTTPS resolvers no longer automatically parse JSON/YAML (#26)
+  - Old behavior: Content-Type header or URL extension triggered auto-parsing
+  - New behavior: Always returns response body as text
+  - Migration: Use transformation resolvers: `${json:${http:api.com/data}}`
+  - `parse=text` is now the default
+  - `parse=binary` still supported for binary content
+  - `parse=json` and `parse=yaml` parameters removed
+  - `parse=auto` parameter removed (no longer auto-detects)
+- **Nested Path Access**: Config paths now work with transformation resolver output (#26)
+  - `data: ${json:${env:CONFIG}}` followed by `config.get("data.name")` now works correctly
+  - Paths like `users[0].email` navigate into resolved structures seamlessly
+  - Enables natural access patterns for transformed data
 
 ## [0.4.0] - 2026-01-19
 

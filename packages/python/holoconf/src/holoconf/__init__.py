@@ -6,6 +6,7 @@ This module provides a configuration library that supports:
 - Environment variable interpolation: ${env:VAR}
 - Self-references: ${path.to.value}
 - File includes: ${file:./other.yaml}
+- Transformation resolvers: ${json:...}, ${yaml:...}, ${split:...}, ${csv:...}, ${base64:...}
 - JSON Schema validation
 - Type coercion with schema support
 - Plugin-based resolver extensions via entry points

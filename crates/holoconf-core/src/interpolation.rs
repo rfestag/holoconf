@@ -589,6 +589,25 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_self_reference_with_default() {
+        let result = parse("${database.host,default=fallback}").unwrap();
+        // Self-references with kwargs converted to ref resolver
+        if let Interpolation::Resolver { name, args, kwargs } = result {
+            assert_eq!(name, "ref");
+            assert_eq!(args.len(), 1);
+            assert_eq!(args[0].as_literal(), Some("database.host"));
+            assert_eq!(kwargs.len(), 1);
+            assert!(kwargs.contains_key("default"));
+            assert_eq!(
+                kwargs.get("default").and_then(|v| v.as_literal()),
+                Some("fallback")
+            );
+        } else {
+            panic!("Expected Resolver");
+        }
+    }
+
+    #[test]
     fn test_parse_relative_self_reference() {
         let result = parse("${.sibling}").unwrap();
         // The path includes the leading dot(s) for relative references
@@ -650,10 +669,15 @@ mod tests {
 
     #[test]
     fn test_parse_kwargs() {
-        let result = parse("${file:./config.yaml,parse=yaml}").unwrap();
+        let result = parse("${file:./config.yaml,parse=text}").unwrap();
 
         if let Interpolation::Resolver { kwargs, .. } = result {
             assert!(kwargs.contains_key("parse"));
+            if let Some(InterpolationArg::Literal(value)) = kwargs.get("parse") {
+                assert_eq!(value, "text");
+            } else {
+                panic!("Expected literal value for parse kwarg");
+            }
         } else {
             panic!("Expected Resolver");
         }

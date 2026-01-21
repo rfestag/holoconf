@@ -432,60 +432,85 @@ impl Config {
             }
         }
 
-        // Try to get raw value
+        // FIRST: Try to get raw value from the YAML tree
         let raw_result = self.raw.get_path(path);
 
-        match raw_result {
-            Ok(raw_value) => {
-                // Resolve the value with an empty resolution stack
-                let mut resolution_stack = Vec::new();
-                let resolved = self.resolve_value(raw_value, path, &mut resolution_stack)?;
+        // If the path exists in raw YAML, use normal resolution
+        if let Ok(raw_value) = raw_result {
+            // Resolve the value with an empty resolution stack
+            let mut resolution_stack = Vec::new();
+            let resolved = self.resolve_value(raw_value, path, &mut resolution_stack)?;
 
-                // Check for null value that should use schema default
-                if resolved.value.is_null() {
-                    if let Some(schema) = &self.schema {
-                        // If schema doesn't allow null but has a default, use the default
-                        if !schema.allows_null(path) {
-                            if let Some(default_value) = schema.get_default(path) {
-                                let resolved_default = ResolvedValue::new(default_value.clone());
-                                // Cache the default
-                                {
-                                    let mut cache =
-                                        self.cache.write().expect("Cache lock poisoned");
-                                    cache.insert(path.to_string(), resolved_default);
-                                }
-                                return Ok(default_value);
-                            }
+            // Check for null value that should use schema default
+            if resolved.value.is_null() {
+                if let Some(ref schema) = self.schema {
+                    // Only use default if schema doesn't allow null
+                    if !schema.allows_null(path) {
+                        if let Some(default) = schema.get_default(path) {
+                            return Ok(default);
                         }
                     }
                 }
+            }
 
-                // Cache the result
+            // Cache the resolved value
+            {
+                let mut cache = self.cache.write().expect("Cache lock poisoned");
+                cache.insert(path.to_string(), resolved.clone());
+            }
+
+            return Ok(resolved.value);
+        }
+
+        // Path not in raw YAML - check if it's a nested path into a resolved structure
+        // This handles cases like: data resolves to ${json:...} (a mapping),
+        // and we're requesting data.name, items[0], or users[0].email
+        if !path.is_empty() {
+            // Generate possible parent paths by removing segments from the right
+            let mut candidate_splits = Vec::new();
+
+            // Try splitting at each '.' or '[' from right to left
+            for (i, ch) in path.char_indices().rev() {
+                if ch == '.' || ch == '[' {
+                    let parent = &path[..i];
+                    let child = if ch == '.' {
+                        &path[i + 1..]
+                    } else {
+                        &path[i..]
+                    };
+                    if !parent.is_empty() && !child.is_empty() {
+                        candidate_splits.push((parent.to_string(), child.to_string()));
+                    }
+                }
+            }
+
+            // Try each candidate split
+            for (parent_path, child_path) in candidate_splits {
+                // Try to get the parent value (this will resolve it if needed)
+                if let Ok(parent_value) = self.get(&parent_path) {
+                    // Try to navigate into the resolved parent value
+                    if let Ok(child_value) = parent_value.get_path(&child_path) {
+                        return Ok(child_value.clone());
+                    }
+                }
+            }
+        }
+
+        // Path not found in raw YAML or resolved structures - check schema defaults
+        if let Some(schema) = &self.schema {
+            if let Some(default_value) = schema.get_default(path) {
+                let resolved_default = ResolvedValue::new(default_value.clone());
+                // Cache the default
                 {
                     let mut cache = self.cache.write().expect("Cache lock poisoned");
-                    cache.insert(path.to_string(), resolved.clone());
+                    cache.insert(path.to_string(), resolved_default);
                 }
-
-                Ok(resolved.value)
+                return Ok(default_value);
             }
-            Err(e) if matches!(e.kind, crate::error::ErrorKind::PathNotFound) => {
-                // Path not found - check schema defaults
-                if let Some(schema) = &self.schema {
-                    if let Some(default_value) = schema.get_default(path) {
-                        let resolved_default = ResolvedValue::new(default_value.clone());
-                        // Cache the default
-                        {
-                            let mut cache = self.cache.write().expect("Cache lock poisoned");
-                            cache.insert(path.to_string(), resolved_default);
-                        }
-                        return Ok(default_value);
-                    }
-                }
-                // No schema or no default - propagate error
-                Err(e)
-            }
-            Err(e) => Err(e),
         }
+
+        // No schema or no default - path not found
+        Err(Error::path_not_found(path))
     }
 
     /// Get a resolved string value, with type coercion if needed
