@@ -25,6 +25,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - All transformation resolvers support chaining: `${json:${file:config.json}}`
   - CSV values returned as strings (use schema validation for type coercion)
   - Base64 automatically returns UTF-8 strings when possible, falls back to bytes for binary data
+- **Archive Extraction Resolver**: New `extract` resolver for extracting files from archives
+  - Supports ZIP, TAR, and TAR.GZ formats with automatic format detection
+  - Syntax: `${extract:${file:archive.zip,encoding=binary},path=config.json}`
+  - Extract specific files from archives without loading entire archive into memory
+  - Password support for encrypted ZIP files: `password=secret`
+  - Returns extracted file contents as bytes
+  - Chain with transformation resolvers: `${json:${extract:${file:data.zip,encoding=binary},path=config.json}}`
+  - Works with remote archives: `${extract:${https:releases.example.com/v1.0.0.tar.gz,parse=binary},path=config.json}`
+  - Requires `archive` feature flag (enabled by default in Python package)
+  - Feature adds dependencies: `tar`, `zip`, `flate2`, `infer`
 
 ### Changed
 - **BREAKING: File Resolver Auto-Parsing Removed**: File resolver no longer automatically parses JSON/YAML based on file extension (#26)
@@ -43,6 +53,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `parse=binary` still supported for binary content
   - `parse=json` and `parse=yaml` parameters removed
   - `parse=auto` parameter removed (no longer auto-detects)
+- **BREAKING: Streaming Binary Data**: File and HTTP/HTTPS resolvers now return streams for binary data instead of loading into memory
+  - Old behavior: `${file:large.bin,encoding=binary}` loaded entire file into memory
+  - New behavior: Returns a stream that's materialized on demand
+  - Streams are automatically materialized before caching or conversion
+  - No API changes required - transparent performance improvement
+  - Significant memory savings for large binary files (e.g., 500MB+ archives)
+  - Internal: `Value::Stream(Box<dyn Read + Send + Sync>)` variant added
+  - Streams cannot be cloned or compared - always materialized before these operations
 - **Nested Path Access**: Config paths now work with transformation resolver output (#26)
   - `data: ${json:${env:CONFIG}}` followed by `config.get("data.name")` now works correctly
   - Paths like `users[0].email` navigate into resolved structures seamlessly

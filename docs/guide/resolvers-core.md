@@ -1362,6 +1362,161 @@ The resolvers execute from inside-out:
     print(config.settings.database.port)  # 5432
     ```
 
+## Archive Extraction: Working with Compressed Files
+
+The `extract` resolver allows you to extract specific files from ZIP, TAR, and TAR.GZ archives. This is useful for:
+
+- Loading configuration from archived releases
+- Extracting certificates or keys from secure bundles
+- Processing backup archives
+- Working with distributed configuration packages
+
+### extract - Extract Files from Archives
+
+```yaml
+# Extract a JSON config file from a ZIP archive
+release_config: ${json:${extract:${file:release-v1.0.0.zip,encoding=binary},path=config.json}}
+
+# Extract from TAR.GZ archive
+backup_data: ${yaml:${extract:${file:backup.tar.gz,encoding=binary},path=data/settings.yaml}}
+
+# Extract certificate from archive
+ca_cert: ${extract:${file:certificates.zip,encoding=binary},path=ca.pem}
+```
+
+**Key Points:**
+
+- The archive data must be provided as bytes using `encoding=binary`
+- Specify the file to extract using the `path` kwarg
+- Supports ZIP, TAR, and TAR.GZ formats (auto-detected)
+- Returns extracted file contents as bytes
+- Chain with transformation resolvers to parse extracted data
+
+### Extracting from Local Archives
+
+```yaml
+# Extract and parse JSON configuration
+app_config:
+  archive_path: ./releases/v1.0.0.zip
+  config: ${json:${extract:${file:${.archive_path},encoding=binary},path=config.json}}
+  readme: ${extract:${file:${.archive_path},encoding=binary},path=README.txt}
+
+# Extract from TAR archive
+backup:
+  archive: ./backup-2024-01-20.tar
+  database_config: ${yaml:${extract:${file:${.archive},encoding=binary},path=config/database.yaml}}
+  app_settings: ${json:${extract:${file:${.archive},encoding=binary},path=config/app.json}}
+```
+
+### Extracting from Remote Archives
+
+You can combine the `extract` resolver with `http` or `https` to process remote archives:
+
+```yaml
+# Download and extract from remote ZIP
+remote_release:
+  url: releases.example.com/myapp/v2.1.0.zip
+  config: ${json:${extract:${https:${.url},parse=binary},path=config.json}}
+  version: ${extract:${https:${.url},parse=binary},path=VERSION.txt}
+
+# Extract from S3 (requires holoconf-aws)
+s3_backup:
+  bucket: my-backups
+  key: backups/2024-01-20.tar.gz
+  data: ${csv:${extract:${s3:${.bucket}/${.key},encoding=binary},path=export.csv}}
+```
+
+### Password-Protected Archives
+
+ZIP archives can be password-protected. Use the `password` kwarg to provide the password:
+
+```yaml
+# Extract from encrypted ZIP
+secure_archive:
+  archive_password: ${env:ARCHIVE_PASSWORD,sensitive=true}
+
+  # Extract encrypted file
+  private_key: ${extract:${file:secure.zip,encoding=binary},path=private.key,password=${.archive_password}}
+
+  # Some files in the ZIP might not be encrypted
+  readme: ${extract:${file:secure.zip,encoding=binary},path=README.txt}
+```
+
+**Security Note:** Password-protected ZIPs use ZipCrypto, which is a weak encryption standard. For sensitive data, prefer other encryption methods like GPG or encrypting files before archiving.
+
+### Extracting Nested Paths
+
+Archives can contain nested directory structures. Use the full path to the file:
+
+```yaml
+# Extract from nested structure
+release:
+  archive: release.tar.gz
+
+  # Extract file from nested directory
+  api_config: ${json:${extract:${file:${.archive},encoding=binary},path=configs/api/settings.json}}
+
+  # Extract from deeply nested path
+  db_schema: ${extract:${file:${.archive},encoding=binary},path=migrations/v1/schema.sql}
+```
+
+### Combining with Other Transformation Resolvers
+
+The `extract` resolver returns bytes, which you can chain with any transformation resolver:
+
+```yaml
+extracted_data:
+  # Extract and parse JSON
+  json_config: ${json:${extract:${file:data.zip,encoding=binary},path=config.json}}
+
+  # Extract and parse YAML
+  yaml_settings: ${yaml:${extract:${file:data.tar.gz,encoding=binary},path=settings.yaml}}
+
+  # Extract and parse CSV
+  csv_data: ${csv:${extract:${file:exports.zip,encoding=binary},path=data.csv}}
+
+  # Extract and base64 encode (useful for embedding binary data)
+  cert_b64: ${base64:${extract:${file:certs.zip,encoding=binary},path=ca.pem}}
+
+  # Extract and split (for line-delimited files)
+  host_list: ${split:${extract:${file:config.tar,encoding=binary},path=hosts.txt},delim=\n}
+```
+
+### Error Handling
+
+```yaml
+# Handle missing files in archive with defaults
+optional_config: ${json:${extract:${file:release.zip,encoding=binary},path=optional.json},default={}}
+
+# The extract resolver itself doesn't support default, but you can wrap it:
+safe_extract:
+  # This will fail if the file doesn't exist in the archive
+  # extracted: ${extract:${file:archive.zip,encoding=binary},path=missing.txt}
+
+  # Instead, wrap the entire chain with a default
+  config: ${json:${extract:${file:archive.zip,encoding=binary},path=config.json},default={"mode":"default"}}
+```
+
+### Supported Archive Formats
+
+| Format | Extension | Compression | Notes |
+|--------|-----------|-------------|-------|
+| ZIP | `.zip` | Deflate | Supports password protection (ZipCrypto) |
+| TAR | `.tar` | None | Uncompressed tape archive |
+| TAR+GZIP | `.tar.gz`, `.tgz` | GZIP | Compressed tape archive |
+
+Format detection is automatic based on file magic bytes (not extension).
+
+### Feature Requirement
+
+The `extract` resolver requires the `archive` feature to be enabled. This is included by default in the Python package but optional in the Rust crate:
+
+```toml
+# For Rust projects
+[dependencies]
+holoconf-core = { version = "0.4", features = ["archive"] }
+```
+
 ## Quick Reference
 
 Here's a summary of all core resolvers:
@@ -1380,6 +1535,7 @@ Here's a summary of all core resolvers:
 | `split` | `${split:text}` | Split string into array | `${split:${env:TAGS}}` |
 | `csv` | `${csv:text}` | Parse CSV into array | `${csv:${file:data.csv}}` |
 | `base64` | `${base64:text}` | Decode base64 | `${base64:${env:SECRET_B64}}` |
+| `extract` | `${extract:data,path=file}` | Extract file from archive | `${extract:${file:data.zip,encoding=binary},path=config.json}` |
 
 All resolvers support:
 
@@ -1398,6 +1554,7 @@ You now understand:
 - Fetching remote config with `${http:url}` and `${https:url}`
 - Configuring HTTP timeouts, CA bundles, and auth headers
 - Parsing structured data with transformation resolvers (`json`, `yaml`, `split`, `csv`, `base64`)
+- Extracting files from archives with the `extract` resolver
 - Chaining resolvers for complex transformations
 - Security implications of HTTP resolvers
 

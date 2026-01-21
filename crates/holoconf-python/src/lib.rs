@@ -107,6 +107,10 @@ fn value_to_py(py: Python<'_>, value: &CoreValue) -> PyResult<PyObject> {
         CoreValue::Float(f) => Ok(f.into_pyobject(py)?.to_owned().unbind().into_any()),
         CoreValue::String(s) => Ok(s.into_pyobject(py)?.to_owned().unbind().into_any()),
         CoreValue::Bytes(bytes) => Ok(PyBytes::new(py, bytes).unbind().into_any()),
+        CoreValue::Stream(_) => {
+            // Streams should be materialized before reaching Python FFI boundary
+            panic!("Value::Stream should be materialized before conversion to Python")
+        }
         CoreValue::Sequence(seq) => {
             let list = PyList::empty(py);
             for item in seq {
