@@ -64,26 +64,26 @@ struct GlobalConfig {
 
 /// S3-specific configuration
 #[derive(Clone, Default, Debug)]
-pub struct S3Config {
-    pub endpoint: Option<String>,
-    pub region: Option<String>,
-    pub profile: Option<String>,
+pub(crate) struct S3Config {
+    pub(crate) endpoint: Option<String>,
+    pub(crate) region: Option<String>,
+    pub(crate) profile: Option<String>,
 }
 
 /// SSM-specific configuration
 #[derive(Clone, Default, Debug)]
-pub struct SsmConfig {
-    pub endpoint: Option<String>,
-    pub region: Option<String>,
-    pub profile: Option<String>,
+pub(crate) struct SsmConfig {
+    pub(crate) endpoint: Option<String>,
+    pub(crate) region: Option<String>,
+    pub(crate) profile: Option<String>,
 }
 
 /// CloudFormation-specific configuration
 #[derive(Clone, Default, Debug)]
-pub struct CfnConfig {
-    pub endpoint: Option<String>,
-    pub region: Option<String>,
-    pub profile: Option<String>,
+pub(crate) struct CfnConfig {
+    pub(crate) endpoint: Option<String>,
+    pub(crate) region: Option<String>,
+    pub(crate) profile: Option<String>,
 }
 
 static GLOBAL_CONFIG: Lazy<RwLock<GlobalConfig>> = Lazy::new(Default::default);
@@ -119,6 +119,8 @@ static CFN_CONFIG: Lazy<RwLock<CfnConfig>> = Lazy::new(Default::default);
 /// holoconf_aws::configure(Some("us-west-2".to_string()), None);
 /// ```
 pub fn configure(region: Option<String>, profile: Option<String>) {
+    // Panic on lock poisoning is acceptable - indicates a panic during config update,
+    // which means the program is already in an inconsistent state
     let mut config = GLOBAL_CONFIG.write().unwrap();
     if let Some(r) = region {
         config.region = Some(r);
@@ -151,6 +153,8 @@ pub fn configure(region: Option<String>, profile: Option<String>) {
 /// );
 /// ```
 pub fn configure_s3(endpoint: Option<String>, region: Option<String>, profile: Option<String>) {
+    // Panic on lock poisoning is acceptable - indicates a panic during config update,
+    // which means the program is already in an inconsistent state
     let mut config = S3_CONFIG.write().unwrap();
     if let Some(e) = endpoint {
         config.endpoint = Some(e);
@@ -186,6 +190,8 @@ pub fn configure_s3(endpoint: Option<String>, region: Option<String>, profile: O
 /// );
 /// ```
 pub fn configure_ssm(endpoint: Option<String>, region: Option<String>, profile: Option<String>) {
+    // Panic on lock poisoning is acceptable - indicates a panic during config update,
+    // which means the program is already in an inconsistent state
     let mut config = SSM_CONFIG.write().unwrap();
     if let Some(e) = endpoint {
         config.endpoint = Some(e);
@@ -221,6 +227,8 @@ pub fn configure_ssm(endpoint: Option<String>, region: Option<String>, profile: 
 /// );
 /// ```
 pub fn configure_cfn(endpoint: Option<String>, region: Option<String>, profile: Option<String>) {
+    // Panic on lock poisoning is acceptable - indicates a panic during config update,
+    // which means the program is already in an inconsistent state
     let mut config = CFN_CONFIG.write().unwrap();
     if let Some(e) = endpoint {
         config.endpoint = Some(e);
@@ -252,6 +260,8 @@ pub fn configure_cfn(endpoint: Option<String>, region: Option<String>, profile: 
 /// holoconf_aws::reset();
 /// ```
 pub fn reset() {
+    // Panic on lock poisoning is acceptable - indicates a panic during config update,
+    // which means the program is already in an inconsistent state
     *GLOBAL_CONFIG.write().unwrap() = Default::default();
     *S3_CONFIG.write().unwrap() = Default::default();
     *SSM_CONFIG.write().unwrap() = Default::default();
@@ -307,14 +317,24 @@ impl ServiceConfig for CfnConfig {
 /// Precedence: kwargs > service config > global config
 ///
 /// This function minimizes allocations by:
-/// 1. Releasing locks before cloning (reduces lock contention)
-/// 2. Only cloning values that will actually be used
+/// 1. Early return if all kwargs provided (no config access needed)
+/// 2. Releasing locks before applying precedence logic (reduces lock contention)
+/// 3. Only cloning values that will actually be used in the precedence chain
 fn resolve_config_with_precedence<T: ServiceConfig>(
     service_config: &RwLock<T>,
     endpoint_kwarg: Option<&str>,
     region_kwarg: Option<&str>,
     profile_kwarg: Option<&str>,
 ) -> (Option<String>, Option<String>, Option<String>) {
+    // Early return if all kwargs provided - no need to read config
+    if endpoint_kwarg.is_some() && region_kwarg.is_some() && profile_kwarg.is_some() {
+        return (
+            endpoint_kwarg.map(String::from),
+            region_kwarg.map(String::from),
+            profile_kwarg.map(String::from),
+        );
+    }
+
     // Acquire locks and extract values, then drop locks immediately
     let (endpoint_service, region_service, profile_service, region_global, profile_global) = {
         let global = GLOBAL_CONFIG.read().unwrap();
