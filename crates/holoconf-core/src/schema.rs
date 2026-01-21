@@ -495,6 +495,11 @@ fn value_to_json(value: &Value) -> serde_json::Value {
             use base64::{engine::general_purpose::STANDARD, Engine as _};
             serde_json::Value::String(STANDARD.encode(bytes))
         }
+        Value::Stream(_) => {
+            // Streams should be materialized before schema validation
+            // This is a programming error, not a user error
+            panic!("Value::Stream should be materialized before schema validation")
+        }
         Value::Sequence(seq) => serde_json::Value::Array(seq.iter().map(value_to_json).collect()),
         Value::Mapping(map) => {
             let obj: serde_json::Map<String, serde_json::Value> = map

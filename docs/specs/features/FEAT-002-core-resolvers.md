@@ -1018,6 +1018,196 @@ connection:
   # Note: limit=4 means 4 splits, resulting in 5 elements max
 ```
 
+### 8. CSV Resolver (`csv`)
+
+Parses CSV data into an array of objects.
+
+**Syntax:**
+```yaml
+# Parse CSV from environment variable
+data: ${csv:${env:CSV_DATA}}
+
+# Parse CSV from file
+users: ${csv:${file:./users.csv}}
+```
+
+**Arguments:**
+
+| Position | Name | Required | Description |
+|----------|------|----------|-------------|
+| 1 | value | Yes | CSV string to parse |
+
+**Keyword Arguments:**
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `sensitive` | bool | inherited | Override sensitivity (inherits from input by default) |
+
+**Behavior:**
+- Parses CSV with headers from first row
+- Returns array of objects where keys are column names
+- Trims whitespace from headers and values
+- Sensitivity is inherited from the input value by default; can be overridden
+
+**Example:**
+```yaml
+# Input: "name,age\nAlice,30\nBob,25"
+users: ${csv:${env:USER_DATA}}
+# Result: [{"name": "Alice", "age": "30"}, {"name": "Bob", "age": "25"}]
+```
+
+### 9. Base64 Resolver (`base64`)
+
+Encodes a string or bytes value to base64.
+
+**Syntax:**
+```yaml
+# Encode string to base64
+encoded: ${base64:${env:SECRET}}
+
+# Encode binary data to base64
+cert_b64: ${base64:${file:./cert.pem,parse=binary}}
+```
+
+**Arguments:**
+
+| Position | Name | Required | Description |
+|----------|------|----------|-------------|
+| 1 | value | Yes | String or bytes to encode |
+
+**Keyword Arguments:**
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `sensitive` | bool | inherited | Override sensitivity (inherits from input by default) |
+
+**Behavior:**
+- Encodes input to base64 string
+- Accepts both string and bytes input
+- Sensitivity is inherited from the input value by default; can be overridden
+
+**Example:**
+```yaml
+encoded_secret: ${base64:${env:API_KEY}}
+```
+
+## Archive Extraction Resolvers
+
+These resolvers extract files from archive formats.
+
+### 10. Extract Resolver (`extract`)
+
+Extracts a specific file from a ZIP, TAR, or TAR.GZ archive.
+
+**Syntax:**
+```yaml
+# Extract from ZIP archive
+config: ${extract:${file:archive.zip,encoding=binary},path=config.json}
+
+# Extract from TAR.GZ archive
+data: ${extract:${file:backup.tar.gz,encoding=binary},path=data/values.csv}
+
+# Extract password-protected ZIP file
+secret: ${extract:${file:secure.zip,encoding=binary},path=secret.txt,password=mypassword}
+
+# Chain with transformation resolvers
+parsed: ${json:${extract:${file:data.zip,encoding=binary},path=config.json}}
+```
+
+**Arguments:**
+
+| Position | Name | Required | Description |
+|----------|------|----------|-------------|
+| 1 | data | Yes | Archive data as bytes (from file/http/https resolver with `encoding=binary`) |
+
+**Keyword Arguments:**
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `path` | string | - | **Required.** Path to file within archive to extract |
+| `password` | string | - | Password for encrypted ZIP files |
+| `sensitive` | bool | `false` | Mark the extracted value as sensitive |
+
+**Supported Formats:**
+- ZIP (`.zip`) - with optional password support
+- TAR (`.tar`)
+- TAR.GZ (`.tar.gz`, `.tgz`)
+
+**Behavior:**
+- Auto-detects archive format using magic bytes
+- Streams archive data (does not load entire archive into memory)
+- Returns extracted file contents as bytes
+- For password-protected ZIPs, provide `password` kwarg
+- For encrypted files without password, returns error
+- If file not found in archive, raises `ResolverError`
+- Archive data must be provided as bytes (use `encoding=binary` with file/http/https resolvers)
+- Extracted data is always returned as bytes; use transformation resolvers to parse
+
+**Security:**
+- Password-protected ZIP files use ZipCrypto (weak encryption, legacy support only)
+- Only localhost file access is supported (no remote file:// URIs)
+- Path traversal in archive member names (e.g., `../../etc/passwd`) is not prevented - extraction returns the member as-is
+
+**Examples:**
+```yaml
+# Extract JSON config from ZIP and parse it
+app_config: ${json:${extract:${file:release.zip,encoding=binary},path=config.json}}
+
+# Extract YAML from TAR.GZ
+settings: ${yaml:${extract:${file:backup.tar.gz,encoding=binary},path=settings.yaml}}
+
+# Extract CSV and parse it
+data: ${csv:${extract:${file:archive.zip,encoding=binary},path=data.csv}}
+
+# Extract binary file (certificate)
+ca_cert: ${extract:${file:certs.zip,encoding=binary},path=ca.pem}
+
+# Extract from remote archive
+remote_config: ${json:${extract:${https:releases.example.com/v1.0.0.tar.gz,parse=binary},path=config.json}}
+
+# Password-protected ZIP
+secret_key: ${extract:${file:secure.zip,encoding=binary},path=private.key,password=${env:ARCHIVE_PASSWORD}}
+```
+
+**Error Cases:**
+
+```yaml
+# Missing path argument
+invalid: ${extract:${file:archive.zip,encoding=binary}}
+# Error: extract resolver requires 'path' kwarg specifying file to extract
+
+# File not found in archive
+missing: ${extract:${file:archive.zip,encoding=binary},path=nonexistent.txt}
+# Error: File 'nonexistent.txt' not found in archive
+
+# Unsupported format
+invalid: ${extract:not-an-archive,path=file.txt}
+# Error: Unsupported or unrecognized archive format
+
+# Encrypted ZIP without password
+encrypted: ${extract:${file:secure.zip,encoding=binary},path=secret.txt}
+# Error: File 'secret.txt' requires a password but none was provided
+
+# Wrong password
+wrong_pass: ${extract:${file:secure.zip,encoding=binary},path=secret.txt,password=wrong}
+# Error: Invalid password for file 'secret.txt'
+```
+
+**Feature Flag:**
+
+The extract resolver requires the `archive` feature flag to be enabled:
+
+```toml
+# Cargo.toml
+holoconf-core = { version = "0.4", features = ["archive"] }
+```
+
+This feature adds the following dependencies:
+- `tar` - TAR archive support
+- `zip` - ZIP archive support
+- `flate2` - GZIP compression support
+- `infer` - Format detection via magic bytes
+
 ## Implementation Notes
 
 ### Rust Core
@@ -1029,6 +1219,9 @@ connection:
 - `json` resolver: Use `serde_json::from_str`
 - `yaml` resolver: Use `serde_yaml::from_str` (first document only)
 - `split` resolver: Use `str::split` with trim/filter options
+- `csv` resolver: Use `csv` crate with headers
+- `base64` resolver: Use `base64` crate
+- `extract` resolver: Use `zip`, `tar`, `flate2`, and `infer` crates
 - Circular detection: Track resolution stack, error if path revisited
 - Binary values: Represent as `Vec<u8>` in Rust, `bytes` in Python
 

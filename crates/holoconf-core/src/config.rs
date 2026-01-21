@@ -441,8 +441,11 @@ impl Config {
             let mut resolution_stack = Vec::new();
             let resolved = self.resolve_value(raw_value, path, &mut resolution_stack)?;
 
+            // Materialize streams before caching to ensure concrete values
+            let materialized_value = resolved.value.materialize()?;
+
             // Check for null value that should use schema default
-            if resolved.value.is_null() {
+            if materialized_value.is_null() {
                 if let Some(ref schema) = self.schema {
                     // Only use default if schema doesn't allow null
                     if !schema.allows_null(path) {
@@ -453,13 +456,19 @@ impl Config {
                 }
             }
 
+            // Create resolved value with materialized data
+            let cached_value = crate::resolver::ResolvedValue {
+                value: materialized_value.clone(),
+                sensitive: resolved.sensitive,
+            };
+
             // Cache the resolved value
             {
                 let mut cache = self.cache.write().expect("Cache lock poisoned");
-                cache.insert(path.to_string(), resolved.clone());
+                cache.insert(path.to_string(), cached_value);
             }
 
-            return Ok(resolved.value);
+            return Ok(materialized_value);
         }
 
         // Path not in raw YAML - check if it's a nested path into a resolved structure
@@ -1014,8 +1023,17 @@ impl Config {
             InterpolationArg::Literal(s) => Ok(s.clone()),
             InterpolationArg::Nested(interp) => {
                 let resolved = self.resolve_interpolation(interp, path, resolution_stack)?;
-                match resolved.value {
+                // Materialize streams before converting to string
+                let materialized = resolved.value.materialize()?;
+                match materialized {
                     Value::String(s) => Ok(s),
+                    Value::Bytes(bytes) => {
+                        // Convert bytes to string - try UTF-8 first, fall back to base64
+                        Ok(String::from_utf8(bytes.clone()).unwrap_or_else(|_| {
+                            use base64::{engine::general_purpose::STANDARD, Engine as _};
+                            STANDARD.encode(&bytes)
+                        }))
+                    }
                     other => Ok(other.to_string()),
                 }
             }
@@ -1074,11 +1092,18 @@ impl Config {
                     let parsed = interpolation::parse(s)?;
                     let resolved = self.resolve_interpolation(&parsed, path, resolution_stack)?;
 
+                    // Materialize streams before caching
+                    let materialized_value = resolved.value.materialize()?;
+                    let cached_resolved = ResolvedValue {
+                        value: materialized_value,
+                        sensitive: resolved.sensitive,
+                    };
+
                     // Cache the result
                     let mut cache = self.cache.write().expect("Cache lock poisoned");
-                    cache.insert(path.to_string(), resolved.clone());
+                    cache.insert(path.to_string(), cached_resolved.clone());
 
-                    Ok(resolved)
+                    Ok(cached_resolved)
                 } else {
                     Ok(ResolvedValue::new(value.clone()))
                 }

@@ -3,18 +3,24 @@
 //! Represents parsed configuration values before resolution.
 //! Values can be scalars (string, int, float, bool, null, bytes),
 //! sequences (arrays), or mappings (objects).
+//!
+//! The `Stream` variant is a transient type used to efficiently pass
+//! binary data between resolvers without loading entire contents into memory.
+//! Streams are materialized to bytes before caching.
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use indexmap::IndexMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
+use std::io::Read;
 
 use crate::error::{Error, Result};
 
 /// A configuration value that may contain unresolved interpolations
 ///
 /// The `Bytes` variant stores raw binary data and serializes to base64 in YAML/JSON.
-#[derive(Debug, Clone, PartialEq, Default)]
+/// The `Stream` variant is a transient type for efficient data transfer between resolvers.
+#[derive(Default)]
 pub enum Value {
     /// Null value
     #[default]
@@ -29,13 +35,73 @@ pub enum Value {
     String(String),
     /// Binary data (serializes to base64)
     Bytes(Vec<u8>),
+    /// Streaming binary data (transient - materialized before caching)
+    /// Not cloneable or comparable - must be materialized via `materialize()` before use
+    /// Note: Stream is Send but Read trait doesn't require Sync, so we wrap in a Sync-able type
+    Stream(Box<dyn Read + Send + Sync>),
     /// Sequence of values
     Sequence(Vec<Value>),
     /// Mapping of string keys to values
     Mapping(IndexMap<String, Value>),
 }
 
-// Custom Serialize implementation to handle Bytes as base64
+// Manual Debug implementation (Stream can't derive Debug)
+impl fmt::Debug for Value {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Value::Null => write!(f, "Null"),
+            Value::Bool(b) => f.debug_tuple("Bool").field(b).finish(),
+            Value::Integer(i) => f.debug_tuple("Integer").field(i).finish(),
+            Value::Float(fl) => f.debug_tuple("Float").field(fl).finish(),
+            Value::String(s) => f.debug_tuple("String").field(s).finish(),
+            Value::Bytes(bytes) => f.debug_tuple("Bytes").field(bytes).finish(),
+            Value::Stream(_) => write!(f, "Stream(<stream>)"),
+            Value::Sequence(seq) => f.debug_tuple("Sequence").field(seq).finish(),
+            Value::Mapping(map) => f.debug_tuple("Mapping").field(map).finish(),
+        }
+    }
+}
+
+// Manual Clone implementation (Stream can't be cloned - panic if attempted)
+impl Clone for Value {
+    fn clone(&self) -> Self {
+        match self {
+            Value::Null => Value::Null,
+            Value::Bool(b) => Value::Bool(*b),
+            Value::Integer(i) => Value::Integer(*i),
+            Value::Float(f) => Value::Float(*f),
+            Value::String(s) => Value::String(s.clone()),
+            Value::Bytes(bytes) => Value::Bytes(bytes.clone()),
+            Value::Stream(_) => {
+                panic!("Cannot clone Value::Stream - must materialize() before cloning")
+            }
+            Value::Sequence(seq) => Value::Sequence(seq.clone()),
+            Value::Mapping(map) => Value::Mapping(map.clone()),
+        }
+    }
+}
+
+// Manual PartialEq implementation (Stream comparison not supported)
+impl PartialEq for Value {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Value::Null, Value::Null) => true,
+            (Value::Bool(a), Value::Bool(b)) => a == b,
+            (Value::Integer(a), Value::Integer(b)) => a == b,
+            (Value::Float(a), Value::Float(b)) => a == b,
+            (Value::String(a), Value::String(b)) => a == b,
+            (Value::Bytes(a), Value::Bytes(b)) => a == b,
+            (Value::Stream(_), Value::Stream(_)) => {
+                panic!("Cannot compare Value::Stream - must materialize() first")
+            }
+            (Value::Sequence(a), Value::Sequence(b)) => a == b,
+            (Value::Mapping(a), Value::Mapping(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
+// Custom Serialize implementation to handle Bytes as base64 and Stream materialization
 impl Serialize for Value {
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where
@@ -51,6 +117,12 @@ impl Serialize for Value {
                 // Serialize bytes as base64-encoded string
                 let encoded = STANDARD.encode(bytes);
                 serializer.serialize_str(&encoded)
+            }
+            Value::Stream(_) => {
+                // Stream should have been materialized before serialization
+                Err(serde::ser::Error::custom(
+                    "Cannot serialize Value::Stream - must materialize() first",
+                ))
             }
             Value::Sequence(seq) => seq.serialize(serializer),
             Value::Mapping(map) => map.serialize(serializer),
@@ -129,6 +201,11 @@ impl Value {
     /// Check if this value is bytes
     pub fn is_bytes(&self) -> bool {
         matches!(self, Value::Bytes(_))
+    }
+
+    /// Check if this value is a stream
+    pub fn is_stream(&self) -> bool {
+        matches!(self, Value::Stream(_))
     }
 
     /// Get as boolean if this is a Bool
@@ -326,8 +403,28 @@ impl Value {
             Value::Float(_) => "float",
             Value::String(_) => "string",
             Value::Bytes(_) => "bytes",
+            Value::Stream(_) => "stream",
             Value::Sequence(_) => "sequence",
             Value::Mapping(_) => "mapping",
+        }
+    }
+
+    /// Materialize a stream into bytes
+    ///
+    /// If this value is a Stream, read it completely into a Bytes value.
+    /// If it's already concrete (not a stream), return self unchanged.
+    /// This is used to ensure streams are materialized before caching.
+    pub fn materialize(self) -> Result<Value> {
+        match self {
+            Value::Stream(mut reader) => {
+                let mut bytes = Vec::new();
+                reader.read_to_end(&mut bytes).map_err(|e| {
+                    Error::resolver_custom("stream", format!("Failed to read stream: {}", e))
+                })?;
+                Ok(Value::Bytes(bytes))
+            }
+            // Already materialized - return as-is
+            other => Ok(other),
         }
     }
 
@@ -490,6 +587,7 @@ impl fmt::Display for Value {
             Value::Float(n) => write!(f, "{}", n),
             Value::String(s) => write!(f, "{}", s),
             Value::Bytes(bytes) => write!(f, "<bytes: {} bytes>", bytes.len()),
+            Value::Stream(_) => write!(f, "<stream>"),
             Value::Sequence(seq) => {
                 write!(f, "[")?;
                 for (i, v) in seq.iter().enumerate() {

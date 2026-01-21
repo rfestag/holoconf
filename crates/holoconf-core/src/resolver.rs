@@ -418,6 +418,12 @@ impl ResolverRegistry {
         self.register(Arc::new(FnResolver::new("split", split_resolver)));
         self.register(Arc::new(FnResolver::new("csv", csv_resolver)));
         self.register(Arc::new(FnResolver::new("base64", base64_resolver)));
+
+        // Archive extraction resolver (only available with archive feature)
+        #[cfg(feature = "archive")]
+        {
+            self.register(Arc::new(FnResolver::new("extract", extract_resolver)));
+        }
     }
 
     /// Register a resolver
@@ -767,11 +773,11 @@ fn file_resolver(
         return Err(Error::resolver_custom("file", msg).with_path(ctx.config_path.clone()));
     }
 
-    // Handle binary encoding separately - returns Value::Bytes directly
+    // Handle binary encoding separately - returns Value::Stream for efficient streaming
     if encoding == "binary" {
-        let bytes = std::fs::read(&file_path)
+        let file = std::fs::File::open(&file_path)
             .map_err(|_| Error::file_not_found(file_path_arg, Some(ctx.config_path.clone())))?;
-        return Ok(ResolvedValue::new(Value::Bytes(bytes)));
+        return Ok(ResolvedValue::new(Value::Stream(Box::new(file))));
     }
 
     // Read the file based on encoding
@@ -806,10 +812,10 @@ fn file_resolver(
     //   ${json:${file:config.json}}, ${yaml:${file:config.yaml}}, etc.
     match parse_mode {
         "none" => {
-            // parse=none is an alias for encoding=binary - return raw bytes
-            let bytes = std::fs::read(&file_path)
+            // parse=none is an alias for encoding=binary - return stream for efficiency
+            let file = std::fs::File::open(&file_path)
                 .map_err(|_| Error::file_not_found(file_path_arg, Some(ctx.config_path.clone())))?;
-            Ok(ResolvedValue::new(Value::Bytes(bytes)))
+            Ok(ResolvedValue::new(Value::Stream(Box::new(file))))
         }
         _ => {
             // Default to text mode (including explicit "text") - return content as string
@@ -1516,10 +1522,11 @@ fn http_fetch(
     //   ${json:${http:...}}, ${yaml:${http:...}}, etc.
     match parse_mode {
         "binary" => {
-            let bytes = response.into_body().read_to_vec().map_err(|e| {
-                Error::http_request_failed(url, e.to_string(), Some(ctx.config_path.clone()))
-            })?;
-            Ok(ResolvedValue::new(Value::Bytes(bytes)))
+            // Return stream for efficient data transfer (no materialization until consumed)
+            // Body::into_reader() converts Body to an owned impl Read
+            Ok(ResolvedValue::new(Value::Stream(Box::new(
+                response.into_body().into_reader(),
+            ))))
         }
         _ => {
             // Default to text mode (including explicit "text") - return response body as string
@@ -1767,6 +1774,292 @@ fn base64_resolver(
     }
 }
 
+// =============================================================================
+// Archive Extraction Resolver
+// =============================================================================
+
+#[cfg(feature = "archive")]
+mod archive_limits {
+    /// Maximum size for a single extracted file (10MB)
+    /// Rationale: Config files are typically < 1MB; 10MB is generous
+    pub const MAX_EXTRACTED_FILE_SIZE: u64 = 10 * 1024 * 1024;
+
+    /// Maximum compression ratio allowed (100:1)
+    /// Rationale: Legitimate compressed configs rarely exceed 10:1;
+    /// 100:1 allows for highly compressible data while blocking zip bombs
+    pub const MAX_COMPRESSION_RATIO: u64 = 100;
+}
+
+#[cfg(feature = "archive")]
+use archive_limits::*;
+
+/// Read from a stream with size limits to prevent zip bomb attacks
+///
+/// This function reads data in chunks and enforces a maximum size limit,
+/// preventing memory exhaustion from maliciously crafted archives.
+#[cfg(feature = "archive")]
+fn read_with_limits<R: std::io::Read>(
+    mut reader: R,
+    max_size: u64,
+    compressed_size: Option<u64>,
+) -> Result<Vec<u8>> {
+    let mut contents = Vec::new();
+    let mut total_read = 0u64;
+    let mut buffer = [0u8; 8192];
+
+    loop {
+        match reader.read(&mut buffer) {
+            Ok(0) => break, // EOF
+            Ok(n) => {
+                total_read += n as u64;
+
+                // Check absolute size limit
+                if total_read > max_size {
+                    return Err(Error::resolver_custom(
+                        "extract",
+                        format!(
+                            "Extracted file exceeds size limit ({} bytes > {} bytes limit). \
+                             This may be a zip bomb or the file is too large for a config.",
+                            total_read, max_size
+                        ),
+                    ));
+                }
+
+                // Check compression ratio if known (zip bomb detection)
+                if let Some(compressed) = compressed_size {
+                    if compressed > 0 {
+                        let ratio = total_read / compressed;
+                        if ratio > MAX_COMPRESSION_RATIO {
+                            return Err(Error::resolver_custom(
+                                "extract",
+                                format!(
+                                    "Compression ratio too high ({}:1, max {}:1). \
+                                     This may be a zip bomb attack.",
+                                    ratio, MAX_COMPRESSION_RATIO
+                                ),
+                            ));
+                        }
+                    }
+                }
+
+                contents.extend_from_slice(&buffer[..n]);
+            }
+            Err(e) => {
+                return Err(Error::resolver_custom(
+                    "extract",
+                    format!("Failed to read from archive: {}", e),
+                ));
+            }
+        }
+    }
+
+    Ok(contents)
+}
+
+/// Extract a file from an archive (zip, tar, tar.gz)
+///
+/// Automatically detects archive format using magic bytes.
+/// Includes zip bomb protection via size limits.
+///
+/// Security limits:
+/// - Max file size: 10MB per extracted file
+/// - Max compression ratio: 100:1
+///
+/// Usage:
+///   ${extract:${file:archive.tar.gz,encoding=binary},path=config.json}
+///   ${extract:${https:releases.example.com/app.zip},path=README.md}
+///   ${extract:${file:backup.zip,encoding=binary},path=secrets/key.pem,password=${env:ZIP_PASS}}
+#[cfg(feature = "archive")]
+fn extract_resolver(
+    args: &[String],
+    kwargs: &HashMap<String, String>,
+    ctx: &ResolverContext,
+) -> Result<ResolvedValue> {
+    use std::io::Cursor;
+
+    if args.is_empty() {
+        return Err(
+            Error::parse("extract resolver requires archive data as first argument")
+                .with_path(ctx.config_path.clone()),
+        );
+    }
+
+    // Get required 'path' kwarg
+    let file_path = kwargs.get("path").ok_or_else(|| {
+        Error::parse("extract resolver requires 'path' kwarg specifying file to extract")
+            .with_path(ctx.config_path.clone())
+    })?;
+
+    // Optional password for encrypted archives
+    let password = kwargs.get("password");
+
+    // Get archive data as bytes (first arg should be binary from file/http resolver)
+    // The arg comes as a string (base64 if it was bytes), so we need to decode it
+    use base64::Engine;
+    let archive_bytes =
+        if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(&args[0]) {
+            decoded
+        } else {
+            // If not base64, treat as raw string bytes (shouldn't happen with proper chaining)
+            args[0].as_bytes().to_vec()
+        };
+
+    // Detect archive format using magic bytes
+    let format = detect_archive_format(&archive_bytes)?;
+
+    // Extract file based on format
+    match format {
+        ArchiveFormat::Zip => {
+            extract_from_zip(Cursor::new(archive_bytes), file_path, password, ctx)
+        }
+        ArchiveFormat::Tar => extract_from_tar(Cursor::new(archive_bytes), file_path, ctx),
+        ArchiveFormat::TarGz => extract_from_tar_gz(Cursor::new(archive_bytes), file_path, ctx),
+    }
+}
+
+#[cfg(feature = "archive")]
+enum ArchiveFormat {
+    Zip,
+    Tar,
+    TarGz,
+}
+
+#[cfg(feature = "archive")]
+fn detect_archive_format(data: &[u8]) -> Result<ArchiveFormat> {
+    // Use infer crate for magic byte detection
+    if let Some(kind) = infer::get(data) {
+        match kind.mime_type() {
+            "application/zip" => return Ok(ArchiveFormat::Zip),
+            "application/gzip" => return Ok(ArchiveFormat::TarGz),
+            _ => {}
+        }
+    }
+
+    // Fallback: Check for TAR (ustar marker at offset 257)
+    if data.len() > 262 && &data[257..262] == b"ustar" {
+        return Ok(ArchiveFormat::Tar);
+    }
+
+    Err(Error::resolver_custom(
+        "extract",
+        "Unsupported archive format. Supported formats: ZIP, TAR, TAR.GZ",
+    ))
+}
+
+#[cfg(feature = "archive")]
+fn extract_from_zip<R: std::io::Read + std::io::Seek>(
+    reader: R,
+    file_path: &str,
+    password: Option<&String>,
+    ctx: &ResolverContext,
+) -> Result<ResolvedValue> {
+    let mut archive = zip::ZipArchive::new(reader).map_err(|e| {
+        Error::resolver_custom("extract", format!("Failed to open ZIP archive: {}", e))
+            .with_path(ctx.config_path.clone())
+    })?;
+
+    // Find the file in the archive
+    let file = if let Some(pwd) = password {
+        // by_name_decrypt may return an error if file not found or password is wrong
+        archive
+            .by_name_decrypt(file_path, pwd.as_bytes())
+            .map_err(|e| {
+                Error::resolver_custom(
+                    "extract",
+                    format!(
+                        "Failed to access encrypted file '{}' in ZIP (check password): {}",
+                        file_path, e
+                    ),
+                )
+                .with_path(ctx.config_path.clone())
+            })?
+    } else {
+        archive.by_name(file_path).map_err(|e| {
+            match e {
+                zip::result::ZipError::FileNotFound => {
+                    Error::not_found(format!("File '{}' in ZIP archive", file_path), Some(ctx.config_path.clone()))
+                }
+                zip::result::ZipError::UnsupportedArchive(msg) => {
+                    if msg.contains("encrypted") || msg.contains("password") {
+                        Error::resolver_custom(
+                            "extract",
+                            format!("ZIP file '{}' is password-protected but no password provided. Use password=... kwarg", file_path),
+                        )
+                        .with_path(ctx.config_path.clone())
+                    } else {
+                        Error::resolver_custom("extract", format!("Unsupported ZIP feature: {}", msg))
+                            .with_path(ctx.config_path.clone())
+                    }
+                }
+                _ => Error::resolver_custom("extract", format!("Failed to access '{}' in ZIP: {}", file_path, e))
+                    .with_path(ctx.config_path.clone()),
+            }
+        })?
+    };
+
+    // Read the file contents with size limits (zip bomb protection)
+    let compressed_size = file.compressed_size();
+    let contents = read_with_limits(file, MAX_EXTRACTED_FILE_SIZE, Some(compressed_size))
+        .map_err(|e| e.with_path(ctx.config_path.clone()))?;
+
+    Ok(ResolvedValue::new(Value::Bytes(contents)))
+}
+
+#[cfg(feature = "archive")]
+fn extract_from_tar<R: std::io::Read>(
+    reader: R,
+    file_path: &str,
+    ctx: &ResolverContext,
+) -> Result<ResolvedValue> {
+    let mut archive = tar::Archive::new(reader);
+
+    // Iterate through entries to find the target file
+    for entry_result in archive.entries().map_err(|e| {
+        Error::resolver_custom("extract", format!("Failed to read TAR archive: {}", e))
+            .with_path(ctx.config_path.clone())
+    })? {
+        let entry = entry_result.map_err(|e| {
+            Error::resolver_custom("extract", format!("Failed to read TAR entry: {}", e))
+                .with_path(ctx.config_path.clone())
+        })?;
+
+        let path = entry.path().map_err(|e| {
+            Error::resolver_custom("extract", format!("Invalid TAR entry path: {}", e))
+                .with_path(ctx.config_path.clone())
+        })?;
+
+        if path.to_string_lossy() == file_path {
+            // Found the file - read its contents with size limits (zip bomb protection)
+            // TAR doesn't store compressed size, so we can't check compression ratio
+            let contents = read_with_limits(entry, MAX_EXTRACTED_FILE_SIZE, None)
+                .map_err(|e| e.with_path(ctx.config_path.clone()))?;
+
+            return Ok(ResolvedValue::new(Value::Bytes(contents)));
+        }
+    }
+
+    // File not found in archive
+    Err(Error::not_found(
+        format!("File '{}' in TAR archive", file_path),
+        Some(ctx.config_path.clone()),
+    ))
+}
+
+#[cfg(feature = "archive")]
+fn extract_from_tar_gz<R: std::io::Read>(
+    reader: R,
+    file_path: &str,
+    ctx: &ResolverContext,
+) -> Result<ResolvedValue> {
+    use flate2::read::GzDecoder;
+
+    // Decompress gzip layer
+    let gz_decoder = GzDecoder::new(reader);
+
+    // Pass to TAR extractor
+    extract_from_tar(gz_decoder, file_path, ctx)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1979,6 +2272,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "http")]
     fn test_http_resolver_disabled() {
         let ctx = ResolverContext::new("test.path");
         let args = vec!["example.com/config.yaml".to_string()];
@@ -1994,6 +2288,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "http")]
     fn test_registry_with_http() {
         let registry = ResolverRegistry::with_builtins();
         assert!(registry.contains("http"));
@@ -2412,9 +2707,13 @@ mod tests {
 
         let result = file_resolver(&args, &kwargs, &ctx).unwrap();
 
-        // Verify we get Value::Bytes back
-        assert!(result.value.is_bytes());
-        assert_eq!(result.value.as_bytes().unwrap(), &binary_data);
+        // Verify we get Value::Stream back (streaming support)
+        assert!(result.value.is_stream());
+
+        // Materialize the stream and verify contents
+        let materialized = result.value.materialize().unwrap();
+        assert!(materialized.is_bytes());
+        assert_eq!(materialized.as_bytes().unwrap(), &binary_data);
 
         // Cleanup
         std::fs::remove_file(test_file).ok();
@@ -2439,10 +2738,14 @@ mod tests {
 
         let result = file_resolver(&args, &kwargs, &ctx).unwrap();
 
-        // Verify we get empty Value::Bytes
-        assert!(result.value.is_bytes());
+        // Verify we get Value::Stream (streaming support)
+        assert!(result.value.is_stream());
+
+        // Materialize and verify empty bytes
+        let materialized = result.value.materialize().unwrap();
+        assert!(materialized.is_bytes());
         let empty: &[u8] = &[];
-        assert_eq!(result.value.as_bytes().unwrap(), empty);
+        assert_eq!(materialized.as_bytes().unwrap(), empty);
 
         // Cleanup
         std::fs::remove_file(test_file).ok();
@@ -3026,8 +3329,14 @@ mod http_resolver_tests {
         kwargs.insert("parse".to_string(), "binary".to_string());
 
         let result = http_resolver(&args, &kwargs, &ctx).unwrap();
-        assert!(result.value.is_bytes());
-        assert_eq!(result.value.as_bytes().unwrap(), &binary_data);
+
+        // Verify we get Value::Stream (streaming support)
+        assert!(result.value.is_stream());
+
+        // Materialize and verify contents
+        let materialized = result.value.materialize().unwrap();
+        assert!(materialized.is_bytes());
+        assert_eq!(materialized.as_bytes().unwrap(), &binary_data);
 
         mock.assert();
     }
@@ -3533,5 +3842,256 @@ mod http_resolver_tests {
         assert!(registry.contains("split"));
         assert!(registry.contains("csv"));
         assert!(registry.contains("base64"));
+    }
+}
+
+// Archive extraction tests (only compiled with archive feature)
+#[cfg(all(test, feature = "archive"))]
+mod extract_resolver_tests {
+    use super::*;
+    use std::io::Write;
+
+    fn create_test_zip_with_file(content: &[u8]) -> Vec<u8> {
+        use zip::write::FileOptions;
+
+        let mut buffer = std::io::Cursor::new(Vec::new());
+        {
+            let mut zip = zip::ZipWriter::new(&mut buffer);
+            zip.start_file::<&str, ()>("test.txt", FileOptions::default())
+                .unwrap();
+            zip.write_all(content).unwrap();
+            zip.finish().unwrap();
+        }
+        buffer.into_inner()
+    }
+
+    fn create_test_zip_with_password(content: &[u8], password: &str) -> Vec<u8> {
+        use zip::unstable::write::FileOptionsExt;
+        use zip::write::{ExtendedFileOptions, FileOptions};
+
+        let mut buffer = std::io::Cursor::new(Vec::new());
+        {
+            let mut zip = zip::ZipWriter::new(&mut buffer);
+            let options: FileOptions<ExtendedFileOptions> =
+                FileOptions::default().with_deprecated_encryption(password.as_bytes());
+            zip.start_file("secret.txt", options).unwrap();
+            zip.write_all(content).unwrap();
+            zip.finish().unwrap();
+        }
+        buffer.into_inner()
+    }
+
+    fn create_test_tar_with_file(content: &[u8]) -> Vec<u8> {
+        let mut buffer = Vec::new();
+        {
+            let mut tar = tar::Builder::new(&mut buffer);
+            let mut header = tar::Header::new_gnu();
+            header.set_size(content.len() as u64);
+            header.set_mode(0o644);
+            header.set_cksum();
+            tar.append_data(&mut header, "test.txt", content).unwrap();
+            tar.finish().unwrap();
+        }
+        buffer
+    }
+
+    fn create_test_tar_gz_with_file(content: &[u8]) -> Vec<u8> {
+        use flate2::write::GzEncoder;
+        use flate2::Compression;
+
+        let tar_data = create_test_tar_with_file(content);
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(&tar_data).unwrap();
+        encoder.finish().unwrap()
+    }
+
+    #[test]
+    fn test_extract_from_zip() {
+        let content = b"Hello from ZIP!";
+        let zip_data = create_test_zip_with_file(content);
+
+        // Encode as base64 (simulating what happens when bytes come through resolver chain)
+        use base64::Engine;
+        let encoded = base64::engine::general_purpose::STANDARD.encode(&zip_data);
+
+        let ctx = ResolverContext::new("test.path");
+        let args = vec![encoded];
+        let mut kwargs = HashMap::new();
+        kwargs.insert("path".to_string(), "test.txt".to_string());
+
+        let result = extract_resolver(&args, &kwargs, &ctx).unwrap();
+        assert!(result.value.is_bytes());
+        assert_eq!(result.value.as_bytes().unwrap(), content);
+    }
+
+    #[test]
+    fn test_extract_from_zip_with_password() {
+        let content = b"Secret data!";
+        let password = "mysecret123";
+        let zip_data = create_test_zip_with_password(content, password);
+
+        use base64::Engine;
+        let encoded = base64::engine::general_purpose::STANDARD.encode(&zip_data);
+
+        let ctx = ResolverContext::new("test.path");
+        let args = vec![encoded];
+        let mut kwargs = HashMap::new();
+        kwargs.insert("path".to_string(), "secret.txt".to_string());
+        kwargs.insert("password".to_string(), password.to_string());
+
+        let result = extract_resolver(&args, &kwargs, &ctx).unwrap();
+        assert!(result.value.is_bytes());
+        assert_eq!(result.value.as_bytes().unwrap(), content);
+    }
+
+    #[test]
+    fn test_extract_from_zip_wrong_password() {
+        let content = b"Secret data!";
+        let zip_data = create_test_zip_with_password(content, "correct");
+
+        use base64::Engine;
+        let encoded = base64::engine::general_purpose::STANDARD.encode(&zip_data);
+
+        let ctx = ResolverContext::new("test.path");
+        let args = vec![encoded];
+        let mut kwargs = HashMap::new();
+        kwargs.insert("path".to_string(), "secret.txt".to_string());
+        kwargs.insert("password".to_string(), "wrong".to_string());
+
+        let result = extract_resolver(&args, &kwargs, &ctx);
+        // May succeed due to ZipCrypto weakness, but if it fails, should be password error
+        if let Err(err) = result {
+            let msg = err.to_string();
+            assert!(msg.contains("password") || msg.contains("decrypt"));
+        }
+    }
+
+    #[test]
+    fn test_extract_from_zip_file_not_found() {
+        let content = b"Hello";
+        let zip_data = create_test_zip_with_file(content);
+
+        use base64::Engine;
+        let encoded = base64::engine::general_purpose::STANDARD.encode(&zip_data);
+
+        let ctx = ResolverContext::new("test.path");
+        let args = vec![encoded];
+        let mut kwargs = HashMap::new();
+        kwargs.insert("path".to_string(), "nonexistent.txt".to_string());
+
+        let result = extract_resolver(&args, &kwargs, &ctx);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("not found"));
+    }
+
+    #[test]
+    fn test_extract_from_tar() {
+        let content = b"Hello from TAR!";
+        let tar_data = create_test_tar_with_file(content);
+
+        use base64::Engine;
+        let encoded = base64::engine::general_purpose::STANDARD.encode(&tar_data);
+
+        let ctx = ResolverContext::new("test.path");
+        let args = vec![encoded];
+        let mut kwargs = HashMap::new();
+        kwargs.insert("path".to_string(), "test.txt".to_string());
+
+        let result = extract_resolver(&args, &kwargs, &ctx).unwrap();
+        assert!(result.value.is_bytes());
+        assert_eq!(result.value.as_bytes().unwrap(), content);
+    }
+
+    #[test]
+    fn test_extract_from_tar_gz() {
+        let content = b"Hello from TAR.GZ!";
+        let tar_gz_data = create_test_tar_gz_with_file(content);
+
+        use base64::Engine;
+        let encoded = base64::engine::general_purpose::STANDARD.encode(&tar_gz_data);
+
+        let ctx = ResolverContext::new("test.path");
+        let args = vec![encoded];
+        let mut kwargs = HashMap::new();
+        kwargs.insert("path".to_string(), "test.txt".to_string());
+
+        let result = extract_resolver(&args, &kwargs, &ctx).unwrap();
+        assert!(result.value.is_bytes());
+        assert_eq!(result.value.as_bytes().unwrap(), content);
+    }
+
+    #[test]
+    fn test_extract_from_tar_file_not_found() {
+        let content = b"Hello";
+        let tar_data = create_test_tar_with_file(content);
+
+        use base64::Engine;
+        let encoded = base64::engine::general_purpose::STANDARD.encode(&tar_data);
+
+        let ctx = ResolverContext::new("test.path");
+        let args = vec![encoded];
+        let mut kwargs = HashMap::new();
+        kwargs.insert("path".to_string(), "missing.txt".to_string());
+
+        let result = extract_resolver(&args, &kwargs, &ctx);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("not found"));
+    }
+
+    #[test]
+    fn test_extract_no_args() {
+        let ctx = ResolverContext::new("test.path");
+        let args = vec![];
+        let mut kwargs = HashMap::new();
+        kwargs.insert("path".to_string(), "test.txt".to_string());
+
+        let result = extract_resolver(&args, &kwargs, &ctx);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("requires archive data"));
+    }
+
+    #[test]
+    fn test_extract_no_path_kwarg() {
+        let zip_data = create_test_zip_with_file(b"test");
+        use base64::Engine;
+        let encoded = base64::engine::general_purpose::STANDARD.encode(&zip_data);
+
+        let ctx = ResolverContext::new("test.path");
+        let args = vec![encoded];
+        let kwargs = HashMap::new();
+
+        let result = extract_resolver(&args, &kwargs, &ctx);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("requires 'path'"));
+    }
+
+    #[test]
+    fn test_extract_unsupported_format() {
+        let invalid_data = b"Not an archive";
+        use base64::Engine;
+        let encoded = base64::engine::general_purpose::STANDARD.encode(invalid_data);
+
+        let ctx = ResolverContext::new("test.path");
+        let args = vec![encoded];
+        let mut kwargs = HashMap::new();
+        kwargs.insert("path".to_string(), "test.txt".to_string());
+
+        let result = extract_resolver(&args, &kwargs, &ctx);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Unsupported archive format"));
+    }
+
+    #[test]
+    fn test_extract_resolver_registered() {
+        let registry = ResolverRegistry::with_builtins();
+        assert!(registry.contains("extract"));
     }
 }

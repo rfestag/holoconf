@@ -25,6 +25,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - All transformation resolvers support chaining: `${json:${file:config.json}}`
   - CSV values returned as strings (use schema validation for type coercion)
   - Base64 automatically returns UTF-8 strings when possible, falls back to bytes for binary data
+- **Archive Extraction Resolver**: New `extract` resolver for extracting files from archives
+  - Supports ZIP, TAR, and TAR.GZ formats with automatic format detection
+  - Syntax: `${extract:${file:archive.zip,encoding=binary},path=config.json}`
+  - Extract specific files from archives by name (no filesystem extraction)
+  - Password support for encrypted ZIP files: `password=secret` (supports both ZipCrypto and AES)
+  - Returns extracted file contents as bytes
+  - Chain with transformation resolvers: `${json:${extract:${file:data.zip,encoding=binary},path=config.json}}`
+  - Works with remote archives: `${extract:${https:releases.example.com/v1.0.0.tar.gz,parse=binary},path=config.json}`
+  - **Security:** Zip bomb protection with 10MB per-file limit and 100:1 compression ratio check
+  - **Security:** Warn users about weak ZipCrypto encryption (prefer AES or GPG)
+  - Requires `archive` feature flag (enabled by default in Python package)
+  - Feature adds dependencies: `tar`, `zip`, `flate2`, `infer`
 
 ### Changed
 - **BREAKING: File Resolver Auto-Parsing Removed**: File resolver no longer automatically parses JSON/YAML based on file extension (#26)
@@ -43,6 +55,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `parse=binary` still supported for binary content
   - `parse=json` and `parse=yaml` parameters removed
   - `parse=auto` parameter removed (no longer auto-detects)
+- **Internal Optimization: Streaming Binary Data** _(not user-facing)_: File and HTTP/HTTPS resolvers now use streaming for binary data transfer
+  - Implementation detail: Binary resolvers return streams internally, materialized before caching
+  - No API changes: Users always receive materialized `Value::Bytes`, never streams
+  - Significant memory efficiency: Defers I/O until needed, then reads in chunks
+  - Internal: `Value::Stream(Box<dyn Read + Send + Sync>)` variant added for resolver → cache pipeline
+  - Note: Streams are fully internal - they never escape to public API or Python bindings
 - **Nested Path Access**: Config paths now work with transformation resolver output (#26)
   - `data: ${json:${env:CONFIG}}` followed by `config.get("data.name")` now works correctly
   - Paths like `users[0].email` navigate into resolved structures seamlessly

@@ -1,0 +1,100 @@
+---
+description: "Archive extraction resolver tests"
+requires_features:
+  - archive
+
+tests:
+  - name: "Extract file from ZIP archive"
+    config: |
+      archive_path: tests/acceptance/resolvers/archives/test.zip
+      extracted_config: ${extract:${file:${archive_path},encoding=binary},path=config.json}
+    assertions:
+      - path: extracted_config
+        expected_value: '{"name": "test", "version": "1.0"}'
+        value_type: bytes
+
+  - name: "Extract nested file from ZIP archive"
+    config: |
+      archive_path: tests/acceptance/resolvers/archives/test.zip
+      extracted_data: ${extract:${file:${archive_path},encoding=binary},path=data/values.csv}
+    assertions:
+      - path: extracted_data
+        expected_value: "id,value\n1,alpha\n2,beta"
+        value_type: bytes
+
+  - name: "Extract file from TAR archive"
+    config: |
+      archive_path: tests/acceptance/resolvers/archives/test.tar
+      extracted_config: ${extract:${file:${archive_path},encoding=binary},path=config.yaml}
+    assertions:
+      - path: extracted_config
+        expected_value: "app: myapp\nport: 8080"
+        value_type: bytes
+
+  - name: "Extract file from TAR.GZ archive"
+    config: |
+      archive_path: tests/acceptance/resolvers/archives/test.tar.gz
+      extracted_data: ${extract:${file:${archive_path},encoding=binary},path=data.json}
+    assertions:
+      - path: extracted_data
+        expected_value: '[{"id": 1}, {"id": 2}]'
+        value_type: bytes
+
+  - name: "Chain extract with JSON transformation"
+    config: |
+      archive_path: tests/acceptance/resolvers/archives/test.zip
+      parsed_config: ${json:${extract:${file:${archive_path},encoding=binary},path=config.json}}
+    assertions:
+      - path: parsed_config.name
+        expected_value: "test"
+      - path: parsed_config.version
+        expected_value: "1.0"
+
+  - name: "Chain extract with YAML transformation"
+    config: |
+      archive_path: tests/acceptance/resolvers/archives/test.tar
+      parsed_config: ${yaml:${extract:${file:${archive_path},encoding=binary},path=config.yaml}}
+    assertions:
+      - path: parsed_config.app
+        expected_value: "myapp"
+      - path: parsed_config.port
+        expected_value: 8080
+
+  - name: "Chain extract with CSV transformation"
+    config: |
+      archive_path: tests/acceptance/resolvers/archives/test.zip
+      csv_data: ${csv:${extract:${file:${archive_path},encoding=binary},path=data/values.csv}}
+    assertions:
+      - path: csv_data[0].id
+        expected_value: "1"
+      - path: csv_data[0].value
+        expected_value: "alpha"
+      - path: csv_data[1].id
+        expected_value: "2"
+      - path: csv_data[1].value
+        expected_value: "beta"
+
+  - name: "Extract with base64 transformation"
+    config: |
+      archive_path: tests/acceptance/resolvers/archives/test.tar.gz
+      base64_data: ${base64:${extract:${file:${archive_path},encoding=binary},path=notes.txt}}
+    assertions:
+      - path: base64_data
+        expected_value: "SW1wb3J0YW50IG5vdGVzIGhlcmU="
+
+  - name: "Error: Extract from non-existent file in archive"
+    config: |
+      archive_path: tests/acceptance/resolvers/archives/test.zip
+      missing_file: ${extract:${file:${archive_path},encoding=binary},path=nonexistent.txt}
+    expected_error: "File 'nonexistent.txt' not found in archive"
+
+  - name: "Error: Extract without path argument"
+    config: |
+      archive_path: tests/acceptance/resolvers/archives/test.zip
+      no_path: ${extract:${file:${archive_path},encoding=binary}}
+    expected_error: "extract resolver requires 'path' kwarg"
+
+  - name: "Error: Extract with unsupported format"
+    config: |
+      unsupported_data: ${extract:not-an-archive,path=file.txt}
+    expected_error: "Unsupported or unrecognized archive format"
