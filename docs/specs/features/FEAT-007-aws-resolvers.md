@@ -287,8 +287,8 @@ shared_config: ${s3:my-bucket/configs/shared.yaml}
 # With default if object doesn't exist
 optional_config: ${s3:my-bucket/configs/optional.yaml,default={}}
 
-# Explicit parsing mode
-feature_flags: ${s3:config-bucket/flags.json,parse=json}
+# Parse JSON using transformation resolver
+feature_flags: ${json:${s3:config-bucket/flags.json}}
 
 # Raw text content
 readme: ${s3:my-bucket/docs/README.md,parse=text}

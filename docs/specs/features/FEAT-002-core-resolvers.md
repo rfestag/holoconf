@@ -339,8 +339,8 @@ remote_config: ${http:example.com/shared.yaml,timeout=60}
 # With authentication header
 remote_config: ${http:api.example.com/config,header=Authorization:Bearer ${env:API_TOKEN}}
 
-# Explicit JSON parsing
-api_config: ${http:api.example.com/config,parse=json}
+# Parse JSON response using transformation resolver
+api_config: ${json:${http:api.example.com/config}}
 
 # Binary content (certificate from URL)
 ca_cert: ${http:pki.internal/ca.pem,parse=binary}
@@ -556,8 +556,8 @@ remote_config: ${https:api.example.com/config,timeout=60}
 # With authentication header
 api_token: ${https:vault.corp.com/token,header=Authorization:Bearer ${env:VAULT_TOKEN}}
 
-# Explicit YAML parsing
-settings: ${https:config.internal/app.yaml,parse=yaml}
+# Parse YAML response using transformation resolver
+settings: ${yaml:${https:config.internal/app.yaml}}
 
 # Mark as sensitive (for secrets)
 database_password: ${https:secrets.internal/db-pass,sensitive=true}

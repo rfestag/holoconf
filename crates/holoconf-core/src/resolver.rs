@@ -396,7 +396,7 @@ impl ResolverRegistry {
         registry
     }
 
-    /// Register the built-in resolvers (env, file, http, https)
+    /// Register the built-in resolvers (env, file, http, https, json, yaml, split, csv, base64)
     fn register_builtin_resolvers(&mut self) {
         // Environment variable resolver
         self.register(Arc::new(FnResolver::new("env", env_resolver)));
@@ -411,6 +411,13 @@ impl ResolverRegistry {
             // HTTPS resolver (disabled by default for security)
             self.register(Arc::new(FnResolver::new("https", https_resolver)));
         }
+
+        // Transformation resolvers
+        self.register(Arc::new(FnResolver::new("json", json_resolver)));
+        self.register(Arc::new(FnResolver::new("yaml", yaml_resolver)));
+        self.register(Arc::new(FnResolver::new("split", split_resolver)));
+        self.register(Arc::new(FnResolver::new("csv", csv_resolver)));
+        self.register(Arc::new(FnResolver::new("base64", base64_resolver)));
     }
 
     /// Register a resolver
@@ -647,16 +654,19 @@ fn normalize_file_path(arg: &str) -> Result<(String, bool)> {
 ///   ${file:///absolute/path}                - Absolute path (RFC 8089)
 ///   ${file://localhost/absolute/path}       - Absolute path (RFC 8089, explicit localhost)
 ///   ${file:/absolute/path}                  - Absolute path (RFC 8089 minimal form)
-///   ${file:path/to/file,parse=yaml}         - Parse as YAML
-///   ${file:path/to/file,parse=json}         - Parse as JSON
-///   ${file:path/to/file,parse=text}         - Read as text (explicit)
-///   ${file:path/to/file,parse=auto}         - Auto-detect from extension (default)
+///   ${file:path/to/file,parse=text}         - Read as text (explicit, no parsing)
+///   ${file:path/to/file,parse=none}         - Return raw bytes (alias for encoding=binary)
 ///   ${file:path/to/file,encoding=utf-8}     - UTF-8 encoding (default)
 ///   ${file:path/to/file,encoding=ascii}     - ASCII encoding (strips non-ASCII)
 ///   ${file:path/to/file,encoding=base64}    - Base64 encode the file contents as string
 ///   ${file:path/to/file,encoding=binary}    - Return raw bytes as Value::Bytes
 ///   ${file:path/to/file,default={}}         - Default if file not found (framework-handled)
 ///   ${file:path/to/file,sensitive=true}     - Mark as sensitive (framework-handled)
+///
+/// For structured data parsing, use transformation resolvers:
+///   ${json:${file:config.json}}             - Parse JSON file
+///   ${yaml:${file:config.yaml}}             - Parse YAML file
+///   ${csv:${file:data.csv}}                 - Parse CSV file
 ///
 /// Note: `default` and `sensitive` are framework-level kwargs handled by ResolverRegistry.
 fn file_resolver(
@@ -671,7 +681,7 @@ fn file_resolver(
     }
 
     let file_path_arg = &args[0];
-    let parse_mode = kwargs.get("parse").map(|s| s.as_str()).unwrap_or("auto");
+    let parse_mode = kwargs.get("parse").map(|s| s.as_str()).unwrap_or("text");
     let encoding = kwargs
         .get("encoding")
         .map(|s| s.as_str())
@@ -791,36 +801,18 @@ fn file_resolver(
         return Ok(ResolvedValue::new(Value::String(content)));
     }
 
-    // Determine parse mode
-    let actual_parse_mode = if parse_mode == "auto" {
-        // Detect from extension
-        match file_path.extension().and_then(|e| e.to_str()) {
-            Some("yaml") | Some("yml") => "yaml",
-            Some("json") => "json",
-            _ => "text",
-        }
-    } else {
-        parse_mode
-    };
-
-    // Parse content based on mode
-    match actual_parse_mode {
-        "yaml" => {
-            let value: Value = serde_yaml::from_str(&content).map_err(|e| {
-                Error::parse(format!("Failed to parse YAML: {}", e))
-                    .with_path(ctx.config_path.clone())
-            })?;
-            Ok(ResolvedValue::new(value))
-        }
-        "json" => {
-            let value: Value = serde_json::from_str(&content).map_err(|e| {
-                Error::parse(format!("Failed to parse JSON: {}", e))
-                    .with_path(ctx.config_path.clone())
-            })?;
-            Ok(ResolvedValue::new(value))
+    // Parse mode: only "text" (default) or "none" (same as encoding=binary)
+    // For structured data parsing, use transformation resolvers:
+    //   ${json:${file:config.json}}, ${yaml:${file:config.yaml}}, etc.
+    match parse_mode {
+        "none" => {
+            // parse=none is an alias for encoding=binary - return raw bytes
+            let bytes = std::fs::read(&file_path)
+                .map_err(|_| Error::file_not_found(file_path_arg, Some(ctx.config_path.clone())))?;
+            Ok(ResolvedValue::new(Value::Bytes(bytes)))
         }
         _ => {
-            // Default to text mode (including explicit "text")
+            // Default to text mode (including explicit "text") - return content as string
             Ok(ResolvedValue::new(Value::String(content)))
         }
     }
@@ -951,14 +943,17 @@ fn http_or_https_resolver(
 ///
 /// Usage:
 ///   ${http:example.com/config.yaml}                   - Clean syntax (auto-prepends http://)
-///   ${http:example.com/config,parse=yaml}             - Parse as YAML
-///   ${http:example.com/config,parse=json}             - Parse as JSON
-///   ${http:example.com/config,parse=text}             - Read as text
-///   ${http:example.com/config,parse=binary}           - Read as binary
+///   ${http:example.com/config,parse=text}             - Read as text (explicit, no parsing)
+///   ${http:example.com/config,parse=binary}           - Read as binary (Value::Bytes)
 ///   ${http:example.com/config,timeout=60}             - Timeout in seconds
 ///   ${http:example.com/config,header=Auth:Bearer token} - Add header
 ///   ${http:example.com/config,default={}}             - Default if request fails
 ///   ${http:example.com/config,sensitive=true}         - Mark as sensitive
+///
+/// For structured data parsing, use transformation resolvers:
+///   ${json:${http:api.example.com/config}}            - Parse JSON response
+///   ${yaml:${http:example.com/config.yaml}}           - Parse YAML response
+///   ${csv:${http:data.example.com/export}}            - Parse CSV response
 ///
 /// Backwards compatible:
 ///   ${http:http://example.com}                        - Still works (protocol stripped and re-prepended)
@@ -980,14 +975,17 @@ fn http_resolver(
 ///
 /// Usage:
 ///   ${https:example.com/config.yaml}                  - Clean syntax (auto-prepends https://)
-///   ${https:example.com/config,parse=yaml}            - Parse as YAML
-///   ${https:example.com/config,parse=json}            - Parse as JSON
-///   ${https:example.com/config,parse=text}            - Read as text
-///   ${https:example.com/config,parse=binary}          - Read as binary
+///   ${https:example.com/config,parse=text}            - Read as text (explicit, no parsing)
+///   ${https:example.com/config,parse=binary}          - Read as binary (Value::Bytes)
 ///   ${https:example.com/config,timeout=60}            - Timeout in seconds
 ///   ${https:example.com/config,header=Auth:Bearer token} - Add header
 ///   ${https:example.com/config,default={}}            - Default if request fails
 ///   ${https:example.com/config,sensitive=true}        - Mark as sensitive
+///
+/// For structured data parsing, use transformation resolvers:
+///   ${json:${https:api.example.com/config}}           - Parse JSON response
+///   ${yaml:${https:example.com/config.yaml}}          - Parse YAML response
+///   ${csv:${https:data.example.com/export}}           - Parse CSV response
 ///
 /// Backwards compatible:
 ///   ${https:https://example.com}                      - Still works (protocol stripped and re-prepended)
@@ -1465,7 +1463,7 @@ fn http_fetch(
 ) -> Result<ResolvedValue> {
     use std::time::Duration;
 
-    let parse_mode = kwargs.get("parse").map(|s| s.as_str()).unwrap_or("auto");
+    let parse_mode = kwargs.get("parse").map(|s| s.as_str()).unwrap_or("text");
     let timeout_secs: u64 = kwargs
         .get("timeout")
         .and_then(|s| s.parse().ok())
@@ -1513,84 +1511,260 @@ fn http_fetch(
         Error::http_request_failed(url, &error_msg, Some(ctx.config_path.clone()))
     })?;
 
-    // Get content type from response
-    let content_type = response
-        .headers()
-        .get("content-type")
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string())
-        .unwrap_or_default();
-
-    // Handle binary mode separately
-    if parse_mode == "binary" {
-        let bytes = response.into_body().read_to_vec().map_err(|e| {
-            Error::http_request_failed(url, e.to_string(), Some(ctx.config_path.clone()))
-        })?;
-        return Ok(ResolvedValue::new(Value::Bytes(bytes)));
-    }
-
-    // Read response body as text
-    let body = response.into_body().read_to_string().map_err(|e| {
-        Error::http_request_failed(url, e.to_string(), Some(ctx.config_path.clone()))
-    })?;
-
-    // Determine actual parse mode
-    let actual_parse_mode = if parse_mode == "auto" {
-        detect_parse_mode(url, &content_type)
-    } else {
-        parse_mode
-    };
-
-    // Parse content based on mode
-    match actual_parse_mode {
-        "yaml" => {
-            let value: Value = serde_yaml::from_str(&body).map_err(|e| {
-                Error::parse(format!("Failed to parse YAML from {}: {}", url, e))
-                    .with_path(ctx.config_path.clone())
+    // Parse mode: only "text" (default) or "binary"
+    // For structured data parsing, use transformation resolvers:
+    //   ${json:${http:...}}, ${yaml:${http:...}}, etc.
+    match parse_mode {
+        "binary" => {
+            let bytes = response.into_body().read_to_vec().map_err(|e| {
+                Error::http_request_failed(url, e.to_string(), Some(ctx.config_path.clone()))
             })?;
-            Ok(ResolvedValue::new(value))
-        }
-        "json" => {
-            let value: Value = serde_json::from_str(&body).map_err(|e| {
-                Error::parse(format!("Failed to parse JSON from {}: {}", url, e))
-                    .with_path(ctx.config_path.clone())
-            })?;
-            Ok(ResolvedValue::new(value))
+            Ok(ResolvedValue::new(Value::Bytes(bytes)))
         }
         _ => {
-            // Default to text mode
+            // Default to text mode (including explicit "text") - return response body as string
+            let body = response.into_body().read_to_string().map_err(|e| {
+                Error::http_request_failed(url, e.to_string(), Some(ctx.config_path.clone()))
+            })?;
             Ok(ResolvedValue::new(Value::String(body)))
         }
     }
 }
 
-/// Detect parse mode from URL extension or content type
-#[cfg(feature = "http")]
-fn detect_parse_mode<'a>(url: &str, content_type: &str) -> &'a str {
-    // Check content type first
-    let ct_lower = content_type.to_lowercase();
-    if ct_lower.contains("application/json") || ct_lower.contains("text/json") {
-        return "json";
+// =============================================================================
+// Transformation Resolvers
+// =============================================================================
+
+/// Helper: Truncate string for error messages
+fn truncate_str(s: &str, max_len: usize) -> String {
+    if s.len() <= max_len {
+        s.to_string()
+    } else {
+        format!("{}...", &s[..max_len])
     }
-    if ct_lower.contains("application/yaml")
-        || ct_lower.contains("application/x-yaml")
-        || ct_lower.contains("text/yaml")
-    {
-        return "yaml";
+}
+
+/// JSON resolver - Parse JSON strings into structured data
+fn json_resolver(
+    args: &[String],
+    _kwargs: &HashMap<String, String>,
+    ctx: &ResolverContext,
+) -> Result<ResolvedValue> {
+    if args.is_empty() {
+        return Err(Error::parse("json resolver requires a string argument")
+            .with_path(ctx.config_path.clone()));
     }
 
-    // Check URL extension
-    if let Some(path) = url.split('?').next() {
-        if path.ends_with(".json") {
-            return "json";
-        }
-        if path.ends_with(".yaml") || path.ends_with(".yml") {
-            return "yaml";
-        }
+    let json_str = &args[0];
+
+    // Parse JSON
+    let parsed: Value = serde_json::from_str(json_str).map_err(|e| {
+        Error::parse(format!(
+            "Invalid JSON at line {}, column {}: {}\nInput preview: {}",
+            e.line(),
+            e.column(),
+            e,
+            truncate_str(json_str, 50)
+        ))
+        .with_path(ctx.config_path.clone())
+    })?;
+
+    Ok(ResolvedValue::new(parsed))
+}
+
+/// YAML resolver - Parse YAML strings (first document only)
+fn yaml_resolver(
+    args: &[String],
+    _kwargs: &HashMap<String, String>,
+    ctx: &ResolverContext,
+) -> Result<ResolvedValue> {
+    if args.is_empty() {
+        return Err(Error::parse("yaml resolver requires a string argument")
+            .with_path(ctx.config_path.clone()));
     }
 
-    // Default to text
-    "text"
+    let yaml_str = &args[0];
+
+    // Parse YAML (first document only)
+    let parsed: Value = serde_yaml::from_str(yaml_str).map_err(|e| {
+        let location_info = if let Some(loc) = e.location() {
+            format!(" at line {}, column {}", loc.line(), loc.column())
+        } else {
+            String::new()
+        };
+
+        Error::parse(format!(
+            "Invalid YAML{}: {}\nInput preview: {}",
+            location_info,
+            e,
+            truncate_str(yaml_str, 50)
+        ))
+        .with_path(ctx.config_path.clone())
+    })?;
+
+    Ok(ResolvedValue::new(parsed))
+}
+
+/// Split resolver - Split strings into arrays
+fn split_resolver(
+    args: &[String],
+    kwargs: &HashMap<String, String>,
+    ctx: &ResolverContext,
+) -> Result<ResolvedValue> {
+    if args.is_empty() {
+        return Err(Error::parse("split resolver requires a string argument")
+            .with_path(ctx.config_path.clone()));
+    }
+
+    let input_str = &args[0];
+    let delim = kwargs.get("delim").map(|s| s.as_str()).unwrap_or(",");
+    let trim = kwargs
+        .get("trim")
+        .map(|s| s.eq_ignore_ascii_case("true"))
+        .unwrap_or(true); // Default: trim
+    let skip_empty = kwargs
+        .get("skip_empty")
+        .map(|s| s.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+    let limit = kwargs.get("limit").and_then(|s| s.parse::<usize>().ok());
+
+    // Split
+    let parts: Vec<&str> = if let Some(limit) = limit {
+        input_str.splitn(limit + 1, delim).collect()
+    } else {
+        input_str.split(delim).collect()
+    };
+
+    // Process: trim and filter
+    let result: Vec<Value> = parts
+        .iter()
+        .map(|s| if trim { s.trim() } else { *s })
+        .filter(|s| !skip_empty || !s.is_empty())
+        .map(|s| Value::String(s.to_string()))
+        .collect();
+
+    Ok(ResolvedValue::new(Value::Sequence(result)))
+}
+
+/// CSV resolver - Parse CSV data into arrays
+fn csv_resolver(
+    args: &[String],
+    kwargs: &HashMap<String, String>,
+    ctx: &ResolverContext,
+) -> Result<ResolvedValue> {
+    if args.is_empty() {
+        return Err(Error::parse("csv resolver requires a string argument")
+            .with_path(ctx.config_path.clone()));
+    }
+
+    let csv_str = &args[0];
+    let header = kwargs
+        .get("header")
+        .map(|s| s.eq_ignore_ascii_case("true"))
+        .unwrap_or(true); // Default: true
+    let trim = kwargs
+        .get("trim")
+        .map(|s| s.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+    let delim_str = kwargs.get("delim").map(|s| s.as_str()).unwrap_or(",");
+
+    // Parse delimiter
+    let delim_char = delim_str.chars().next().ok_or_else(|| {
+        Error::parse("CSV delimiter cannot be empty").with_path(ctx.config_path.clone())
+    })?;
+
+    // Build CSV reader
+    let mut reader = csv::ReaderBuilder::new()
+        .has_headers(header)
+        .delimiter(delim_char as u8)
+        .trim(if trim {
+            csv::Trim::All
+        } else {
+            csv::Trim::None
+        })
+        .from_reader(csv_str.as_bytes());
+
+    // Get headers if present
+    let headers = if header {
+        Some(
+            reader
+                .headers()
+                .map_err(|e| {
+                    Error::parse(format!("CSV parse error: {}", e))
+                        .with_path(ctx.config_path.clone())
+                })?
+                .clone(),
+        )
+    } else {
+        None
+    };
+
+    // Parse rows
+    let mut rows = Vec::new();
+    for result in reader.records() {
+        let record = result.map_err(|e| {
+            let location_info = e
+                .position()
+                .map(|p| format!(" at line {}", p.line()))
+                .unwrap_or_default();
+            Error::parse(format!("CSV parse error{}: {}", location_info, e))
+                .with_path(ctx.config_path.clone())
+        })?;
+
+        let row = if let Some(ref headers) = headers {
+            // Array of objects: [{"name": "Alice", ...}]
+            let mut obj = indexmap::IndexMap::new();
+            for (i, field) in record.iter().enumerate() {
+                let key = headers.get(i).unwrap_or(&format!("col{}", i)).to_string();
+                obj.insert(key, Value::String(field.to_string()));
+            }
+            Value::Mapping(obj)
+        } else {
+            // Array of arrays: [["Alice", "admin"]]
+            Value::Sequence(
+                record
+                    .iter()
+                    .map(|s| Value::String(s.to_string()))
+                    .collect(),
+            )
+        };
+
+        rows.push(row);
+    }
+
+    Ok(ResolvedValue::new(Value::Sequence(rows)))
+}
+
+/// Base64 resolver - Decode base64 strings to bytes
+fn base64_resolver(
+    args: &[String],
+    _kwargs: &HashMap<String, String>,
+    ctx: &ResolverContext,
+) -> Result<ResolvedValue> {
+    if args.is_empty() {
+        return Err(Error::parse("base64 resolver requires a string argument")
+            .with_path(ctx.config_path.clone()));
+    }
+
+    let b64_str = args[0].trim();
+
+    use base64::{engine::general_purpose, Engine as _};
+
+    let decoded = general_purpose::STANDARD.decode(b64_str).map_err(|e| {
+        Error::parse(format!(
+            "Invalid base64: {}\nInput preview: {}",
+            e,
+            truncate_str(b64_str, 50)
+        ))
+        .with_path(ctx.config_path.clone())
+    })?;
+
+    // Try to decode as UTF-8 string (common for secrets, tokens, configs)
+    // Fall back to bytes for binary data (images, certificates, etc.)
+    match String::from_utf8(decoded.clone()) {
+        Ok(s) => Ok(ResolvedValue::new(Value::String(s))),
+        Err(_) => Ok(ResolvedValue::new(Value::Bytes(decoded))),
+    }
 }
 
 #[cfg(test)]
@@ -1779,7 +1953,10 @@ mod tests {
         let kwargs = HashMap::new();
 
         let result = file_resolver(&args, &kwargs, &ctx).unwrap();
-        assert!(result.value.is_mapping());
+        // File resolver now returns text by default (no auto-parsing)
+        // Use ${yaml:${file:...}} for structured data
+        assert!(result.value.is_string());
+        assert!(result.value.as_str().unwrap().contains("key: value"));
 
         // Cleanup
         std::fs::remove_file(test_file).ok();
@@ -1964,7 +2141,10 @@ mod tests {
         let kwargs = HashMap::new();
 
         let result = file_resolver(&args, &kwargs, &ctx).unwrap();
-        assert!(result.value.is_mapping());
+        // File resolver now returns text by default (no auto-parsing)
+        // Use ${json:${file:...}} for structured data
+        assert!(result.value.is_string());
+        assert!(result.value.as_str().unwrap().contains(r#""key": "value""#));
 
         // Cleanup
         std::fs::remove_file(test_file).ok();
@@ -2019,10 +2199,10 @@ mod tests {
         let args = vec!["holoconf_invalid.yaml".to_string()];
         let kwargs = HashMap::new();
 
-        let result = file_resolver(&args, &kwargs, &ctx);
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(err.to_string().contains("parse") || err.to_string().contains("YAML"));
+        // File resolver now returns text regardless of extension
+        // Invalid YAML is just returned as text - parsing errors happen in yaml_resolver
+        let result = file_resolver(&args, &kwargs, &ctx).unwrap();
+        assert!(result.value.is_string());
 
         // Cleanup
         std::fs::remove_file(test_file).ok();
@@ -2047,10 +2227,10 @@ mod tests {
         let args = vec!["holoconf_invalid.json".to_string()];
         let kwargs = HashMap::new();
 
-        let result = file_resolver(&args, &kwargs, &ctx);
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(err.to_string().contains("parse") || err.to_string().contains("JSON"));
+        // File resolver now returns text regardless of extension
+        // Invalid JSON is just returned as text - parsing errors happen in json_resolver
+        let result = file_resolver(&args, &kwargs, &ctx).unwrap();
+        assert!(result.value.is_string());
 
         // Cleanup
         std::fs::remove_file(test_file).ok();
@@ -2777,8 +2957,11 @@ mod http_resolver_tests {
         let args = vec![format!("{}/config.json", server.url())];
         let kwargs = HashMap::new();
 
+        // HTTP resolver now returns text by default (no auto-parsing)
+        // Use ${json:${http:...}} for structured data
         let result = http_resolver(&args, &kwargs, &ctx).unwrap();
-        assert!(result.value.is_mapping());
+        assert!(result.value.is_string());
+        assert!(result.value.as_str().unwrap().contains(r#""key": "value""#));
 
         mock.assert();
     }
@@ -2797,8 +2980,11 @@ mod http_resolver_tests {
         let args = vec![format!("{}/config.yaml", server.url())];
         let kwargs = HashMap::new();
 
+        // HTTP resolver now returns text by default (no auto-parsing)
+        // Use ${yaml:${http:...}} for structured data
         let result = http_resolver(&args, &kwargs, &ctx).unwrap();
-        assert!(result.value.is_mapping());
+        assert!(result.value.is_string());
+        assert!(result.value.as_str().unwrap().contains("key: value"));
 
         mock.assert();
     }
@@ -2847,23 +3033,25 @@ mod http_resolver_tests {
     }
 
     #[test]
-    fn test_http_fetch_explicit_parse_mode() {
+    fn test_http_fetch_explicit_parse_text() {
         let mut server = Server::new();
-        // Return JSON but with text/plain content-type
+        // Return JSON but with parse=text it should be returned as string
         let mock = server
             .mock("GET", "/data")
             .with_status(200)
-            .with_header("content-type", "text/plain")
+            .with_header("content-type", "application/json")
             .with_body(r#"{"key": "value"}"#)
             .create();
 
         let ctx = ResolverContext::new("test.path").with_allow_http(true);
         let args = vec![format!("{}/data", server.url())];
         let mut kwargs = HashMap::new();
-        kwargs.insert("parse".to_string(), "json".to_string());
+        kwargs.insert("parse".to_string(), "text".to_string());
 
         let result = http_resolver(&args, &kwargs, &ctx).unwrap();
-        assert!(result.value.is_mapping());
+        // With parse=text, JSON should be returned as string (not parsed)
+        assert!(result.value.is_string());
+        assert_eq!(result.value.as_str(), Some(r#"{"key": "value"}"#));
 
         mock.assert();
     }
@@ -2959,7 +3147,9 @@ mod http_resolver_tests {
         let kwargs = HashMap::new();
 
         let result = http_resolver(&args, &kwargs, &ctx).unwrap();
-        assert!(result.value.is_mapping());
+        // HTTP resolver now returns text by default (no auto-parsing)
+        assert!(result.value.is_string());
+        assert!(result.value.as_str().unwrap().contains("key: value"));
 
         mock.assert();
     }
@@ -3008,61 +3198,340 @@ mod http_resolver_tests {
         ));
     }
 
+    // ========================================
+    // Transformation Resolver Tests
+    // ========================================
+
     #[test]
-    fn test_detect_parse_mode_from_content_type() {
-        assert_eq!(
-            detect_parse_mode("http://example.com/data", "application/json"),
-            "json"
-        );
-        assert_eq!(
-            detect_parse_mode("http://example.com/data", "text/json"),
-            "json"
-        );
-        assert_eq!(
-            detect_parse_mode("http://example.com/data", "application/yaml"),
-            "yaml"
-        );
-        assert_eq!(
-            detect_parse_mode("http://example.com/data", "application/x-yaml"),
-            "yaml"
-        );
-        assert_eq!(
-            detect_parse_mode("http://example.com/data", "text/yaml"),
-            "yaml"
-        );
-        assert_eq!(
-            detect_parse_mode("http://example.com/data", "text/plain"),
-            "text"
-        );
+    fn test_json_resolver_valid() {
+        let ctx = ResolverContext::new("test.path");
+        let args = vec![r#"{"key": "value", "num": 42}"#.to_string()];
+        let kwargs = HashMap::new();
+
+        let result = json_resolver(&args, &kwargs, &ctx).unwrap();
+        assert!(result.value.is_mapping());
+
+        let map = result.value.as_mapping().unwrap();
+        assert_eq!(map.get("key"), Some(&Value::String("value".to_string())));
+        assert_eq!(map.get("num"), Some(&Value::Integer(42)));
+        assert!(!result.sensitive);
     }
 
     #[test]
-    fn test_detect_parse_mode_from_url_extension() {
-        assert_eq!(
-            detect_parse_mode("http://example.com/config.json", ""),
-            "json"
-        );
-        assert_eq!(
-            detect_parse_mode("http://example.com/config.yaml", ""),
-            "yaml"
-        );
-        assert_eq!(
-            detect_parse_mode("http://example.com/config.yml", ""),
-            "yaml"
-        );
-        assert_eq!(
-            detect_parse_mode("http://example.com/config.txt", ""),
-            "text"
-        );
-        assert_eq!(detect_parse_mode("http://example.com/config", ""), "text");
+    fn test_json_resolver_array() {
+        let ctx = ResolverContext::new("test.path");
+        let args = vec![r#"[1, 2, 3, "four"]"#.to_string()];
+        let kwargs = HashMap::new();
+
+        let result = json_resolver(&args, &kwargs, &ctx).unwrap();
+        assert!(result.value.is_sequence());
+
+        let seq = result.value.as_sequence().unwrap();
+        assert_eq!(seq.len(), 4);
+        assert_eq!(seq[0], Value::Integer(1));
+        assert_eq!(seq[3], Value::String("four".to_string()));
     }
 
     #[test]
-    fn test_detect_parse_mode_content_type_takes_precedence() {
-        // Content-Type should take precedence over URL extension
-        assert_eq!(
-            detect_parse_mode("http://example.com/config.yaml", "application/json"),
-            "json"
-        );
+    fn test_json_resolver_invalid() {
+        let ctx = ResolverContext::new("test.path");
+        let args = vec![r#"{"key": invalid}"#.to_string()];
+        let kwargs = HashMap::new();
+
+        let result = json_resolver(&args, &kwargs, &ctx);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("Invalid JSON"));
+    }
+
+    #[test]
+    fn test_json_resolver_no_args() {
+        let ctx = ResolverContext::new("test.path");
+        let args = vec![];
+        let kwargs = HashMap::new();
+
+        let result = json_resolver(&args, &kwargs, &ctx);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("requires a string argument"));
+    }
+
+    #[test]
+    fn test_yaml_resolver_valid() {
+        let ctx = ResolverContext::new("test.path");
+        let args = vec!["key: value\nnum: 42\nlist:\n  - a\n  - b".to_string()];
+        let kwargs = HashMap::new();
+
+        let result = yaml_resolver(&args, &kwargs, &ctx).unwrap();
+        assert!(result.value.is_mapping());
+
+        let map = result.value.as_mapping().unwrap();
+        assert_eq!(map.get("key"), Some(&Value::String("value".to_string())));
+        assert_eq!(map.get("num"), Some(&Value::Integer(42)));
+        assert!(!result.sensitive);
+    }
+
+    #[test]
+    fn test_yaml_resolver_array() {
+        let ctx = ResolverContext::new("test.path");
+        let args = vec!["- one\n- two\n- three".to_string()];
+        let kwargs = HashMap::new();
+
+        let result = yaml_resolver(&args, &kwargs, &ctx).unwrap();
+        assert!(result.value.is_sequence());
+
+        let seq = result.value.as_sequence().unwrap();
+        assert_eq!(seq.len(), 3);
+        assert_eq!(seq[0], Value::String("one".to_string()));
+    }
+
+    #[test]
+    fn test_yaml_resolver_invalid() {
+        let ctx = ResolverContext::new("test.path");
+        let args = vec!["key: value\n  bad_indent: oops".to_string()];
+        let kwargs = HashMap::new();
+
+        let result = yaml_resolver(&args, &kwargs, &ctx);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("Invalid YAML"));
+    }
+
+    #[test]
+    fn test_yaml_resolver_no_args() {
+        let ctx = ResolverContext::new("test.path");
+        let args = vec![];
+        let kwargs = HashMap::new();
+
+        let result = yaml_resolver(&args, &kwargs, &ctx);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("requires a string argument"));
+    }
+
+    #[test]
+    fn test_split_resolver_basic() {
+        let ctx = ResolverContext::new("test.path");
+        let args = vec!["a,b,c".to_string()];
+        let kwargs = HashMap::new();
+
+        let result = split_resolver(&args, &kwargs, &ctx).unwrap();
+        assert!(result.value.is_sequence());
+
+        let seq = result.value.as_sequence().unwrap();
+        assert_eq!(seq.len(), 3);
+        assert_eq!(seq[0], Value::String("a".to_string()));
+        assert_eq!(seq[1], Value::String("b".to_string()));
+        assert_eq!(seq[2], Value::String("c".to_string()));
+    }
+
+    #[test]
+    fn test_split_resolver_custom_delim() {
+        let ctx = ResolverContext::new("test.path");
+        let args = vec!["one|two|three".to_string()];
+        let mut kwargs = HashMap::new();
+        kwargs.insert("delim".to_string(), "|".to_string());
+
+        let result = split_resolver(&args, &kwargs, &ctx).unwrap();
+        let seq = result.value.as_sequence().unwrap();
+        assert_eq!(seq.len(), 3);
+        assert_eq!(seq[0], Value::String("one".to_string()));
+    }
+
+    #[test]
+    fn test_split_resolver_with_trim() {
+        let ctx = ResolverContext::new("test.path");
+        let args = vec!["  a  ,  b  ,  c  ".to_string()];
+        let mut kwargs = HashMap::new();
+        kwargs.insert("trim".to_string(), "true".to_string());
+
+        let result = split_resolver(&args, &kwargs, &ctx).unwrap();
+        let seq = result.value.as_sequence().unwrap();
+        assert_eq!(seq[0], Value::String("a".to_string()));
+        assert_eq!(seq[1], Value::String("b".to_string()));
+    }
+
+    #[test]
+    fn test_split_resolver_no_trim() {
+        let ctx = ResolverContext::new("test.path");
+        let args = vec!["  a  ,  b  ".to_string()];
+        let mut kwargs = HashMap::new();
+        kwargs.insert("trim".to_string(), "false".to_string());
+
+        let result = split_resolver(&args, &kwargs, &ctx).unwrap();
+        let seq = result.value.as_sequence().unwrap();
+        assert_eq!(seq[0], Value::String("  a  ".to_string()));
+        assert_eq!(seq[1], Value::String("  b  ".to_string()));
+    }
+
+    #[test]
+    fn test_split_resolver_with_limit() {
+        let ctx = ResolverContext::new("test.path");
+        let args = vec!["a,b,c,d,e".to_string()];
+        let mut kwargs = HashMap::new();
+        kwargs.insert("limit".to_string(), "2".to_string());
+
+        let result = split_resolver(&args, &kwargs, &ctx).unwrap();
+        let seq = result.value.as_sequence().unwrap();
+        assert_eq!(seq.len(), 3); // limit=2 means split into 3 parts max
+        assert_eq!(seq[0], Value::String("a".to_string()));
+        assert_eq!(seq[1], Value::String("b".to_string()));
+        assert_eq!(seq[2], Value::String("c,d,e".to_string()));
+    }
+
+    #[test]
+    fn test_csv_resolver_with_headers() {
+        let ctx = ResolverContext::new("test.path");
+        let args = vec!["name,age\nAlice,30\nBob,25".to_string()];
+        let kwargs = HashMap::new();
+
+        let result = csv_resolver(&args, &kwargs, &ctx).unwrap();
+        assert!(result.value.is_sequence());
+
+        let seq = result.value.as_sequence().unwrap();
+        assert_eq!(seq.len(), 2);
+
+        // First row should be a mapping with keys from headers
+        let first = seq[0].as_mapping().unwrap();
+        assert_eq!(first.get("name"), Some(&Value::String("Alice".to_string())));
+        assert_eq!(first.get("age"), Some(&Value::String("30".to_string())));
+    }
+
+    #[test]
+    fn test_csv_resolver_without_headers() {
+        let ctx = ResolverContext::new("test.path");
+        let args = vec!["Alice,30\nBob,25".to_string()];
+        let mut kwargs = HashMap::new();
+        kwargs.insert("header".to_string(), "false".to_string());
+
+        let result = csv_resolver(&args, &kwargs, &ctx).unwrap();
+        assert!(result.value.is_sequence());
+
+        let seq = result.value.as_sequence().unwrap();
+        assert_eq!(seq.len(), 2);
+
+        // First row should be a sequence (array)
+        let first = seq[0].as_sequence().unwrap();
+        assert_eq!(first.len(), 2);
+        assert_eq!(first[0], Value::String("Alice".to_string()));
+        assert_eq!(first[1], Value::String("30".to_string()));
+    }
+
+    #[test]
+    fn test_csv_resolver_custom_delim() {
+        let ctx = ResolverContext::new("test.path");
+        let args = vec!["name|age\nAlice|30\nBob|25".to_string()];
+        let mut kwargs = HashMap::new();
+        kwargs.insert("delim".to_string(), "|".to_string());
+
+        let result = csv_resolver(&args, &kwargs, &ctx).unwrap();
+        let seq = result.value.as_sequence().unwrap();
+        assert_eq!(seq.len(), 2);
+
+        let first = seq[0].as_mapping().unwrap();
+        assert_eq!(first.get("name"), Some(&Value::String("Alice".to_string())));
+    }
+
+    #[test]
+    fn test_csv_resolver_with_trim() {
+        let ctx = ResolverContext::new("test.path");
+        let args = vec!["name , age\n  Alice  ,  30  ".to_string()];
+        let mut kwargs = HashMap::new();
+        kwargs.insert("trim".to_string(), "true".to_string());
+
+        let result = csv_resolver(&args, &kwargs, &ctx).unwrap();
+        let seq = result.value.as_sequence().unwrap();
+
+        let first = seq[0].as_mapping().unwrap();
+        assert_eq!(first.get("name"), Some(&Value::String("Alice".to_string())));
+        assert_eq!(first.get("age"), Some(&Value::String("30".to_string())));
+    }
+
+    #[test]
+    fn test_csv_resolver_empty_delimiter() {
+        let ctx = ResolverContext::new("test.path");
+        let args = vec!["name,age".to_string()];
+        let mut kwargs = HashMap::new();
+        kwargs.insert("delim".to_string(), "".to_string());
+
+        let result = csv_resolver(&args, &kwargs, &ctx);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("delimiter cannot be empty"));
+    }
+
+    #[test]
+    fn test_csv_resolver_no_args() {
+        let ctx = ResolverContext::new("test.path");
+        let args = vec![];
+        let kwargs = HashMap::new();
+
+        let result = csv_resolver(&args, &kwargs, &ctx);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("requires a string argument"));
+    }
+
+    #[test]
+    fn test_base64_resolver_valid() {
+        let ctx = ResolverContext::new("test.path");
+        // "Hello, World!" in base64
+        let args = vec!["SGVsbG8sIFdvcmxkIQ==".to_string()];
+        let kwargs = HashMap::new();
+
+        let result = base64_resolver(&args, &kwargs, &ctx).unwrap();
+        // Base64-decoded UTF-8 text becomes a string
+        assert!(result.value.is_string());
+
+        let text = result.value.as_str().unwrap();
+        assert_eq!(text, "Hello, World!");
+        assert!(!result.sensitive);
+    }
+
+    #[test]
+    fn test_base64_resolver_with_whitespace() {
+        let ctx = ResolverContext::new("test.path");
+        // Base64 with surrounding whitespace should be trimmed
+        let args = vec!["  SGVsbG8=  ".to_string()];
+        let kwargs = HashMap::new();
+
+        let result = base64_resolver(&args, &kwargs, &ctx).unwrap();
+        let text = result.value.as_str().unwrap();
+        assert_eq!(text, "Hello");
+    }
+
+    #[test]
+    fn test_base64_resolver_invalid() {
+        let ctx = ResolverContext::new("test.path");
+        let args = vec!["not-valid-base64!!!".to_string()];
+        let kwargs = HashMap::new();
+
+        let result = base64_resolver(&args, &kwargs, &ctx);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("Invalid base64"));
+    }
+
+    #[test]
+    fn test_base64_resolver_no_args() {
+        let ctx = ResolverContext::new("test.path");
+        let args = vec![];
+        let kwargs = HashMap::new();
+
+        let result = base64_resolver(&args, &kwargs, &ctx);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("requires a string argument"));
+    }
+
+    #[test]
+    fn test_transformation_resolvers_registered() {
+        let registry = ResolverRegistry::with_builtins();
+
+        assert!(registry.contains("json"));
+        assert!(registry.contains("yaml"));
+        assert!(registry.contains("split"));
+        assert!(registry.contains("csv"));
+        assert!(registry.contains("base64"));
     }
 }

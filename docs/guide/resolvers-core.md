@@ -1045,6 +1045,323 @@ Some configuration endpoints require authentication. Add custom headers:
 
     This avoids repeated network requests.
 
+## Transformation Resolvers: Parsing Structured Data
+
+Sometimes you need to parse structured text into usable data - JSON from an API, YAML from a file, CSV data, or base64-encoded secrets. Transformation resolvers handle this by transforming string data into structured types.
+
+### json - Parse JSON Data
+
+Parse JSON strings into dictionaries, arrays, or other types:
+
+```yaml
+# Parse JSON from environment variable
+api_config: ${json:${env:API_CONFIG}}
+
+# Parse JSON from file
+features: ${json:${file:features.json}}
+
+# Parse JSON from HTTP endpoint
+remote_data: ${json:${http:api.example.com/data}}
+```
+
+=== "Python"
+
+    ```python
+    from holoconf import Config
+    import os
+
+    # Set JSON in environment
+    os.environ['API_CONFIG'] = '{"timeout": 30, "retries": 3}'
+
+    config = Config.loads("""
+    api: ${json:${env:API_CONFIG}}
+    """)
+
+    # Access as structured data
+    print(config.api.timeout)  # 30
+    print(config.api.retries)  # 3
+    ```
+
+=== "Rust"
+
+    ```rust
+    use holoconf::Config;
+    use std::env;
+
+    env::set_var("API_CONFIG", r#"{"timeout": 30, "retries": 3}"#);
+
+    let config = Config::from_yaml(r#"
+    api: ${json:${env:API_CONFIG}}
+    "#)?;
+
+    let timeout: i64 = config.get("api.timeout")?;
+    println!("Timeout: {}", timeout);  // 30
+    ```
+
+The json resolver preserves native types - numbers stay as numbers, booleans stay as booleans.
+
+### yaml - Parse YAML Data
+
+Parse YAML strings into structured data:
+
+```yaml
+# Parse YAML from file
+database: ${yaml:${file:database.yaml}}
+
+# Parse YAML from HTTP
+settings: ${yaml:${https:config.internal/app.yaml}}
+```
+
+=== "Python"
+
+    ```python
+    # database.yaml contains:
+    # host: localhost
+    # port: 5432
+    # credentials:
+    #   username: admin
+
+    config = Config.load("config.yaml")
+
+    print(config.database.host)  # localhost
+    print(config.database.credentials.username)  # admin
+    ```
+
+=== "Rust"
+
+    ```rust
+    let config = Config::load("config.yaml")?;
+    let host: String = config.get("database.host")?;
+    println!("Host: {}", host);  // localhost
+    ```
+
+### split - Split Strings into Arrays
+
+Split comma-separated (or custom delimiter) strings into arrays:
+
+```yaml
+# Default comma delimiter
+tags: ${split:${env:FEATURE_TAGS}}
+
+# Custom delimiter
+path_dirs: ${split:${env:PATH},delim=:}
+
+# With trim to remove whitespace
+emails: ${split:${env:ADMIN_EMAILS},trim=true}
+
+# Limit number of splits
+parts: ${split:${env:DATA},limit=3}
+```
+
+=== "Python"
+
+    ```python
+    import os
+
+    os.environ['FEATURE_TAGS'] = 'auth,api,logging'
+    os.environ['PATH'] = '/usr/bin:/usr/local/bin:/home/user/bin'
+
+    config = Config.loads("""
+    tags: ${split:${env:FEATURE_TAGS}}
+    paths: ${split:${env:PATH},delim=:}
+    """)
+
+    print(config.tags)  # ['auth', 'api', 'logging']
+    print(config.paths[0])  # '/usr/bin'
+    ```
+
+=== "Rust"
+
+    ```rust
+    use holoconf::Config;
+
+    env::set_var("FEATURE_TAGS", "auth,api,logging");
+
+    let config = Config::from_yaml(r#"
+    tags: ${split:${env:FEATURE_TAGS}}
+    "#)?;
+
+    let tags: Vec<String> = config.get("tags")?;
+    println!("First tag: {}", tags[0]);  // auth
+    ```
+
+Options:
+
+- `delim=,` - Delimiter character (default: `,`)
+- `trim=true` - Remove whitespace from each item
+- `limit=N` - Maximum number of items (remaining text goes in last item)
+
+### csv - Parse CSV Data
+
+Parse CSV text into arrays of objects (with headers) or arrays of arrays (without headers):
+
+```yaml
+# Parse CSV with headers (default)
+users: ${csv:${file:users.csv}}
+
+# Access by column name
+first_user_email: ${users[0].email}
+
+# Parse CSV without headers (array of arrays)
+raw_data: ${csv:${file:data.csv},header=false}
+
+# Custom delimiter (TSV)
+records: ${csv:${file:data.tsv},delim=\t}
+```
+
+=== "Python"
+
+    ```python
+    # users.csv contains:
+    # name,email,role
+    # Alice,alice@example.com,admin
+    # Bob,bob@example.com,user
+
+    config = Config.loads("""
+    users: ${csv:${file:users.csv}}
+    """)
+
+    print(config.users[0].name)   # Alice
+    print(config.users[0].email)  # alice@example.com
+    print(config.users[1].role)   # user
+    ```
+
+=== "Rust"
+
+    ```rust
+    let config = Config::load("config.yaml")?;
+    let first_user: String = config.get("users[0].name")?;
+    println!("First user: {}", first_user);  // Alice
+    ```
+
+Options:
+
+- `header=true` - First row contains headers (default: `true`)
+    - With headers: Returns array of objects
+    - Without headers: Returns array of arrays
+- `delim=,` - Field delimiter (default: `,`)
+- `trim=true` - Trim whitespace from values
+
+!!! note "CSV Values are Strings"
+    All CSV values are returned as strings. Use schema validation to coerce types:
+
+    ```yaml
+    # users.csv: name,age
+    # Alice,30
+    users: ${csv:${file:users.csv}}
+    ```
+
+    ```python
+    # Define schema to coerce age to integer
+    schema = {
+        "type": "object",
+        "properties": {
+            "users": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "age": {"type": "integer"}
+                    }
+                }
+            }
+        }
+    }
+    ```
+
+### base64 - Decode Base64 Data
+
+Decode base64-encoded strings:
+
+```yaml
+# Decode base64-encoded secret
+api_key: ${base64:${env:API_KEY_B64}}
+
+# Decode from file
+certificate: ${base64:${file:cert.b64}}
+
+# Chain with other transformations
+# Base64-encoded JSON
+config_data: ${json:${base64:${env:ENCODED_CONFIG}}}
+```
+
+=== "Python"
+
+    ```python
+    import os
+    import base64
+
+    # Encode a secret
+    secret = "my-secret-api-key"
+    encoded = base64.b64encode(secret.encode()).decode()
+    os.environ['API_KEY_B64'] = encoded
+
+    config = Config.loads("""
+    api_key: ${base64:${env:API_KEY_B64}}
+    """)
+
+    print(config.api_key)  # my-secret-api-key
+    ```
+
+=== "Rust"
+
+    ```rust
+    use holoconf::Config;
+
+    env::set_var("API_KEY_B64", "bXktc2VjcmV0LWFwaS1rZXk=");
+
+    let config = Config::from_yaml(r#"
+    api_key: ${base64:${env:API_KEY_B64}}
+    "#)?;
+
+    let key: String = config.get("api_key")?;
+    println!("API Key: {}", key);  // my-secret-api-key
+    ```
+
+!!! tip "UTF-8 vs Binary"
+    The base64 resolver automatically detects UTF-8 text and returns it as a string. Binary data (images, certificates) is returned as bytes.
+
+### Chaining Transformations
+
+You can chain multiple resolvers together by nesting them:
+
+```yaml
+# Common patterns
+encoded_json: ${json:${base64:${env:ENCODED_CONFIG}}}
+remote_csv: ${csv:${http:data.example.com/export.csv}}
+split_from_file: ${split:${file:tags.txt}}
+
+# Complex chain: fetch, decode, parse
+api_data: ${json:${base64:${https:api.example.com/encrypted}}}
+```
+
+The resolvers execute from inside-out:
+
+1. `${https:...}` fetches the data
+2. `${base64:...}` decodes it
+3. `${json:...}` parses the JSON
+
+=== "Python"
+
+    ```python
+    import os
+    import base64
+    import json
+
+    # Simulate encoded JSON config
+    data = {"database": {"host": "prod-db", "port": 5432}}
+    encoded = base64.b64encode(json.dumps(data).encode()).decode()
+    os.environ['ENCODED_CONFIG'] = encoded
+
+    config = Config.loads("""
+    settings: ${json:${base64:${env:ENCODED_CONFIG}}}
+    """)
+
+    print(config.settings.database.host)  # prod-db
+    print(config.settings.database.port)  # 5432
+    ```
+
 ## Quick Reference
 
 Here's a summary of all core resolvers:
@@ -1058,6 +1375,11 @@ Here's a summary of all core resolvers:
 | `file` | `${file:path}` | File content or RFC 8089 URI | `${file:secrets/key.pem}` |
 | `http` | `${http:url}` | HTTP GET (auto-prepends http://) | `${http:api.example.com/config}` |
 | `https` | `${https:url}` | HTTPS GET (auto-prepends https://) | `${https:api.example.com/config}` |
+| `json` | `${json:text}` | Parse JSON string | `${json:${env:CONFIG}}` |
+| `yaml` | `${yaml:text}` | Parse YAML string | `${yaml:${file:config.yaml}}` |
+| `split` | `${split:text}` | Split string into array | `${split:${env:TAGS}}` |
+| `csv` | `${csv:text}` | Parse CSV into array | `${csv:${file:data.csv}}` |
+| `base64` | `${base64:text}` | Decode base64 | `${base64:${env:SECRET_B64}}` |
 
 All resolvers support:
 
@@ -1075,6 +1397,8 @@ You now understand:
 - Including file content with `${file:path}`
 - Fetching remote config with `${http:url}` and `${https:url}`
 - Configuring HTTP timeouts, CA bundles, and auth headers
+- Parsing structured data with transformation resolvers (`json`, `yaml`, `split`, `csv`, `base64`)
+- Chaining resolvers for complex transformations
 - Security implications of HTTP resolvers
 
 ## Next Steps

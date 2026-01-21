@@ -650,10 +650,15 @@ mod tests {
 
     #[test]
     fn test_parse_kwargs() {
-        let result = parse("${file:./config.yaml,parse=yaml}").unwrap();
+        let result = parse("${file:./config.yaml,parse=text}").unwrap();
 
         if let Interpolation::Resolver { kwargs, .. } = result {
             assert!(kwargs.contains_key("parse"));
+            if let Some(InterpolationArg::Literal(value)) = kwargs.get("parse") {
+                assert_eq!(value, "text");
+            } else {
+                panic!("Expected literal value for parse kwarg");
+            }
         } else {
             panic!("Expected Resolver");
         }

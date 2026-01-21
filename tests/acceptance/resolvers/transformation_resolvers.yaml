@@ -1,0 +1,318 @@
+suite: transformation_resolvers
+description: Transformation resolvers (json, yaml, split, csv, base64) work by transforming output from other resolvers
+
+tests:
+  # JSON Resolver Tests - parse JSON from env vars or files
+  - name: json_resolver_from_env
+    given:
+      env:
+        JSON_CONFIG: '{"name": "Alice", "age": 30}'
+      config: |
+        data: ${json:${env:JSON_CONFIG}}
+    when:
+      access: data.name
+    then:
+      value: "Alice"
+
+  - name: json_resolver_from_file
+    given:
+      files:
+        data.txt: '[1, 2, 3, 4]'
+      config: |
+        items: ${json:${file:data.txt}}
+    when:
+      access: items[0]
+    then:
+      value: 1
+
+  - name: json_resolver_nested
+    given:
+      files:
+        config.txt: '{"database": {"host": "localhost", "port": 5432}}'
+      config: |
+        db: ${json:${file:config.txt}}
+    when:
+      access: db.database.port
+    then:
+      value: 5432
+
+  - name: json_resolver_invalid
+    given:
+      env:
+        BAD_JSON: '{"invalid": }'
+      config: |
+        data: ${json:${env:BAD_JSON}}
+    when:
+      access: data
+    then:
+      error:
+        type: ParseError
+        message_contains: "Invalid JSON"
+
+  # YAML Resolver Tests
+  - name: yaml_resolver_from_env
+    given:
+      env:
+        YAML_DATA: "name: Bob\nage: 25"
+      config: |
+        data: ${yaml:${env:YAML_DATA}}
+    when:
+      access: data.name
+    then:
+      value: "Bob"
+
+  - name: yaml_resolver_array
+    given:
+      files:
+        list.txt: "- red\n- green\n- blue"
+      config: |
+        colors: ${yaml:${file:list.txt}}
+    when:
+      access: colors[1]
+    then:
+      value: "green"
+
+  - name: yaml_resolver_nested
+    given:
+      env:
+        YAML_CONFIG: "server:\n  host: 0.0.0.0\n  port: 8080"
+      config: |
+        settings: ${yaml:${env:YAML_CONFIG}}
+    when:
+      access: settings.server.port
+    then:
+      value: 8080
+
+  # Split Resolver Tests - split env vars into arrays
+  - name: split_resolver_basic
+    given:
+      env:
+        TAGS: "web,api,database"
+      config: |
+        tags: ${split:${env:TAGS}}
+    when:
+      access: tags[0]
+    then:
+      value: "web"
+
+  - name: split_resolver_custom_delimiter
+    given:
+      env:
+        PATH_VAR: "/usr/local/bin:/usr/bin:/bin"
+      config: |
+        path: ${split:${env:PATH_VAR},delim=:}
+    when:
+      access: path[1]
+    then:
+      value: "/usr/bin"
+
+  - name: split_resolver_with_trim
+    given:
+      env:
+        ITEMS: "  apple  |  banana  |  cherry  "
+      config: |
+        items: ${split:${env:ITEMS},delim=|,trim=true}
+    when:
+      access: items[0]
+    then:
+      value: "apple"
+
+  - name: split_resolver_with_limit
+    given:
+      env:
+        DATA: "one,two,three,four,five"
+      config: |
+        parts: ${split:${env:DATA},limit=2}
+    when:
+      access: parts[2]
+    then:
+      value: "three,four,five"
+
+  # CSV Resolver Tests - parse CSV files
+  - name: csv_resolver_with_headers
+    given:
+      files:
+        users.csv: |
+          name,age
+          Alice,30
+          Bob,25
+      config: |
+        users: ${csv:${file:users.csv}}
+    when:
+      access: users[0].name
+    then:
+      value: "Alice"
+
+  - name: csv_resolver_without_headers
+    given:
+      files:
+        data.csv: |
+          Alice,30
+          Bob,25
+      config: |
+        data: ${csv:${file:data.csv},header=false}
+    when:
+      access: data[0][0]
+    then:
+      value: "Alice"
+
+  - name: csv_resolver_custom_delimiter
+    given:
+      files:
+        records.txt: |
+          name|city
+          Alice|NYC
+          Bob|LA
+      config: |
+        records: ${csv:${file:records.txt},delim=|}
+    when:
+      access: records[0].city
+    then:
+      value: "NYC"
+
+  - name: csv_resolver_with_trim
+    given:
+      files:
+        data.csv: "name , age\n  Alice  ,  30  "
+      config: |
+        data: ${csv:${file:data.csv},trim=true}
+    when:
+      access: data[0].name
+    then:
+      value: "Alice"
+
+  # Base64 Resolver Tests - decode base64 from env vars
+  - name: base64_resolver_from_env
+    given:
+      env:
+        ENCODED: SGVsbG8sIFdvcmxkIQ==
+      config: |
+        message: ${base64:${env:ENCODED}}
+    when:
+      access: message
+    then:
+      value: "Hello, World!"
+
+  - name: base64_resolver_from_file
+    given:
+      files:
+        encoded.txt: SGVsbG8=
+      config: |
+        data: ${base64:${file:encoded.txt}}
+    when:
+      access: data
+    then:
+      value: "Hello"
+
+  - name: base64_resolver_invalid
+    given:
+      env:
+        BAD_BASE64: "not-valid!!!"
+      config: |
+        data: ${base64:${env:BAD_BASE64}}
+    when:
+      access: data
+    then:
+      error:
+        type: ParseError
+        message_contains: "Invalid base64"
+
+  # Chaining Tests
+  - name: chain_file_and_json
+    given:
+      files:
+        data.txt: '{"users": [{"name": "Alice", "role": "admin"}]}'
+      config: |
+        parsed: ${json:${file:data.txt}}
+    when:
+      access: parsed.users[0].name
+    then:
+      value: "Alice"
+
+  - name: chain_env_and_split
+    given:
+      env:
+        TAGS: "prod,us-east-1,web"
+      config: |
+        tags: ${split:${env:TAGS}}
+    when:
+      access: tags[1]
+    then:
+      value: "us-east-1"
+
+  - name: chain_file_and_csv
+    given:
+      files:
+        users.csv: |
+          name,email
+          alice@example.com,alice@example.com
+          bob@example.com,bob@example.com
+      config: |
+        users: ${csv:${file:users.csv}}
+    when:
+      access: users[0].email
+    then:
+      value: "alice@example.com"
+
+  # Type coercion - CSV returns strings, schema coerces to integers
+  - name: csv_values_coerced_by_schema
+    given:
+      schema: |
+        type: object
+        properties:
+          users:
+            type: array
+            items:
+              type: object
+              properties:
+                age:
+                  type: integer
+      files:
+        users.csv: "name,age\nAlice,30"
+      config: |
+        users: ${csv:${file:users.csv}}
+    when:
+      access: users[0].age
+    then:
+      value: 30
+      type: integer
+
+  - name: json_preserves_native_types
+    given:
+      env:
+        JSON_DATA: '{"count": 42, "active": true}'
+      config: |
+        data: ${json:${env:JSON_DATA}}
+    when:
+      access: data.count
+    then:
+      value: 42
+      type: integer
+
+  # Sensitive data
+  - name: base64_with_sensitive_flag
+    given:
+      env:
+        ENCODED_SECRET: c2VjcmV0X3Bhc3N3b3Jk
+      config: |
+        secret: ${base64:${env:ENCODED_SECRET},sensitive=true}
+    when:
+      dump:
+        format: yaml
+        redact: true
+    then:
+      output_contains: "[REDACTED]"
+      output_not_contains: "secret_password"
+
+  - name: json_with_sensitive_flag
+    given:
+      env:
+        JSON_CREDS: '{"api_key": "secret123"}'
+      config: |
+        credentials: ${json:${env:JSON_CREDS},sensitive=true}
+    when:
+      dump:
+        format: yaml
+        redact: true
+    then:
+      output_contains: "[REDACTED]"
