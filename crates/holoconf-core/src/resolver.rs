@@ -1803,8 +1803,6 @@ fn read_with_limits<R: std::io::Read>(
     max_size: u64,
     compressed_size: Option<u64>,
 ) -> Result<Vec<u8>> {
-    use std::io::Read;
-
     let mut contents = Vec::new();
     let mut total_read = 0u64;
     let mut buffer = [0u8; 8192];
@@ -1955,8 +1953,6 @@ fn extract_from_zip<R: std::io::Read + std::io::Seek>(
     password: Option<&String>,
     ctx: &ResolverContext,
 ) -> Result<ResolvedValue> {
-    use std::io::Read;
-
     let mut archive = zip::ZipArchive::new(reader).map_err(|e| {
         Error::resolver_custom("extract", format!("Failed to open ZIP archive: {}", e))
             .with_path(ctx.config_path.clone())
@@ -2015,8 +2011,6 @@ fn extract_from_tar<R: std::io::Read>(
     file_path: &str,
     ctx: &ResolverContext,
 ) -> Result<ResolvedValue> {
-    use std::io::Read;
-
     let mut archive = tar::Archive::new(reader);
 
     // Iterate through entries to find the target file
