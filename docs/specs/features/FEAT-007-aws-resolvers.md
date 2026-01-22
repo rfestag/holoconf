@@ -341,35 +341,147 @@ The default client (no region/profile overrides) uses key `(None, None)` and res
 
 ## Configuration API
 
-> **Note:** The `configure()` and `reset()` APIs described below are planned for future releases.
-> Currently, AWS configuration is handled via standard AWS SDK environment variables and config files.
+AWS resolvers support two levels of configuration for testing and advanced use cases:
 
-For testing and advanced use cases, the global AWS configuration can be overridden:
+### Global Configuration (All Services)
 
+Set default region and profile for all AWS services:
+
+**Python:**
 ```python
 import holoconf_aws
 
-# Configure endpoint URL (for moto/LocalStack)
+# Configure defaults for all AWS services
 holoconf_aws.configure(
-    endpoint_url="http://localhost:5000",  # All services
+    region="us-east-1",   # Default region
+    profile="prod",       # Default AWS profile
+)
+```
+
+**Rust:**
+```rust
+use holoconf_aws;
+
+// Configure defaults for all AWS services
+holoconf_aws::configure(
+    Some("us-east-1".to_string()),    // Default region
+    Some("prod".to_string()),          // Default AWS profile
+);
+```
+
+**Note:** Global configuration only supports `region` and `profile`. Endpoints are service-specific (see below).
+
+### Service-Specific Configuration
+
+Override defaults for individual services, including endpoints:
+
+**Python:**
+```python
+# S3-specific configuration
+holoconf_aws.s3(
+    endpoint="http://localhost:5000",  # For moto/LocalStack
+    region="us-west-2",                # Override global region
+    profile="dev",                     # Override global profile
 )
 
-# Or per-service endpoints
-holoconf_aws.configure(
-    ssm_endpoint="http://localhost:5000",
-    s3_endpoint="http://localhost:5000",
-    cfn_endpoint="http://localhost:5000",
+# SSM-specific configuration
+holoconf_aws.ssm(
+    endpoint="http://localhost:5001",
 )
 
-# Override default region/profile
-holoconf_aws.configure(
-    region="us-east-1",
+# CloudFormation-specific configuration
+holoconf_aws.cfn(
     profile="testing",
 )
+```
 
-# Reset to defaults (clears client cache)
+**Rust:**
+```rust
+use holoconf_aws;
+
+// S3-specific configuration
+holoconf_aws::configure_s3(
+    Some("http://localhost:5000".to_string()),  // For moto/LocalStack
+    Some("us-west-2".to_string()),              // Override global region
+    Some("dev".to_string()),                    // Override global profile
+);
+
+// SSM-specific configuration
+holoconf_aws::configure_ssm(
+    Some("http://localhost:5001".to_string()),
+    None,
+    None,
+);
+
+// CloudFormation-specific configuration
+holoconf_aws::configure_cfn(
+    None,
+    None,
+    Some("testing".to_string()),
+);
+```
+
+### Reset Configuration
+
+Clear all configuration and client cache:
+
+**Python:**
+```python
 holoconf_aws.reset()
 ```
+
+**Rust:**
+```rust
+holoconf_aws::reset();
+```
+
+### Precedence
+
+Configuration follows this precedence chain (highest to lowest):
+
+1. **Resolver kwargs** - Per-call overrides in config file
+2. **Service configuration** - `holoconf_aws.s3()`, `ssm()`, `cfn()`
+3. **Global configuration** - `holoconf_aws.configure()`
+4. **AWS SDK defaults** - Environment variables, credentials file, IMDS
+
+**Example:**
+
+**Python:**
+```python
+# Set global default
+holoconf_aws.configure(region="us-east-1")
+
+# Override for S3
+holoconf_aws.s3(region="us-west-2")
+```
+
+**Rust:**
+```rust
+// Set global default
+holoconf_aws::configure(Some("us-east-1".to_string()), None);
+
+// Override for S3
+holoconf_aws::configure_s3(None, Some("us-west-2".to_string()), None);
+```
+
+**Configuration file (applies to both Python and Rust):**
+```yaml
+# Uses us-west-2 (service config)
+s3_value: ${s3:bucket/file}
+
+# Uses eu-west-1 (kwarg override)
+override: ${s3:bucket/file,region=eu-west-1}
+
+# Uses us-east-1 (global config, no SSM override)
+ssm_value: ${ssm:/path}
+```
+
+### Use Cases
+
+- **Testing with moto/LocalStack** - Point services to local endpoints
+- **Multi-region applications** - Set default region without per-call overrides
+- **Profile-based environments** - Use different AWS profiles per environment
+- **Test isolation** - Reset state between tests
 
 ## Testing with Mock Resolvers
 

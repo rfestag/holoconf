@@ -46,12 +46,13 @@ impl CfnResolver {
         &self,
         stack_name: &str,
         output_key: &str,
-        region: Option<&str>,
-        profile: Option<&str>,
+        region: Option<String>,
+        profile: Option<String>,
+        endpoint: Option<&str>,
     ) -> Result<String> {
         // Get cached client (creates one if needed)
         let client: aws_sdk_cloudformation::Client =
-            client_cache::get_client(region, profile).await;
+            client_cache::get_client(region, profile, endpoint).await;
 
         // Describe the stack
         let response = client
@@ -149,13 +150,21 @@ impl Resolver for CfnResolver {
             ));
         }
 
-        let region = kwargs.get("region").map(|s| s.as_str());
-        let profile = kwargs.get("profile").map(|s| s.as_str());
+        // Resolve configuration with precedence: kwargs > service config > global config
+        let (endpoint, region, profile) = crate::resolve_cfn_config(
+            kwargs.get("endpoint").map(|s| s.as_str()),
+            kwargs.get("region").map(|s| s.as_str()),
+            kwargs.get("profile").map(|s| s.as_str()),
+        );
 
         // Fetch the output using the async runtime
-        let value = self
-            .runtime
-            .block_on(self.fetch_output(stack_name, output_key, region, profile))?;
+        let value = self.runtime.block_on(self.fetch_output(
+            stack_name,
+            output_key,
+            region,
+            profile,
+            endpoint.as_deref(),
+        ))?;
 
         // CloudFormation outputs are not sensitive by default
         Ok(ResolvedValue::new(Value::String(value)))

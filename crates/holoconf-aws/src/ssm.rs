@@ -52,11 +52,12 @@ impl SsmResolver {
     async fn fetch_parameter(
         &self,
         path: &str,
-        region: Option<&str>,
-        profile: Option<&str>,
+        region: Option<String>,
+        profile: Option<String>,
+        endpoint: Option<&str>,
     ) -> Result<(String, ParameterType)> {
         // Get cached client (creates one if needed)
-        let client: aws_sdk_ssm::Client = client_cache::get_client(region, profile).await;
+        let client: aws_sdk_ssm::Client = client_cache::get_client(region, profile, endpoint).await;
 
         // Get parameter with decryption
         let response = client
@@ -115,13 +116,20 @@ impl Resolver for SsmResolver {
             ));
         }
 
-        let region = kwargs.get("region").map(|s| s.as_str());
-        let profile = kwargs.get("profile").map(|s| s.as_str());
+        // Resolve configuration with precedence: kwargs > service config > global config
+        let (endpoint, region, profile) = crate::resolve_ssm_config(
+            kwargs.get("endpoint").map(|s| s.as_str()),
+            kwargs.get("region").map(|s| s.as_str()),
+            kwargs.get("profile").map(|s| s.as_str()),
+        );
 
         // Fetch the parameter using the async runtime
-        let (value, param_type) = self
-            .runtime
-            .block_on(self.fetch_parameter(path, region, profile))?;
+        let (value, param_type) = self.runtime.block_on(self.fetch_parameter(
+            path,
+            region,
+            profile,
+            endpoint.as_deref(),
+        ))?;
 
         // Handle different parameter types
         match param_type {
