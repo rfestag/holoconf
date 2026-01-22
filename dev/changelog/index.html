@@ -3199,6 +3199,15 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <li><strong>Security:</strong> Warn users about weak ZipCrypto encryption (prefer AES or GPG)</li>
 <li>Requires <code>archive</code> feature flag (enabled by default in Python package)</li>
 <li>Feature adds dependencies: <code>tar</code>, <code>zip</code>, <code>flate2</code>, <code>infer</code></li>
+<li><strong>AWS Resolver Configuration API</strong>: Two-tier configuration system for AWS resolvers (#27)</li>
+<li>Global configuration: <code>holoconf_aws.configure(region="us-east-1", profile="prod")</code> sets defaults for all AWS services</li>
+<li>Service-specific configuration: <code>holoconf_aws.s3(endpoint="http://localhost:5000")</code> overrides for individual services</li>
+<li><code>holoconf_aws.reset()</code> clears all configuration and client cache (useful for test isolation)</li>
+<li>Four-level precedence: resolver kwargs &gt; service config &gt; global config &gt; AWS SDK defaults</li>
+<li>All AWS resolvers now support <code>endpoint=</code> kwarg for per-call endpoint overrides</li>
+<li>Enables testing with moto/LocalStack via custom endpoint URLs</li>
+<li>Configuration is additive: calling <code>configure(region=None)</code> leaves existing values unchanged</li>
+<li>See <a href="../guide/resolvers-aws/#configuration-api">Configuration API guide</a> for full details</li>
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
