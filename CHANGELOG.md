@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-02-12
+
+### Changed
+- **Binary Size Optimization**: Optimized release builds for significantly smaller binary sizes
+  - Added Cargo release profile with `strip=true`, `lto=true`, `opt-level="z"`, `panic="abort"`
+  - Python wheel sizes reduced by 10-20x (122MB → ~6-12MB for holoconf, 257MB → ~15-30MB for holoconf-aws)
+  - Improves installation speed and reduces disk space requirements
+
+### Added
+- **holoconf-aws Publishing**: holoconf-aws Python package now published to PyPI alongside holoconf
+  - Automatically published on tagged releases
+  - Available on all platforms: Linux (x86_64), macOS (universal2), Windows (x86_64)
+  - holoconf-aws Rust crate also published to crates.io
+
 ## [0.5.0] - 2026-02-11
 
 ### Added
