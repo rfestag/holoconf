@@ -196,6 +196,119 @@ jobs:
           path: packages/python/holoconf/dist/*.tar.gz
 
   # ==========================================================================
+  # Build holoconf-aws Python wheels - Linux x86_64
+  # ==========================================================================
+  build-aws-linux-x86_64:
+    name: Build holoconf-aws Linux (x86_64)
+    needs: [validate]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build manylinux wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          target: x86_64-unknown-linux-gnu
+          manylinux: "2_28"
+          args: --release --out dist
+          working-directory: packages/python/holoconf-aws
+          sccache: true
+
+      - name: Build musllinux wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          target: x86_64-unknown-linux-musl
+          manylinux: musllinux_1_2
+          args: --release --out dist
+          working-directory: packages/python/holoconf-aws
+          sccache: true
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-aws-linux-x86_64
+          path: packages/python/holoconf-aws/dist/*.whl
+
+  # ==========================================================================
+  # Build holoconf-aws Python wheels - macOS universal2
+  # ==========================================================================
+  build-aws-macos:
+    name: Build holoconf-aws macOS
+    needs: [validate]
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build wheels (universal2)
+        uses: PyO3/maturin-action@v1
+        with:
+          target: universal2-apple-darwin
+          args: --release --out dist
+          working-directory: packages/python/holoconf-aws
+          sccache: true
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-aws-macos
+          path: packages/python/holoconf-aws/dist/*.whl
+
+  # ==========================================================================
+  # Build holoconf-aws Python wheels - Windows x86_64
+  # ==========================================================================
+  build-aws-windows:
+    name: Build holoconf-aws Windows
+    needs: [validate]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: x86_64-pc-windows-msvc
+          args: --release --out dist
+          working-directory: packages/python/holoconf-aws
+          sccache: true
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-aws-windows
+          path: packages/python/holoconf-aws/dist/*.whl
+
+  # ==========================================================================
+  # Build holoconf-aws source distribution
+  # ==========================================================================
+  build-aws-sdist:
+    name: Build holoconf-aws sdist
+    needs: [validate]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build sdist
+        uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist
+          working-directory: packages/python/holoconf-aws
+
+      - name: Upload sdist
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-aws-sdist
+          path: packages/python/holoconf-aws/dist/*.tar.gz
+
+  # ==========================================================================
   # Build CLI binaries for all platforms
   # ==========================================================================
   build-cli:
@@ -287,7 +400,15 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.crates-io-auth.outputs.token }}
 
-      - name: Wait for crates.io to index
+      - name: Wait for crates.io to index holoconf-core
+        run: sleep 30
+
+      - name: Publish holoconf-aws
+        run: cargo publish -p holoconf-aws
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.crates-io-auth.outputs.token }}
+
+      - name: Wait for crates.io to index holoconf-aws
         run: sleep 30
 
       - name: Publish holoconf-cli
@@ -311,6 +432,28 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           pattern: wheels-*
+          path: dist
+          merge-multiple: true
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+  # ==========================================================================
+  # Publish holoconf-aws to PyPI
+  # ==========================================================================
+  publish-pypi-aws:
+    name: Publish holoconf-aws to PyPI
+    needs: [build-aws-linux-x86_64, build-aws-macos, build-aws-windows, build-aws-sdist]
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/holoconf-aws
+    permissions:
+      id-token: write  # Trusted publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-aws-*
           path: dist
           merge-multiple: true
 
@@ -343,7 +486,7 @@ jobs:
   # ==========================================================================
   github-release:
     name: Create GitHub Release
-    needs: [publish-crates, publish-pypi, build-cli]
+    needs: [publish-crates, publish-pypi, publish-pypi-aws, build-cli]
     runs-on: ubuntu-latest
     permissions:
       contents: write

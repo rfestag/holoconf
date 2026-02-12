@@ -35,3 +35,22 @@ tokio = { version = "1.0", features = ["full"] }
 
 # Testing
 pretty_assertions = "1.4"
+
+# =============================================================================
+# Release Profile - Optimized for Size
+# =============================================================================
+[profile.release]
+# Strip debug symbols from binaries (reduces size by 10-20x)
+strip = true
+
+# Enable Link-Time Optimization (better dead code elimination)
+lto = true
+
+# Use single codegen unit for better optimization (slower build, smaller binary)
+codegen-units = 1
+
+# Optimize for size instead of speed
+opt-level = "z"
+
+# Use abort on panic instead of unwinding (smaller binary)
+panic = "abort"
