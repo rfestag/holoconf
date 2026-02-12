@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-02-11
+
 ### Added
 - **Config Reference Defaults**: Config references now support optional `default=` parameter for handling missing values (#25)
   - Use `${path.to.value,default=fallback}` to provide a fallback when path doesn't exist
